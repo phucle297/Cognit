@@ -1,0 +1,83 @@
+# Cognit project configuration.
+# This file is committed to the repo. It is the only file under .cognit/ that
+# should be checked in by default. .cognit/cognit.db, .cognit/inbox/,
+# .cognit/snapshots/ and .cognit/archive/ are all gitignored.
+#
+# Every section has a default; you only need to set what you want to override.
+# Use `cognit config --show` to see the resolved config (defaults merged in).
+# Use `cognit config --edit` to open this file in $EDITOR.
+
+project:
+  # Set automatically from the directory name at `cognit init` time. Override
+  # here if you want a different display name in the dashboard.
+  name: cognit
+
+redaction:
+  # Built-in patterns (jwt, api_key_inline, pem_block, password_field) are
+  # always applied. Add project-specific patterns here. The redaction step
+  # runs at ingest on every event, so the redacted text never reaches disk.
+  enabled: true
+  patterns:
+    - name: internal_bearer
+      regex: 'Bearer [A-Za-z0-9._-]{20,}'
+      replacement: 'Bearer [REDACTED]'
+    - name: github_pat
+      regex: 'ghp_[A-Za-z0-9]{36}'
+      replacement: 'ghp_[REDACTED]'
+
+cleanup:
+  # Artifacts older than this and not referenced by any active conclusion or
+  # accepted decision are moved to .cognit/archive/ on `cognit gc`.
+  artifact_max_age_days: 30
+
+  # What to do with unreferenced artifacts:
+  #   archive  — move to .cognit/archive/ (recoverable)
+  #   delete   — remove permanently (saves disk, loses evidence)
+  #   keep     — do nothing (default; safe)
+  unreferenced_action: archive
+
+  # Hard cap. Warning at 80%, hard stop at 100% with "run cognit gc" prompt.
+  max_db_size_mb: 1024
+
+session:
+  # Automatic snapshot every N events. The reducer restores the latest
+  # snapshot and replays only events after it, so state rebuild stays fast
+  # even for long sessions.
+  snapshot_every_n_events: 100
+
+  # If true, `cognit session resume "goal"` creates a new session with
+  # parent_session_id set and inherits rejected-hypothesis / accepted-decision
+  # context. If false, resume appends events to the existing session.
+  fork_on_resume: true
+
+actors:
+  # Default trust score per actor type. Used when a new actor is seen for the
+  # first time. Range 0-1. Higher = more trusted.
+  defaults:
+    human: 0.9
+    worker: 0.6
+    system: 1.0
+
+  # Per-actor overrides. The watcher auto-registers unknown actors with the
+  # type default; add explicit overrides here once you know what you trust.
+  known:
+    - name: claude-code
+      trust_score: 0.7
+    - name: codex
+      trust_score: 0.65
+    - name: opencode
+      trust_score: 0.6
+
+inbox:
+  # Watch .cognit/inbox for new event files. Disable if you want to control
+  # ingestion manually via `cognit inbox process`.
+  watch: true
+
+  # Wait this many ms after a file appears before reading it. Lets atomic
+  # writes (tmp + rename) settle.
+  debounce_ms: 200
+
+  # Require event files to use the atomic write protocol (write to .tmp,
+  # fsync, rename to .json). Disable only if you have a legacy writer that
+  # cannot follow the protocol.
+  atomic_write_required: true
