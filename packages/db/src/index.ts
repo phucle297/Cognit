@@ -22,6 +22,7 @@ export * from "./event-store";
 export * from "./inbox";
 export * from "./connection";
 export * from "./session-service";
+export * from "./snapshot-service";
 export * from "./layers/live";
 export * from "./schema/rows";
 export * from "./schema/migrations";

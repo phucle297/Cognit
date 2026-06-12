@@ -6,6 +6,7 @@ import { RedactorLive } from "../redaction";
 import { MigrationRegistryLive } from "../migrate";
 import { UuidLive } from "../ulid";
 import { SessionService, SessionServiceLive } from "../session-service";
+import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
 import type { DbError, DbCorrupted } from "../errors";
 
 /**
@@ -15,6 +16,7 @@ import type { DbError, DbCorrupted } from "../errors";
  *   - DbConnection     (raw handle, WAL-mode SQLite)
  *   - EventStore       (append / list / get)
  *   - SessionService   (CRUD over `sessions` + lifecycle events)
+ *   - SnapshotService  (write / latest / takeIfDue)
  *   - Redactor         (built-in patterns, no user patterns)
  *   - MigrationRegistry (pure transforms)
  *   - Uuid             (monotonic ulid)
@@ -41,18 +43,30 @@ const sessionServiceLayer = (dbPath: string) =>
     baseLayer(dbPath),
   );
 
+/** SnapshotServiceLive depends on DbConnection + leafs (Uuid + Logger). */
+const snapshotServiceLayer = (dbPath: string) =>
+  Layer.provide(
+    SnapshotServiceLive,
+    Layer.provide(leafs, DbConnectionLive(dbPath)),
+  );
+
 /**
- * Full live layer for the local `.cognit/cognit.db`. Provides EventStore
- * and SessionService. The Layer's R channel is `never` — all deps are
- * satisfied internally.
+ * Full live layer for the local `.cognit/cognit.db`. Provides EventStore,
+ * SessionService, and SnapshotService. The Layer's R channel is `never`
+ * — all deps are satisfied internally.
  */
 export const DbLive = (
   dbPath: string,
-): Layer.Layer<EventStore | SessionService, DbError | DbCorrupted, never> => {
+): Layer.Layer<
+  EventStore | SessionService | SnapshotService,
+  DbError | DbCorrupted,
+  never
+> => {
   const base = baseLayer(dbPath);
   const sessions = sessionServiceLayer(dbPath);
-  return Layer.merge(base, sessions) as Layer.Layer<
-    EventStore | SessionService,
+  const snapshots = snapshotServiceLayer(dbPath);
+  return Layer.merge(Layer.merge(base, sessions), snapshots) as Layer.Layer<
+    EventStore | SessionService | SnapshotService,
     DbError | DbCorrupted,
     never
   >;

@@ -16,7 +16,6 @@ import {
   UuidTest,
 } from "../src";
 import { EventStoreLive } from "../src/event-store";
-import type { SessionRow } from "../src/schema/rows";
 
 /**
  * Test layer composing all the services the SessionService test needs.
@@ -367,6 +366,267 @@ describe("SessionService", () => {
         // explicitly so reducer can treat the create event as the
         // canonical anchor for the session)
         expect(r.event.id).toBe(r.session.id);
+      }),
+    );
+  });
+});
+
+describe("SessionService.resume", () => {
+  let dbPath = "";
+  beforeEach(async () => {
+    dbPath = await withTempDb();
+  });
+
+  const runWithLayer = <A, E, R>(
+    eff: Effect.Effect<A, E, R>,
+  ): Promise<A> =>
+    Effect.runPromise(
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<
+        A,
+        E,
+        never
+      >,
+    );
+
+  it("fork=true (default) creates a new session with parent_session_id set", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const original = yield* service.create({
+          projectId,
+          goal: "investigate leak",
+          actor: ACTOR,
+        });
+        const r = yield* service.resume({
+          projectId,
+          idOrGoal: original.session.id,
+          actor: ACTOR,
+        });
+        expect(r.forked).toBe(true);
+        expect(r.session.id).not.toBe(original.session.id);
+        expect(r.session.parent_session_id).toBe(original.session.id);
+        expect(r.parent.id).toBe(original.session.id);
+        expect(r.session.goal.startsWith("investigate leak (resumed ")).toBe(true);
+        expect(r.event.type).toBe("session_created");
+        const payload = JSON.parse(r.event.payload_json);
+        expect(payload.parent_session_id).toBe(original.session.id);
+      }),
+    );
+  });
+
+  it("resume resolves by goal substring when not a ULID-shaped id", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        yield* service.create({ projectId, goal: "find the bug", actor: ACTOR });
+        const r = yield* service.resume({
+          projectId,
+          idOrGoal: "find the bug",
+          actor: ACTOR,
+        });
+        expect(r.forked).toBe(true);
+        expect(r.parent.goal).toBe("find the bug");
+      }),
+    );
+  });
+
+  it("resume(reopen) flips status back to active and emits session_created", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const original = yield* service.create({
+          projectId,
+          goal: "P",
+          actor: ACTOR,
+        });
+        yield* service.pause(original.session.id, ACTOR);
+        const r = yield* service.resume({
+          projectId,
+          idOrGoal: original.session.id,
+          fork: false,
+          actor: ACTOR,
+        });
+        expect(r.forked).toBe(false);
+        expect(r.session.id).toBe(original.session.id);
+        expect(r.session.status).toBe("active");
+      }),
+    );
+  });
+
+  it("resume fails on a closed session (cannot fork a closed session)", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const original = yield* service.create({
+          projectId,
+          goal: "P",
+          actor: ACTOR,
+        });
+        yield* service.close(original.session.id, ACTOR);
+        const r = yield* service
+          .resume({
+            projectId,
+            idOrGoal: original.session.id,
+            actor: ACTOR,
+          })
+          .pipe(Effect.either);
+        expect(Either.isLeft(r)).toBe(true);
+        if (Either.isLeft(r)) {
+          expect(r.left._tag).toBe("SessionAlreadyClosed");
+        }
+      }),
+    );
+  });
+
+  it("resume fails on unknown id", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const service = yield* SessionService;
+        const r = yield* service
+          .resume({
+            projectId: "01projectxxxxxxxxxxxxxxxxx",
+            idOrGoal: "01nosuchsessionhere00000",
+            actor: ACTOR,
+          })
+          .pipe(Effect.either);
+        expect(Either.isLeft(r)).toBe(true);
+        if (Either.isLeft(r)) {
+          expect(r.left._tag).toBe("UnknownSessionForResume");
+        }
+      }),
+    );
+  });
+});
+
+describe("SessionService.show (reducer view)", () => {
+  let dbPath = "";
+  beforeEach(async () => {
+    dbPath = await withTempDb();
+  });
+
+  const runWithLayer = <A, E, R>(
+    eff: Effect.Effect<A, E, R>,
+  ): Promise<A> =>
+    Effect.runPromise(
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<
+        A,
+        E,
+        never
+      >,
+    );
+
+  it("show returns the SessionState derived from all events", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const store = yield* EventStore;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "investigate",
+          actor: ACTOR,
+        });
+        yield* store.append({
+          type: "observation_recorded",
+          payload: { text: "first observation" },
+          sessionId: created.session.id,
+          actor: ACTOR,
+        });
+        yield* store.append({
+          type: "observation_recorded",
+          payload: { text: "second observation" },
+          sessionId: created.session.id,
+          actor: ACTOR,
+        });
+        yield* store.append({
+          type: "hypothesis_created",
+          payload: { title: "leak in HMR", text: "explain" },
+          sessionId: created.session.id,
+          actor: ACTOR,
+          confidence: 0.5,
+        });
+        const r = yield* service.show(created.session.id);
+        expect(r.state.observations).toHaveLength(2);
+        expect(r.state.hypotheses.size).toBe(1);
+        expect(r.state.hypotheses.get(r.state.current_hypothesis_id ?? "")?.current_state).toBe(
+          "active",
+        );
+        expect(r.state.timeline.length).toBeGreaterThanOrEqual(4);
+        expect(r.snapshot).toBeNull();
+      }),
+    );
+  });
+
+  it("show on an unknown session returns UnknownSession", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const service = yield* SessionService;
+        const r = yield* service
+          .show("01nosuchsessionhere00000000")
+          .pipe(Effect.either);
+        expect(Either.isLeft(r)).toBe(true);
+      }),
+    );
+  });
+
+  it("show captures rejected hypotheses and verified conclusions", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const store = yield* EventStore;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "leak",
+          actor: ACTOR,
+        });
+        const sid = created.session.id;
+        // hypothesis created + rejected
+        yield* store.append({
+          type: "hypothesis_created",
+          payload: { title: "Turbopack", text: "leak" },
+          sessionId: sid,
+          actor: ACTOR,
+        });
+        yield* store.append({
+          type: "hypothesis_rejected",
+          payload: { reason_type: "evidence", superseded_by_id: null },
+          sessionId: sid,
+          actor: ACTOR,
+        });
+        // conclusion proposed + verified
+        yield* store.append({
+          type: "conclusion_proposed",
+          payload: { text: "Turbopack is not the cause" },
+          sessionId: sid,
+          actor: ACTOR,
+        });
+        yield* store.append({
+          type: "conclusion_verified",
+          payload: { verification_id: "01vr", supporting_evidence_ids: ["01e1"] },
+          sessionId: sid,
+          actor: ACTOR,
+        });
+        const r = yield* service.show(sid);
+        const rej = Array.from(r.state.hypotheses.values()).find(
+          (h) => h.current_state === "rejected",
+        );
+        expect(rej).toBeDefined();
+        const ver = Array.from(r.state.conclusions.values()).find(
+          (c) => c.state === "verified",
+        );
+        expect(ver).toBeDefined();
+        expect(ver?.verification_id).toBe("01vr");
       }),
     );
   });

@@ -8,7 +8,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
-    "./redaction": "./src/redaction.ts"
+    "./redaction": "./src/redaction.ts",
+    "./reducer": "./src/reducer.ts",
+    "./state": "./src/state.ts"
   },
   "scripts": {
     "build": "echo \"core: no build (no emit)\"",

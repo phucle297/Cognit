@@ -11,13 +11,16 @@ import { emptySessionState, type ReducerEvent, type SessionState } from "../src/
  */
 
 let nowCounter = 0;
-const mkEvent = (overrides: Partial<ReducerEvent> & Pick<ReducerEvent, "id" | "type">): ReducerEvent => {
+const mkEvent = (
+  overrides: Partial<ReducerEvent> & Pick<ReducerEvent, "id">,
+): ReducerEvent => {
   nowCounter += 1;
   const created_at = new Date(Date.UTC(2026, 0, 1, 0, 0, 0, nowCounter)).toISOString();
   return {
     project_id: "01projectxxxxxxxxxxxxxxxxx",
     session_id: "01sessionxxxxxxxxxxxxxxxxx",
     actor_id: "01actor00000000000000000000a",
+    type: "observation_recorded",
     version: "1.0.0",
     payload_json: "{}",
     source_json: null,
