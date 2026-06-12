@@ -22,18 +22,12 @@
     <goal>Build a local-first Cognit runtime for recording, recovering, and visualizing AI engineering cognition.</goal>
     <note>Terminology: this spec uses three release tags. "Bootstrap" = &lt;bootstrap_phases&gt;, phases 0-4: event store, CLI, reducer, verification, export/import. No API, no dashboard. "v0.1" = Bootstrap + &lt;v0_1_phases&gt; (phases 5-6): Hono API + Vite dashboard. "v0.2" = v0.1 + &lt;v0_2_phases&gt; (phases 7-9): recovery engine, gravity, constraint engine, inbox adapter, cognit wrap. The README uses "MVP" to mean v0.1; treat the two as synonyms.</note>
     <storage>SQLite + local filesystem</storage>
-    <runtime>Node.js</runtime>
     <language>TypeScript</language>
-    <api>Hono (v0.1, not Bootstrap)</api>
-    <dashboard>Vite + React (v0.1, not Bootstrap)</dashboard>
-    <cli>Commander.js</cli>
-    <orm>Drizzle</orm>
-    <validation>Zod</validation>
-    <graph_ui>React Flow</graph_ui>
-    <support>
-      <lib>chokidar</lib>
-      <lib>fuse.js</lib>
-    </support>
+    <standards>
+      <stack>STACK.md</stack>
+      <conventions>CONVENTIONS.md</conventions>
+      <note>All technical decisions (runtime, package manager, monorepo tool, frameworks, FP runtime, ORM, test runner, build tool, linter, formatter) live in STACK.md. Naming, file layout, code style, and anti-patterns live in CONVENTIONS.md. Add new tech decisions to those files, not here. This scope block intentionally stays minimal so the data model and feature spec remain the focus of plan.xml.</note>
+    </standards>
   </scope>
 
   <repository_structure>
@@ -248,7 +242,7 @@
       <event>verification_rerun (payload: parent_verification_id)</event>
       <event>artifact_attached</event>
       <event>edge_created (payload: edge_type, from_entity_type, from_entity_id, to_entity_type, to_entity_id)</event>
-      <event>actor_registered (when a new actor id is seen for the first time)</event>
+      <event>actor_registered (payload: actor_type, actor_name, trust_score; emitted when a new actor id is seen for the first time — by the CLI, inbox watcher, or SDK)</event>
       <event>constraint_rule_added</event>
       <event>constraint_rule_applied (payload: rule_id, affected_hypothesis_ids)</event>
       <event>redaction_applied (audit trail for what was redacted, never the redacted content)</event>
@@ -361,8 +355,8 @@
 
     <table name="constraint_rules">
       <column>id text primary key</column>
-      <column>condition_json text not null</column>
-      <column>actions_json text not null</column>
+      <column>condition_json text not null  <!-- JSON DSL; see constraint_engine for schema --></column>
+      <column>actions_json text not null    <!-- JSON array of action objects; see constraint_engine for schema --></column>
       <column>enabled integer default 1</column>
       <column>created_at text</column>
     </table>
@@ -406,6 +400,7 @@
       <command>cognit session resume "goal-or-id" [--fork=true]   (default fork=true: creates new session with parent_session_id; if multiple open sessions match the goal, the most recently created one is picked and a warning is printed; use --id &lt;ulid&gt; for precision)</command>
       <command>cognit session pause</command>
       <command>cognit session close</command>
+      <command>cognit session show &lt;id-or-goal&gt;   (reducer output: rejected hypotheses, verified conclusions, accepted decisions, last known state, all events in order)</command>
       <command>cognit snapshot</command>
       <command>cognit observation add "text" [--confidence 0..1] [--artifact path]</command>
       <command>cognit finding add "text" [--derived-from observation-or-finding-id] [--artifact path]</command>
@@ -427,8 +422,7 @@
       <command>cognit artifact add ./file.log --kind terminal-log</command>
       <command>cognit edge add --type supports|contradicts|tests|... --from entity:id --to entity:id</command>
       <command>cognit edge list [--session id] [--type edge-type] [--from entity:id] [--to entity:id]   (read-only dump of the edges table)</command>
-      <command>cognit session show &lt;id-or-goal&gt;   (reducer output: rejected hypotheses, verified conclusions, accepted decisions, last known state, all events in order)</command>
-      <command>cognit events [--session id] [--type event-type] [--actor name] [--since iso] [--limit n] [--follow]   (terminal tail of the event stream; --follow blocks on the inbox watcher like `tail -f`; works without the dashboard)</command>
+      <command>cognit events [--session id] [--type event-type] [--actor name] [--since iso] [--limit n] [--follow]   (terminal tail of the event stream; --follow polls SQLite directly via packages/db — no API server required; works from Bootstrap onward)</command>
       <command>cognit redaction test "raw string"   (dry-run every configured + built-in pattern against the input; prints which patterns matched and what the redacted output would be, without writing to the store)</command>
       <command>cognit export --output bundle.tar.gz [--include-artifacts]</command>
       <command>cognit import --input bundle.tar.gz [--merge-strategy skip|overwrite|fork]</command>
@@ -439,6 +433,7 @@
   </cli>
 
   <api>
+    <note>The SSE endpoint GET /events/stream powers the dashboard Timeline page live mode. The CLI cognit events --follow reads SQLite directly and does NOT use this endpoint — they are independent implementations of the same concept. This separation means --follow works without the API server running.</note>
     <route method="GET" path="/health" />
     <route method="GET" path="/projects" />
     <route method="POST" path="/projects" />
@@ -450,7 +445,7 @@
     <route method="POST" path="/sessions/:id/resume" />
     <route method="GET" path="/sessions/:id/events" />
     <route method="GET" path="/events?session=&amp;type=&amp;actor=&amp;since=&amp;limit=" />
-    <route method="GET" path="/events/stream" note="SSE; pushes new events as they are appended. Powers `cognit events --follow` and the Timeline page live mode." />
+    <route method="GET" path="/events/stream" note="SSE; pushes new events as they are appended. Powers the Timeline page live mode in the dashboard only. The CLI --follow flag reads SQLite directly, not this endpoint." />
     <route method="GET" path="/sessions/:id/state" />
     <route method="GET" path="/sessions/:id/graph" />
     <route method="GET" path="/sessions/:id/recovery" />
@@ -562,24 +557,75 @@
   <constraint_engine>
     <description>Rule-based pruning. Renamed from "entanglement" — the internal model is a plain rule engine and "entanglement" implied something it isn't.</description>
     <status>Ships in v0.2 (Phase 8). Rule-based pruning, fired on experiment_completed and verification_failed events.</status>
+
     <rule_shape>
       <field>id</field>
-      <field>condition (small JSON DSL: all|any|not, with entity state matchers)</field>
-      <field>actions (reject_hypothesis, weaken_hypothesis, promote_hypothesis, create_finding)</field>
+      <field>condition_json — JSON object using the condition DSL defined below</field>
+      <field>actions_json — JSON array of action objects defined below</field>
       <field>enabled</field>
       <field>created_at</field>
     </rule_shape>
-    <actions>
-      <action>reject_hypothesis</action>
-      <action>weaken_hypothesis</action>
-      <action>promote_hypothesis</action>
-      <action>create_finding</action>
-    </actions>
-    <example>
-      <description>Prune a low-confidence active hypothesis once an experiment that directly contradicts it has run.</description>
-      <condition>{"all":[{"event":"experiment_completed","contradicts_includes":"$h.id"},{"entity":"hypothesis","id":"$h.id","state":"active","confidence":{"lt":0.3}}]}</condition>
-      <action>reject_hypothesis</action>
-    </example>
+
+    <condition_dsl>
+      <description>
+        The condition is a JSON object. The top-level key is a logical operator: "all", "any", or "not".
+        Inside, each clause is either an event matcher or an entity matcher.
+
+        Event matcher — checks the triggering event:
+          {"event": "experiment_completed", "contradicts_includes": "$h.id"}
+          {"event": "verification_failed", "linked_hypothesis_id": "$h.id"}
+
+        Entity matcher — checks the current state of an entity:
+          {"entity": "hypothesis", "id": "$h.id", "state": "active"}
+          {"entity": "hypothesis", "id": "$h.id", "confidence": {"lt": 0.3}}
+
+        $h is a bound variable scoped to the triggering event's primary subject
+        (the hypothesis that was tested or linked). Numeric comparisons: lt, lte, gt, gte, eq.
+      </description>
+      <example_condition>
+        {
+          "all": [
+            {"event": "experiment_completed", "contradicts_includes": "$h.id"},
+            {"entity": "hypothesis", "id": "$h.id", "state": "active"},
+            {"entity": "hypothesis", "id": "$h.id", "confidence": {"lt": 0.3}}
+          ]
+        }
+      </example_condition>
+    </condition_dsl>
+
+    <actions_dsl>
+      <description>
+        actions_json is a JSON array. Each element is an action object with a "type" field.
+        Available action types and their fields:
+          {"type": "reject_hypothesis",  "reason": "string", "reason_type": "evidence|superseded|constraint"}
+          {"type": "weaken_hypothesis"}
+          {"type": "promote_hypothesis"}
+          {"type": "create_finding",     "text": "string"}
+      </description>
+      <example_actions>
+        [
+          {"type": "reject_hypothesis", "reason": "Contradicted by experiment and low confidence", "reason_type": "constraint"}
+        ]
+      </example_actions>
+    </actions_dsl>
+
+    <full_example>
+      <description>Reject a low-confidence active hypothesis once a completed experiment directly contradicts it.</description>
+      <condition_json>
+        {
+          "all": [
+            {"event": "experiment_completed", "contradicts_includes": "$h.id"},
+            {"entity": "hypothesis", "id": "$h.id", "state": "active"},
+            {"entity": "hypothesis", "id": "$h.id", "confidence": {"lt": 0.3}}
+          ]
+        }
+      </condition_json>
+      <actions_json>
+        [
+          {"type": "reject_hypothesis", "reason": "Contradicted by experiment and low confidence", "reason_type": "constraint"}
+        ]
+      </actions_json>
+    </full_example>
   </constraint_engine>
 
   <secret_redaction>
@@ -627,7 +673,7 @@
       <invalid_json>Move to .cognit/inbox/_error/&lt;name&gt;.json with sidecar &lt;name&gt;.reason.txt</invalid_json>
       <unknown_session_id>Move to .cognit/inbox/_error/</unknown_session_id>
       <zod_validation_failure>Move to .cognit/inbox/_error/</zod_validation_failure>
-      <actor_not_registered>Auto-register with default trust_score; emit actor_registered event</actor_not_registered>
+      <actor_not_registered>Auto-register with default trust_score from cognit.yaml actors.defaults.&lt;type&gt;; emit actor_registered event. trust_score 0 is a sentinel for "unset" — never allow it to persist.</actor_not_registered>
     </failure_handling>
     <redaction_step>
       <where>Applied by `appendEvent` (in packages/db), regardless of source. The watcher only validates JSON shape, Zod, and atomic-write detection — redaction is the responsibility of the store layer, not the watcher. This guarantees the same invariant for CLI direct writes, SDK calls, and future HTTP endpoints.</where>
@@ -657,7 +703,7 @@
       <field from="created_at">advisory only; appendEvent overwrites with server-side timestamp. Including it in the inbox file is allowed but ignored.</field>
       <field from="causation_id, correlation_id">passed through verbatim to event columns</field>
       <field from="confidence (top-level on the inbox file)">stored on the event row's confidence column. NOT a payload field.</field>
-      <field from="actor (object)">resolved to actor_id via actors table; auto-registers unknown names with type default trust_score from cognit.yaml.actors.defaults</field>
+      <field from="actor (object)">resolved to actor_id via actors table; auto-registers unknown names with type default trust_score from cognit.yaml.actors.defaults. trust_score 0 is a sentinel — always overwrite on registration.</field>
       <field from="payload">validated by Zod per event type and version, then redacted by appendEvent. Payload contains type-specific fields only (e.g. {title} for hypothesis_created); cross-cutting fields (confidence, source, causation_id, correlation_id, created_at) are top-level on the event, not payload fields.</field>
     </inbox_to_store_mapping>
   </worker_adapter>
@@ -667,7 +713,7 @@
     <phase id="0" name="Bootstrap">
       <task>Create monorepo</task>
       <task>Setup TypeScript</task>
-      <task>Setup bun scripts</task>
+      <task>Setup pnpm scripts</task>
       <task>Create CLI binary</task>
       <task>Create .cognit directory structure (including .gitignore snippet)</task>
       <task>Create cognit.yaml schema (Zod-validated)</task>
@@ -686,7 +732,7 @@
     </phase>
 
     <phase id="2" name="Session Runtime and Reducer">
-      <task>Create session commands (create, list, resume, pause, close)</task>
+      <task>Create session commands (create, list, resume, pause, close, show)</task>
       <task>Implement resume-as-fork (sets parent_session_id, inherits context summary)</task>
       <task>Implement reducer with snapshot policy (every 100 events + on close)</task>
       <task>Implement session state rebuild from events + last snapshot</task>
@@ -698,7 +744,7 @@
       <task>Implement experiment add/complete (with --tests, --supports, --contradicts)</task>
       <task>Implement decision propose/accept/reject (with --based-on)</task>
       <task>Implement conclusion propose/verify/reject (with --with verification-id)</task>
-      <task>Implement edge add (typed relationships)</task>
+      <task>Implement edge add and edge list (typed relationships)</task>
       <task>Implement hypothesis state transitions (weaken/reject with reason_type)</task>
       <task>Implement theory lifecycle (merge, archive)</task>
       <done_when>Core investigation flow works from CLI with full entity relationships and edge graph</done_when>
@@ -708,6 +754,8 @@
       <task>Run local verification command (started/passed/failed/errored/cancelled)</task>
       <task>Capture stdout/stderr, create artifact</task>
       <task>Link verification to hypothesis via --tests</task>
+      <task>Implement cognit verify cancel --id</task>
+      <task>Implement cognit redaction test (dry-run)</task>
       <task>Implement cognit gc (artifact archive, db size warning)</task>
       <task>Implement cognit export/import (tar.gz bundle, lossless round-trip)</task>
       <done_when>A session can run a full investigation, produce verifiable evidence, export itself, and be re-imported on another machine</done_when>
@@ -723,6 +771,7 @@
       <task>Expose state, graph, recovery, edges endpoints</task>
       <task>Expose verify and verify/:id/cancel endpoints</task>
       <task>Expose actor endpoints</task>
+      <task>Implement GET /events/stream SSE endpoint for dashboard Timeline live mode</task>
       <done_when>Dashboard can read Cognit state through HTTP</done_when>
     </phase>
 
@@ -751,8 +800,8 @@
     <phase id="8" name="Gravity and Constraint">
       <task>Compute hypothesis gravity from evidence/reproducibility/actor_trust/freshness</task>
       <task>Apply freshness decay to never-verified hypotheses</task>
-      <task>Constraint rule schema and DSL</task>
-      <task>Apply rules on experiment_completed and verification_failed</task>
+      <task>Implement constraint rule JSON DSL (condition_dsl + actions_dsl as specified in constraint_engine)</task>
+      <task>Apply rules on experiment_completed and verification_failed events</task>
       <task>Show pruning result in timeline</task>
       <done_when>One experiment can weaken/reject/promote related hypotheses via a rule</done_when>
     </phase>
@@ -760,7 +809,7 @@
     <phase id="9" name="Worker Inbox Adapter and Auto-capture">
       <task>Watch .cognit/inbox with chokidar + atomic-write detection</task>
       <task>Validate JSON event files (Zod)</task>
-      <task>Auto-register unknown actors with default trust_score</task>
+      <task>Auto-register unknown actors with default trust_score from cognit.yaml; emit actor_registered event</task>
       <task>Move invalid files to .cognit/inbox/_error/</task>
       <task>Implement cognit wrap for arbitrary worker commands</task>
       <task>Document Claude Code / Codex / OpenCode / Gemini CLI hooks</task>
@@ -789,6 +838,7 @@
     <criterion>cognit session resume forks a new session with parent_session_id and emits a basic recovery block (rejected hypotheses, verified conclusions, accepted decisions)</criterion>
     <criterion>Secrets (JWT, API keys, PEM blocks, password fields) are redacted at ingest and never appear in events</criterion>
     <criterion>cognit export/import round-trips a session losslessly</criterion>
+    <criterion>cognit events --follow tails the event stream directly from SQLite without requiring the API server</criterion>
   </bootstrap_success_criteria>
 
   <v0_1_success_criteria>
@@ -796,5 +846,6 @@
     <criterion>Dashboard opens on port 6970 and shows Overview, Timeline, Knowledge Graph, Decision Graph, Verification, Settings (Recovery Center renders with a "v0.2" badge or is omitted — the full recovery output block and gravity ranking ship in v0.2)</criterion>
     <criterion>API serves state, graph, edges, and a minimal recovery endpoint (just rejected_hypotheses, verified_conclusions, accepted_decisions — fuzzy search and suggested_next_steps are v0.2)</criterion>
     <criterion>Snapshots are created automatically and used to speed up state rebuild</criterion>
+    <criterion>GET /events/stream SSE endpoint pushes live events to the dashboard Timeline page</criterion>
   </v0_1_success_criteria>
 </cognit_plan>

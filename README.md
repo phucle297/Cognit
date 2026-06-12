@@ -2,20 +2,20 @@
 
 > Git for AI cognition.
 
-Code has Git.  
-Tasks have Jira.  
+Code has Git.
+Tasks have Jira.
 AI has Cognit.
 
 Cognit is a local-first persistent decision and knowledge layer for AI-assisted engineering.
 
 It records what AI workers learn, try, reject, verify, and conclude during software engineering tasks.
 
-Cognit is not an agent framework.  
-Cognit is not a multi-agent platform.  
-Cognit is not a workflow engine.  
-Cognit is not a chat history database.  
-Cognit is not a backup tool.  
-Cognit is not a general-purpose knowledge management system.  
+Cognit is not an agent framework.
+Cognit is not a multi-agent platform.
+Cognit is not a workflow engine.
+Cognit is not a chat history database.
+Cognit is not a backup tool.
+Cognit is not a general-purpose knowledge management system.
 Cognit is not a log aggregator.
 
 Cognit is infrastructure for preserving engineering cognition.
@@ -118,11 +118,11 @@ The session state remains.
 Two scopes:
 
 - **Project** — the top-level unit. In local-first mode, one project per `.cognit` directory, typically one git repository. Project name is captured from the directory name (or `--project` flag) at init time.
-- **Session** — one investigation or engineering goal inside a project. A session can be *forked* from a previous session via `cognit session resume`, which sets `parent_session_id` and inherits rejected/accepted context.
+- **Session** — one investigation or engineering goal inside a project. A session can be _forked_ from a previous session via `cognit session resume`, which sets `parent_session_id` and inherits rejected/accepted context.
 
 ### Actor
 
-Every event is written by an *actor*: a human, a worker AI (e.g. `claude-code`), or a system process. Identity is first-class so the future trust engine can reason about it. Unknown actors seen for the first time are auto-registered with a default trust score from `cognit.yaml`.
+Every event is written by an _actor_: a human, a worker AI (e.g. `claude-code`), or a system process. Identity is first-class so the future trust engine can reason about it. Unknown actors seen for the first time are auto-registered with a default trust score from `cognit.yaml` and an `actor_registered` event is emitted.
 
 ### Observation
 
@@ -208,6 +208,7 @@ Cognit stores events.
 Example events:
 
 ```txt
+project_created
 session_created
 observation_recorded
 finding_created
@@ -215,11 +216,12 @@ hypothesis_created
 experiment_completed
 hypothesis_rejected (reason_type: evidence | superseded | constraint)
 decision_accepted
+conclusion_verified
 verification_passed
 verification_errored
 verification_rerun
-conclusion_verified
 edge_created
+actor_registered
 snapshot_created
 ```
 
@@ -232,7 +234,6 @@ Every event carries:
 - `payload_json` (type-specific, validated by Zod at ingest, redacted before write)
 - `confidence` (0-1, set at event creation; entity-level confidence is derived)
 - `causation_id` and `correlation_id` (for event-sourcing tracing)
-- `parent_session_id` (when the event belongs to a forked session)
 - `created_at`
 
 The current state of a session is rebuilt by replaying its event stream. Snapshots speed this up: the reducer restores the last snapshot and replays only events after it.
@@ -318,21 +319,34 @@ The v0.2 Gravity Engine is a simple weighted sum. The future plan is a learned m
 
 The Constraint Engine applies dependency and exclusion rules between states. (Originally called "Entanglement Engine"; renamed because the internal model is a plain rule engine and "entanglement" implied something it isn't.)
 
-Example rule:
+Rules are stored as JSON in the `constraint_rules` table and evaluated against the triggering event plus current entity state. Rules fire on `experiment_completed` and `verification_failed` events.
 
-```yaml
-- id: rule_001
-  when:
-    all:
-      - hypothesis.state: active
-      - hypothesis.confidence: { lt: 0.3 }
-      - verification.state: failed
-      - verification.linked_hypothesis_id: hypothesis
-  then:
-    - reject_hypothesis
+Example rule (JSON):
+
+```json
+{
+  "condition": {
+    "all": [
+      { "event": "experiment_completed", "contradicts_includes": "$h.id" },
+      { "entity": "hypothesis", "id": "$h.id", "state": "active" },
+      { "entity": "hypothesis", "id": "$h.id", "confidence": { "lt": 0.3 } }
+    ]
+  },
+  "actions": [
+    {
+      "type": "reject_hypothesis",
+      "reason": "Contradicted by experiment and low confidence",
+      "reason_type": "constraint"
+    }
+  ]
+}
 ```
 
-Rules fire on `experiment_completed` and `verification_failed` events. One experiment result can automatically prune multiple investigation branches.
+The condition DSL uses `all`, `any`, and `not` as logical operators. Each clause is either an **event matcher** (`{"event": "experiment_completed", ...}`) or an **entity matcher** (`{"entity": "hypothesis", "id": "$h.id", "state": "active"}`). `$h` is a bound variable scoped to the hypothesis that was tested or linked in the triggering event. Numeric comparisons: `lt`, `lte`, `gt`, `gte`, `eq`.
+
+Available actions: `reject_hypothesis`, `weaken_hypothesis`, `promote_hypothesis`, `create_finding`.
+
+One experiment result can automatically prune multiple investigation branches.
 
 ---
 
@@ -357,9 +371,9 @@ Pages:
 ## Installation
 
 ```bash
-bun install
-bun run build
-bun link
+pnpm install
+pnpm build
+pnpm link --global
 ```
 
 ---
@@ -436,7 +450,7 @@ cognit hypothesis reject "Turbopack cache is leaking memory" \
 cognit hypothesis add "Module graph listener leak in HMR" \
   --belongs-to "HMR resource retention" --confidence 0.6
 
-cognit verify --type benchmark --command "bun run bench:memory" \
+cognit verify --type benchmark --command "pnpm run bench:memory" \
   --tests "Module graph listener leak in HMR"
 # the verify command prints a verification id; the verification record
 # carries linked_hypothesis_id pointing at the hypothesis above (not an edge)
@@ -503,6 +517,8 @@ No old chat context is required.
 
 To resume into the same session instead of forking, pass `--fork=false`. If multiple open sessions match the goal, the most recently created one is picked and a warning is printed; pass `--id <ulid>` for precision.
 
+---
+
 ## Inspecting the Event Stream
 
 For terminal-first inspection, without launching the dashboard:
@@ -511,7 +527,17 @@ For terminal-first inspection, without launching the dashboard:
 cognit events --session <id> --type verification_failed --follow
 ```
 
-`cognit events` reads from the same event store the dashboard does, with filters for session, type, actor, and a `--follow` mode that tails new events as they are appended. It works in v0.1 (no API, no dashboard required).
+`cognit events` reads from the same SQLite store that the dashboard does, with filters for session, type, actor, and a `--follow` mode that polls for new events as they are appended. `--follow` reads directly from SQLite and works without the API server running — it is available from Bootstrap onward.
+
+---
+
+## Inspecting a Session
+
+```bash
+cognit session show <id-or-goal>
+```
+
+Prints the reducer output: rejected hypotheses, verified conclusions, accepted decisions, last known state, and all events in chronological order. Useful for a full audit of an investigation without opening the dashboard.
 
 ---
 
@@ -571,8 +597,8 @@ Example event file:
   "schema_version": "1.0.0",
   "type": "hypothesis_created",
   "session_id": "01HXY...",
-  "actor": {"type": "worker", "name": "claude-code"},
-  "source": {"tool": "cognit", "command": "cognit hypothesis add ..."},
+  "actor": { "type": "worker", "name": "claude-code" },
+  "source": { "tool": "cognit", "command": "cognit hypothesis add ..." },
   "payload": {
     "title": "Runtime listener leak"
   },
@@ -580,7 +606,7 @@ Example event file:
 }
 ```
 
-The watcher auto-registers unknown actors with a default trust score from `cognit.yaml`. The full inbox-to-store field mapping is documented in `plan.xml` under `<worker_adapter><inbox_to_store_mapping>`.
+The watcher auto-registers unknown actors with a default trust score from `cognit.yaml` and emits an `actor_registered` event. The full inbox-to-store field mapping is documented in `plan.xml` under `<worker_adapter><inbox_to_store_mapping>`.
 
 ### Auto-capture with `cognit wrap`
 
@@ -620,23 +646,87 @@ The bundle is a `tar.gz` of the SQLite dump, the `artifacts/` directory, and `co
 
 ---
 
+## CLI Reference
+
+```bash
+cognit init [--project name]
+cognit config [--edit] [--show]
+
+cognit project list
+
+cognit session create "goal" [--parent session-id]
+cognit session list [--status active|paused|closed]
+cognit session resume "goal-or-id" [--fork=true] [--id ulid]
+cognit session pause
+cognit session close
+cognit session show <id-or-goal>
+
+cognit snapshot
+
+cognit observation add "text" [--confidence 0..1] [--artifact path]
+cognit finding add "text" [--derived-from id] [--artifact path]
+
+cognit hypothesis add "text" [--confidence 0..1] [--belongs-to theory]
+cognit hypothesis weaken "id-or-title" --reason "reason"
+cognit hypothesis reject "id-or-title" --reason "reason" --reason-type evidence|superseded|constraint [--superseded-by id]
+cognit hypothesis promote "id-or-title"
+
+cognit theory add "text"
+cognit theory merge "id-or-title" --into "target-id-or-title"
+
+cognit experiment add "text" --tests "hypothesis-id-or-title"
+cognit experiment complete --result "text" --supports h1,h2 --contradicts h3
+
+cognit decision propose "text"
+cognit decision accept "id-or-title" --reason "reason" --based-on "conclusion-id,..."
+cognit decision reject "id-or-title" --reason "reason"
+
+cognit conclusion propose "text"
+cognit conclusion verify "id-or-title" --with "verification-id"
+
+cognit verify --type build|test|lint|typecheck|benchmark|custom --command "cmd" [--tests hypothesis-id-or-title]
+cognit verify cancel --id verification-id
+
+cognit artifact add ./file.log --kind terminal-log
+
+cognit edge add --type supports|contradicts|tests|... --from entity:id --to entity:id
+cognit edge list [--session id] [--type edge-type] [--from entity:id] [--to entity:id]
+
+cognit events [--session id] [--type event-type] [--actor name] [--since iso] [--limit n] [--follow]
+
+cognit redaction test "raw string"
+
+cognit export --output bundle.tar.gz [--include-artifacts]
+cognit import --input bundle.tar.gz [--merge-strategy skip|overwrite|fork]
+
+cognit gc [--dry-run] [--force]
+
+cognit wrap -- <command>
+
+cognit dashboard [--port 6970]
+```
+
+All entity-referencing commands accept `--id <ulid>` or a title substring. Title match is fuzzy (fuse.js) and errors out when ambiguous.
+
+---
+
 ## Configuration (cognit.yaml)
 
 ```yaml
 project:
-  name: cognit   # set automatically from directory name at init
+  name: cognit # set automatically from directory name at init
 
 redaction:
   enabled: true
   # built-in patterns (jwt, api_key_inline, pem_block, password_field) are always applied
   patterns:
     - name: internal_bearer
-      regex: 'Bearer [A-Za-z0-9._-]{20,}'
-      replacement: 'Bearer [REDACTED]'
+      regex: "Bearer [A-Za-z0-9._-]{20,}"
+      replacement: "Bearer [REDACTED]"
 
 cleanup:
   artifact_max_age_days: 30
-  unreferenced_action: archive   # archive | delete | keep
+  unreferenced_action: archive # archive | delete | keep
   max_db_size_mb: 1024
 
 session:
@@ -667,10 +757,10 @@ Edit with `cognit config --edit`. Show with `cognit config --show`.
 ## Development
 
 ```bash
-bun run dev:server
-bun run dev:dashboard
-bun run dev:cli
-bun run check
+pnpm dev:server
+pnpm dev:dashboard
+pnpm dev:cli
+pnpm check
 ```
 
 ---
@@ -684,10 +774,11 @@ Cognit v0.1 is complete when it can:
 - store events in SQLite with explicit redaction at ingest
 - rebuild session state from events (with snapshot acceleration)
 - attach artifacts as evidence
-- reject repeated failed approaches, with typed rejection reasons (`evidence` / `superseded` / `constraint`) recorded on the hypothesis state — note: this is the *data model*; the Constraint Engine that auto-prunes via rules lands in v0.2
+- reject repeated failed approaches, with typed rejection reasons (`evidence` / `superseded` / `constraint`) recorded on the hypothesis state — note: this is the _data model_; the Constraint Engine that auto-prunes via rules lands in v0.2
 - show why a decision exists, with `based_on` edges to verified conclusions
 - export and import sessions losslessly
 - open a dashboard on port 6970 with Overview, Timeline, Knowledge Graph, Decision Graph, Verification, and Settings pages (Recovery Center ships in v0.2 and the v0.1 dashboard badges it accordingly)
+- tail the event stream from the terminal with `cognit events --follow`, without requiring the API server
 
 A smaller **Bootstrap** (no API, no dashboard) only needs to ship phases 0-4 of the implementation plan and is enough to validate the data model with real sessions.
 
