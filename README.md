@@ -231,7 +231,7 @@ Every event carries:
 - `project_id`, `session_id` (foreign keys)
 - `actor_id` (the source — human, worker, or system)
 - `type` and `version` (schema version of the payload, for replay-time migration)
-- `payload_json` (type-specific, validated by Zod at ingest, redacted before write)
+- `payload_json` (type-specific, validated by Effect Schema at ingest, redacted before write)
 - `confidence` (0-1, set at event creation; entity-level confidence is derived)
 - `causation_id` and `correlation_id` (for event-sourcing tracing)
 - `created_at`
@@ -582,7 +582,7 @@ Cognit owns state.
 
 ## Worker Inbox Adapter
 
-The first adapter is intentionally simple. Any worker can publish events by writing JSON files into `.cognit/inbox/`. The watcher (chokidar) reads each file, validates its JSON shape and Zod schema, detects atomic writes (the `.tmp` + rename protocol), and forwards the event to `appendEvent` — which is the single redaction boundary in the store. The watcher itself does not redact; the same redaction invariant is enforced for CLI direct writes, SDK calls, and the future HTTP `POST /events` endpoint, because every write path goes through `appendEvent`.
+The first adapter is intentionally simple. Any worker can publish events by writing JSON files into `.cognit/inbox/`. The watcher (chokidar) reads each file, validates its JSON shape and Effect Schema, detects atomic writes (the `.tmp` + rename protocol), and forwards the event to `appendEvent` — which is the single redaction boundary in the store. The watcher itself does not redact; the same redaction invariant is enforced for CLI direct writes, SDK calls, and the future HTTP `POST /events` endpoint, because every write path goes through `appendEvent`.
 
 Atomic write protocol (so partial writes are not picked up):
 

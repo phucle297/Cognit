@@ -14,7 +14,7 @@ apps/                  # user-facing processes
   dashboard/           # Vite + React UI (v0.1+)
 
 packages/              # libraries, no process of their own
-  core/                # domain types, Zod schemas, event defs, reducer, redaction
+  core/                # domain types, Effect schemas, event defs, reducer, redaction
   db/                  # SQLite + Drizzle; implements the event store
   cli/                 # Commander.js; one binary: `cognit`
   sdk/                 # programmatic API for tools that prefer calls over inbox
@@ -37,7 +37,7 @@ sdk           ┤         ◄── verification
 
 | Package        | Owns                                                  | Does not own                                |
 | -------------- | ----------------------------------------------------- | ------------------------------------------- |
-| `core`         | Types, Zod schemas, reducer, redaction patterns, DSLs | I/O, SQLite, HTTP, subprocess               |
+| `core`         | Types, Effect schemas, reducer, redaction patterns, DSLs | I/O, SQLite, HTTP, subprocess               |
 | `db`           | Drizzle schema, migrations, `appendEvent` boundary    | UI, HTTP routes, business policy             |
 | `cli`          | Commander command tree, stdout formatting             | Domain logic (delegates to `core` + `db`)   |
 | `sdk`          | Typed calls into `db` for workers                    | File watching, subprocess                   |
@@ -87,7 +87,7 @@ sequenceDiagram
     participant Wt as Watcher (chokidar)
     participant A as appendEvent
     participant R as Redactor
-    participant Z as Zod validator
+    participant Z as Schema validator
     participant DB as SQLite events table
     participant AR as actors table
 
@@ -118,7 +118,7 @@ The CLI direct-write path and the future `POST /events` HTTP path both go throug
 What appendEvent guarantees, in order:
 
 1. JSON shape sanity.
-2. Zod validation against `(type, version)` schema in `core`.
+2. Effect Schema validation against `(type, version)` schema in `core`.
 3. Redaction of `payload_json` using built-in patterns (`jwt`, `api_key_inline`, `pem_block`, `password_field`) plus any `cognit.yaml` extras.
 4. Append a `redaction_applied` event when a pattern fires (audit trail: pattern name + affected entity id, never the redacted content).
 5. Resolve `actor` to `actor_id`; auto-register unknown actors with the default trust score from `cognit.yaml.actors.defaults.<type>`. **Do not allow trust_score=0 to persist on a registered actor** — the default is overwritten on first sighting.
@@ -289,9 +289,9 @@ Inbox atomic write protocol (so partial writes are never picked up):
 Watcher responsibilities (chokidar):
 
 - Detect atomic completion (no `.tmp` suffix + mtime older than `debounce_ms`).
-- Validate JSON shape and Zod schema.
+- Validate JSON shape and Effect Schema.
 - Hand raw bytes to `appendEvent`. Watcher does not redact.
-- On any failure (invalid JSON, unknown session, Zod failure), move the file to `.cognit/inbox/_error/<name>.json` with a sidecar `<name>.reason.txt`.
+- On any failure (invalid JSON, unknown session, Schema failure), move the file to `.cognit/inbox/_error/<name>.json` with a sidecar `<name>.reason.txt`.
 
 `cognit wrap` is the frictionless onboarding path: `cognit wrap -- claude-code --print "..."` runs the wrapped command, captures tool calls, exit codes, and stderr as observations, and emits them as events.
 
@@ -310,7 +310,7 @@ Watcher responsibilities (chokidar):
 | `actors`  | per-type defaults + per-name overrides                    |
 | `inbox`   | `watch`, `debounce_ms`, `atomic_write_required`           |
 
-Edit with `cognit config --edit`. Show with `cognit config --show`. The file is Zod-validated at read time.
+Edit with `cognit config --edit`. Show with `cognit config --show`. The file is Effect-Schema-validated at read time.
 
 ---
 
@@ -320,7 +320,7 @@ Edit with `cognit config --edit`. Show with `cognit config --show`. The file is 
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | Inbox file with invalid JSON         | Moved to `.cognit/inbox/_error/<name>.json` with `<name>.reason.txt`                                  |
 | Inbox file with unknown session_id   | Same as above                                                                                          |
-| Inbox file failing Zod validation    | Same as above                                                                                          |
+| Inbox file failing Schema validation    | Same as above                                                                                          |
 | Secret detected at ingest            | `payload_json` redacted; `redaction_applied` event written with pattern name + entity id (no content) |
 | Trust score = 0 on registered actor  | Bug — `appendEvent` must overwrite with the `actors.defaults.<type>` value                             |
 | Old event with older schema version  | Replayed via `core/event-migrations.ts`; never silently dropped                                       |

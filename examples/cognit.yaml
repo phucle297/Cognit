@@ -1,0 +1,34 @@
+project:
+  name: cognit-example
+
+redaction:
+  enabled: true
+  patterns:
+    - name: internal_bearer
+      regex: 'Bearer [A-Za-z0-9._-]{20,}'
+      replacement: 'Bearer [REDACTED]'
+
+cleanup:
+  artifact_max_age_days: 30
+  unreferenced_action: archive
+  max_db_size_mb: 1024
+
+session:
+  snapshot_every_n_events: 100
+  fork_on_resume: true
+
+actors:
+  defaults:
+    human: 0.9
+    worker: 0.6
+    system: 1.0
+  known:
+    - name: claude-code
+      trust_score: 0.7
+    - name: codex
+      trust_score: 0.65
+
+inbox:
+  watch: true
+  debounce_ms: 200
+  atomic_write_required: true

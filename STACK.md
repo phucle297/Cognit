@@ -54,20 +54,20 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 
 ## Backend
 
-| Layer      | Choice   | Notes                                |
-| ---------- | -------- | ------------------------------------ |
-| API        | Hono     | v0.1+                                |
-| ORM        | Drizzle  | schema-first, type-safe queries      |
-| Validation | Zod      | at every trust boundary              |
-| FP runtime | Effect   | error channels, dependency injection |
-| File watch | chokidar | inbox adapter                        |
-| Search     | fuse.js  | fuzzy keyword                        |
+| Layer      | Choice         | Notes                                |
+| ---------- | -------------- | ------------------------------------ |
+| API        | Hono           | v0.1+                                |
+| ORM        | Drizzle        | schema-first, type-safe queries      |
+| Validation | Effect Schema  | at every trust boundary              |
+| FP runtime | Effect         | error channels, dependency injection |
+| File watch | chokidar       | inbox adapter                        |
+| Search     | fuse.js        | fuzzy keyword                        |
 
 **Why:**
 
 - **Hono** — small, fast, edge-ready, Effect-compatible middleware.
 - **Drizzle** — SQL-first. Queries stay readable, types are real, no codegen step.
-- **Zod** at the boundary — every event payload parsed before it lands in the store.
+- **Effect Schema** at the boundary — every event payload parsed before it lands in the store. Same `effect` package as the runtime; one ecosystem, no second dependency to drift.
 - **Effect** — typed async, typed errors, dependency injection, resource management. Keeps the event store, reducer, and SDK honest about side effects.
 - **chokidar** — the de facto file watcher for Node.
 - **fuse.js** — fuzzy keyword search with weighted fields, zero infra.
@@ -83,7 +83,7 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 | Styling    | Tailwind CSS 4        | utility-first, no global CSS |
 | Components | shadcn/ui             | copy-paste, own the source   |
 | Graph UI   | React Flow            | knowledge + decision graph   |
-| Forms      | react-hook-form + Zod | type-safe                    |
+| Forms      | react-hook-form + Effect Schema | type-safe, shared schemas with `core` |
 
 **Why:**
 
@@ -92,7 +92,7 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 - **Tailwind 4** — CSS-first config, no `tailwind.config.js` required, faster.
 - **shadcn/ui** — components live in our repo, copy-paste, no runtime dep, no version lock.
 - **React Flow** — the standard for node-edge graph UIs in React.
-- **react-hook-form + Zod** — fast, controlled, schema-validated.
+- **react-hook-form + Effect Schema** — fast, controlled, schema-validated. Schemas live in `core` and are reused on the server, so the form types match the API.
 
 ---
 
@@ -123,6 +123,7 @@ Adding any of these needs a Changeset entry, a PR description, and a one-line "w
 - **No Next.js, no React Server Components.** Local-first SPA + Hono API.
 - **No Redux, Zustand, Jotai, Recoil, MobX.** Server state via fetch, local state via `useState`/Effect. No global client store.
 - **No Prisma, TypeORM, Knex, Kysely, MikroORM.** Drizzle only.
+- **No zod, no valibot, no yup, no arktype, no typebox.** Effect Schema only. (Effect Schema is the schema module of the `effect` runtime — one dep, one ecosystem.)
 - **No ESLint, no Prettier, no Biome.** oxc + oxfmt + oxlint only.
 - **No class-based domain models in `core`.** Pure data + pure functions.
 - **No `throw` in `packages/*`.** Effect error channels or typed `Result<E, A>`.

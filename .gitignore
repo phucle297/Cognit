@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+coverage/
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Cognit local state (when run inside a Cognit project)
+.cognit/cognit.db
+.cognit/cognit.db-journal
+.cognit/cognit.db-wal
+.cognit/cognit.db-shm
+.cognit/inbox/
+.cognit/snapshots/
+.cognit/archive/
+.cognit/.gitignore

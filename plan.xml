@@ -33,7 +33,7 @@
   <repository_structure>
     <path>apps/server</path>             <!-- Hono HTTP API; read view + minimal write endpoints -->
     <path>apps/dashboard</path>          <!-- Vite + React; all 7 pages; read-only against server -->
-    <path>packages/core</path>           <!-- Domain types, Zod schemas, event definitions, reducer, redaction; pure logic, no I/O -->
+    <path>packages/core</path>           <!-- Domain types, Effect schemas, event definitions, reducer, redaction; pure logic, no I/O -->
     <path>packages/db</path>             <!-- SQLite + Drizzle; migrations; implements the event store interface from core -->
     <path>packages/cli</path>            <!-- Commander.js; one binary: cognit -->
     <path>packages/sdk</path>            <!-- Programmatic API for tools that prefer direct calls over inbox files (used by cognit wrap) -->
@@ -199,7 +199,7 @@
       <field name="actor_id">ulid FK (replaces the old actor_json blob)</field>
       <field name="type">event type name</field>
       <field name="version">schema version of the event payload (semver). Used to migrate old events on replay.</field>
-      <field name="payload_json">type-specific shape, validated by Zod at ingest</field>
+      <field name="payload_json">type-specific shape, validated by Effect Schema at ingest</field>
       <field name="source_json">tool / command / file path that produced the event (kept as JSON for flexibility)</field>
       <field name="artifact_refs_json">array of artifact ids this event references</field>
       <field name="causation_id">event id that directly caused this event (nullable)</field>
@@ -672,11 +672,11 @@
     <failure_handling>
       <invalid_json>Move to .cognit/inbox/_error/&lt;name&gt;.json with sidecar &lt;name&gt;.reason.txt</invalid_json>
       <unknown_session_id>Move to .cognit/inbox/_error/</unknown_session_id>
-      <zod_validation_failure>Move to .cognit/inbox/_error/</zod_validation_failure>
+      <schema_validation_failure>Move to .cognit/inbox/_error/</schema_validation_failure>
       <actor_not_registered>Auto-register with default trust_score from cognit.yaml actors.defaults.&lt;type&gt;; emit actor_registered event. trust_score 0 is a sentinel for "unset" — never allow it to persist.</actor_not_registered>
     </failure_handling>
     <redaction_step>
-      <where>Applied by `appendEvent` (in packages/db), regardless of source. The watcher only validates JSON shape, Zod, and atomic-write detection — redaction is the responsibility of the store layer, not the watcher. This guarantees the same invariant for CLI direct writes, SDK calls, and future HTTP endpoints.</where>
+      <where>Applied by `appendEvent` (in packages/db), regardless of source. The watcher only validates JSON shape, Effect Schema, and atomic-write detection — redaction is the responsibility of the store layer, not the watcher. This guarantees the same invariant for CLI direct writes, SDK calls, and future HTTP endpoints.</where>
     </redaction_step>
     <auto_capture>
       <tool>cognit wrap</tool>
@@ -704,7 +704,7 @@
       <field from="causation_id, correlation_id">passed through verbatim to event columns</field>
       <field from="confidence (top-level on the inbox file)">stored on the event row's confidence column. NOT a payload field.</field>
       <field from="actor (object)">resolved to actor_id via actors table; auto-registers unknown names with type default trust_score from cognit.yaml.actors.defaults. trust_score 0 is a sentinel — always overwrite on registration.</field>
-      <field from="payload">validated by Zod per event type and version, then redacted by appendEvent. Payload contains type-specific fields only (e.g. {title} for hypothesis_created); cross-cutting fields (confidence, source, causation_id, correlation_id, created_at) are top-level on the event, not payload fields.</field>
+      <field from="payload">validated by Effect Schema per event type and version, then redacted by appendEvent. Payload contains type-specific fields only (e.g. {title} for hypothesis_created); cross-cutting fields (confidence, source, causation_id, correlation_id, created_at) are top-level on the event, not payload fields.</field>
     </inbox_to_store_mapping>
   </worker_adapter>
 
@@ -716,7 +716,7 @@
       <task>Setup pnpm scripts</task>
       <task>Create CLI binary</task>
       <task>Create .cognit directory structure (including .gitignore snippet)</task>
-      <task>Create cognit.yaml schema (Zod-validated)</task>
+      <task>Create cognit.yaml schema (Effect-Schema-validated)</task>
       <done_when>cognit init creates local Cognit project, writes cognit.yaml and .gitignore</done_when>
     </phase>
 
@@ -724,7 +724,7 @@
       <task>Create SQLite schema (projects, sessions, actors, events, snapshots, artifacts, edges)</task>
       <task>Create Drizzle migrations</task>
       <task>Implement redaction pipeline (apply built-in and config patterns at ingest)</task>
-      <task>Implement appendEvent with Zod validation per event type and per version</task>
+      <task>Implement appendEvent with Effect Schema validation per event type and per version</task>
       <task>Implement listEvents</task>
       <task>Implement event schema migration utility (replay-time version transform)</task>
       <task>Add packages/core/__fixtures__/events-v0.x.json (a small hand-written event log from a fictional previous version) and a reducer replay test that asserts the migrated state matches the snapshot</task>
@@ -808,7 +808,7 @@
 
     <phase id="9" name="Worker Inbox Adapter and Auto-capture">
       <task>Watch .cognit/inbox with chokidar + atomic-write detection</task>
-      <task>Validate JSON event files (Zod)</task>
+      <task>Validate JSON event files (Effect Schema)</task>
       <task>Auto-register unknown actors with default trust_score from cognit.yaml; emit actor_registered event</task>
       <task>Move invalid files to .cognit/inbox/_error/</task>
       <task>Implement cognit wrap for arbitrary worker commands</task>

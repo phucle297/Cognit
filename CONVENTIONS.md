@@ -36,7 +36,7 @@
 | DB columns          | snake_case           | `project_id`, `created_at`       |
 | URL paths           | kebab-case           | `/sessions/:id/recovery`         |
 | CLI sub-commands    | space-separated      | `cognit hypothesis reject`       |
-| Zod schemas         | PascalCase + Schema  | `HypothesisCreatedSchema`        |
+| Effect schemas      | PascalCase + Schema  | `HypothesisCreatedSchema`        |
 | Effect Layers       | PascalCase + Layer   | `EventStoreLayer`                |
 | Effect Errors       | PascalCase + Error   | `HypothesisNotFoundError`        |
 
@@ -94,7 +94,7 @@
 │  ├─ server/          # Hono HTTP API
 │  └─ dashboard/       # Vite + React 19
 ├─ packages/
-│  ├─ core/            # types, Zod, reducer, redaction, Effect services
+│  ├─ core/            # types, Effect Schema, reducer, redaction, Effect services
 │  ├─ db/              # Drizzle + appendEvent
 │  ├─ cli/             # cognit binary
 │  ├─ sdk/             # programmatic API for workers
@@ -135,7 +135,7 @@
 packages/core/src/
 ├─ index.ts
 ├─ types/               # domain types (Hypothesis, Decision, …)
-├─ schemas/             # Zod schemas, one per event type
+├─ schemas/             # Effect schemas, one per event type
 ├─ events/              # event type definitions + migrations
 ├─ reducer/             # pure replay function
 ├─ redaction/           # pattern engine
@@ -216,7 +216,7 @@ Hard NOs. If you need one, write the case in the PR description and request a re
 - ❌ Coupling `apps/*` to `packages/*` internals. Public surface is `index.ts`.
 - ❌ Adding a dep without checking `STACK.md → What is NOT`.
 - ❌ Mutating `payload_json` of an event after append. Events are immutable.
-- ❌ Skipping Zod at the trust boundary.
+- ❌ Skipping Effect Schema at the trust boundary.
 - ❌ Inline `key={i}` on React lists. Use stable ids.
 - ❌ Tailwind `!important` (`!` prefix) in `apps/dashboard`. Refactor instead.
 
@@ -226,7 +226,7 @@ Acceptable, but write a one-line comment with the reason.
 
 - ⚠️ `let` for accumulator variables in hot loops.
 - ⚠️ `for` loop when `.map` would do — only for perf-critical paths.
-- ⚠️ `as` cast — use a Zod parse instead.
+- ⚠️ `as` cast — use a Schema parse instead.
 - ⚠️ `// eslint-disable` / `oxlint-disable` — write the case in a code comment.
 
 ---
