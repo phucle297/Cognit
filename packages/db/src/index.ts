@@ -3,8 +3,8 @@
  * Effect-native service boundaries.
  *
  * Public surface:
- *   - Tags: DbConnection, EventStore, Redactor, MigrationRegistry,
- *     Uuid, Logger
+ *   - Tags: DbConnection, EventStore, SessionService, Redactor,
+ *     MigrationRegistry, Uuid, Logger
  *   - Live layers: DbLive(dbPath), DbTestBase
  *   - Errors: tagged union in `./errors`
  *   - Helpers: openDb, makeRedactor, migratePayload, redactEvent,
@@ -21,6 +21,7 @@ export * from "./redaction";
 export * from "./event-store";
 export * from "./inbox";
 export * from "./connection";
+export * from "./session-service";
 export * from "./layers/live";
 export * from "./schema/rows";
 export * from "./schema/migrations";
