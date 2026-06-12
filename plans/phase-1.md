@@ -35,8 +35,7 @@ packages/db/
 | Tag                 | Methods                                                    | Depends on                                          |
 | ------------------- | ---------------------------------------------------------- | --------------------------------------------------- |
 | `DbConnection`      | `db`, `close`, `tx<T>(fn): Effect<T, DbError>`             | —                                                   |
-| `EventStore`        | `appendEvent`, `listEvents`, `getEvent`                    | DbConnection, EventValidator, Redactor, Clock, Uuid |
-| `EventValidator`    | `validate(type, version, payload): Either<ParseError, T>`  | — (pure)                                            |
+| `EventStore`        | `appendEvent`, `listEvents`, `getEvent`                    | DbConnection, Redactor, Clock, Uuid                  |
 | `Redactor`          | `redact(text): RedactionResult` (built-in + user patterns) | @cognit/core                                        |
 | `MigrationRegistry` | `transformsFor(from, to): ReadonlyArray<Transform>`        | — (pure)                                            |
 | `Clock`             | `now(): Effect<Date>`                                      | —                                                   |
@@ -45,16 +44,25 @@ packages/db/
 ## appendEvent flow (single tx)
 
 ```
-1. validate type known
-2. ensureActor(name, type, config) → actor_id, trust_score  (autoreg if new)
-3. validate session exists, project exists
-4. idempotency: SELECT 1 FROM events WHERE id = ?  → return existing
-5. payload redact(redactor)
-6. source redact
-7. for each hit: insert redaction_applied (in same tx)
-8. insert event row with server created_at, CURRENT_VERSION
-9. return EventRow
+1. validate type known (against EVENT_TYPES)
+2. validate payload against PAYLOAD_SCHEMAS_V1[type] (skip for redaction_applied)
+3. capture eventId, createdAt once at top
+4. resolve session (out-of-tx lookup; UnknownSession if missing)
+5. open tx:
+   a. ensureActor(autoreg if new, return actor_id)
+   b. idempotency: SELECT by eventId (returns existing row if duplicate)
+   c. redactEvent(payload, source) → redactedPayload, redactedSource, hits
+   d. insertEvent(main row, all fields including createdAt)
+   e. for each hit: insertEvent(redaction_applied row, sharing createdAt, with field_path starting "payload.value." or "source.value.")
+   f. ROLLBACK on any failure; COMMIT on success
+6. return EventRow
 ```
+
+## Implementation notes (post-cycle-4)
+
+- `redactEvent` wraps payload/source in `{value}` envelope; `fieldPath` = `payload.value.<dotted>` or `source.value.<dotted>`. `redactValue` still operates on raw values so `payload_json` shape is unchanged.
+- `EventValidator` Tag was deleted (D2.a); consumers inline `Schema.decodeUnknownEither` against `PAYLOAD_SCHEMAS_V1`.
+- Idempotency check moved INSIDE the tx; UNIQUE-constraint (`SQLITE_CONSTRAINT_PRIMARYKEY`) caught and re-fetched on race.
 
 ## Migration utility
 

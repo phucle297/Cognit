@@ -77,6 +77,13 @@
 - App code: async/await is fine. `Promise<T>` for one-shot, Effect for streams and orchestration.
 - No fire-and-forget promises. Every async path returns a value or an effect.
 
+### Effect services
+
+- A new service = one `Context.Tag` in `context.ts`, one `*Live` Layer exporting the implementation, one entry in the `leafs` merge in `layers/live.ts` if it has no dependencies, and a re-export from `index.ts`.
+- Use `Layer.provide` to wire dependencies through R-channels. `Layer.mergeAll` only ZIPS outputs; it does NOT satisfy R-channels.
+- Use `Effect.runtime<R>()` to materialize the current fiber's R into a `Runtime<R>`, then `runtime.runFork(effect)` for fire-and-forget from a chokidar callback or other non-Effect entry point. Never use `as Effect<...>` casts to strip R-channels.
+- Errors are typed via the failure channel (`Effect.Effect<A, E, R>`). Wrap sync driver calls in `Effect.try` / `trySync` from `errors.ts` so failures become typed `DbError` and tx ROLLBACK fires correctly.
+
 ### Logging
 
 - `console.log` is banned in `packages/*`. Use the logger from `core`.
@@ -217,6 +224,7 @@ Hard NOs. If you need one, write the case in the PR description and request a re
 - ❌ Adding a dep without checking `STACK.md → What is NOT`.
 - ❌ Mutating `payload_json` of an event after append. Events are immutable.
 - ❌ Skipping Effect Schema at the trust boundary.
+- ❌ Wrapping `scanValue` on a raw value without an envelope — produces empty `fieldPath` and silently drops redaction audit rows.
 - ❌ Inline `key={i}` on React lists. Use stable ids.
 - ❌ Tailwind `!important` (`!` prefix) in `apps/dashboard`. Refactor instead.
 

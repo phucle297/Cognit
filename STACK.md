@@ -72,6 +72,12 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 - **chokidar** — the de facto file watcher for Node.
 - **fuse.js** — fuzzy keyword search with weighted fields, zero infra.
 
+### Service patterns
+
+- **Effect Layer composition** — every service is a `Context.Tag` with a `*Live` Layer. Live layer = `Layer.effect(Tag, Effect.gen(function*() { ... deps ... return { methods } }))`. Composed via `Layer.provide(Layer.provide(EventStoreLive, leafs), DbConnectionLive(dbPath))` so each consumer's R channel is satisfied. `Layer.mergeAll` only ZIPS outputs; it does NOT satisfy R channels — use `Layer.provide` for that.
+- **Migration runner** — `packages/db/src/schema/migrations.ts` exports `applyMigrations(db: SqliteHandle): Effect<{ applied }, DbError>`. Bootstraps `schema_version` (idempotent), reads current version, walks the ordered `MIGRATIONS` list, runs each in its own tx with `BEGIN`/`COMMIT`/`ROLLBACK`, upserts the version row. First migration is `1.0.0` and applies the current `TABLES_DDL`. Future versions prepend/append to the array.
+- **Redaction path envelope** — `redactEvent` wraps payload/source in `{value: ...}` before calling `scanValue` so every hit has a non-empty `fieldPath` (e.g. `payload.value.text`). `redactValue` operates on the raw value to keep `payload_json` shape unchanged. Defensive filter on `fieldPath === ""` in event-store.ts remains as a guard.
+
 ---
 
 ## Frontend
