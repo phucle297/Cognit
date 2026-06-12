@@ -3,7 +3,7 @@ import type { Database, RunResult } from "better-sqlite3";
 import type { AppendEventInput, EventRow, ListEventsQuery } from "./event-store";
 import type { RedactionHit } from "./redaction";
 import type { Transform } from "./migrate";
-import type { UnknownEventType, ValidationFailure, UnknownSession } from "./errors";
+import type { DbError, NotFound, UnknownEventType, ValidationFailure, UnknownSession } from "./errors";
 
 /**
  * Raw better-sqlite3 handle. Wrapped so the rest of the code never imports
@@ -22,22 +22,6 @@ export interface SqliteHandle {
 export class DbConnection extends Context.Tag("@cognit/db/DbConnection")<
   DbConnection,
   { readonly handle: SqliteHandle }
->() {}
-
-/** Per-(type, version) payload validator. */
-export interface EventValidatorShape {
-  readonly validate: (
-    type: string,
-    version: string,
-    payload: unknown,
-  ) => Effect.Effect<unknown, never>;
-  readonly knownTypes: () => ReadonlyArray<string>;
-  readonly knownVersions: (type: string) => ReadonlyArray<string>;
-}
-
-export class EventValidator extends Context.Tag("@cognit/db/EventValidator")<
-  EventValidator,
-  EventValidatorShape
 >() {}
 
 /** Redactor: scans text, returns hits (no content). */
@@ -65,11 +49,15 @@ export class MigrationRegistry extends Context.Tag("@cognit/db/MigrationRegistry
 export interface EventStoreShape {
   readonly append: (
     input: AppendEventInput,
-  ) => Effect.Effect<EventRow, UnknownEventType | ValidationFailure | UnknownSession, never>;
+  ) => Effect.Effect<
+    EventRow,
+    UnknownEventType | ValidationFailure | UnknownSession | DbError,
+    never
+  >;
   readonly list: (
     q: ListEventsQuery,
   ) => Effect.Effect<{ events: ReadonlyArray<EventRow>; nextCursor?: string }, never>;
-  readonly get: (id: string) => Effect.Effect<EventRow, never>;
+  readonly get: (id: string) => Effect.Effect<EventRow, NotFound>;
 }
 
 export class EventStore extends Context.Tag("@cognit/db/EventStore")<

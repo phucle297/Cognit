@@ -54,14 +54,14 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 
 ## Backend
 
-| Layer      | Choice         | Notes                                |
-| ---------- | -------------- | ------------------------------------ |
-| API        | Hono           | v0.1+                                |
-| ORM        | Drizzle        | schema-first, type-safe queries      |
-| Validation | Effect Schema  | at every trust boundary              |
-| FP runtime | Effect         | error channels, dependency injection |
-| File watch | chokidar       | inbox adapter                        |
-| Search     | fuse.js        | fuzzy keyword                        |
+| Layer      | Choice        | Notes                                |
+| ---------- | ------------- | ------------------------------------ |
+| API        | Hono          | v0.1+                                |
+| ORM        | Drizzle       | schema-first, type-safe queries      |
+| Validation | Effect Schema | at every trust boundary              |
+| FP runtime | Effect        | error channels, dependency injection |
+| File watch | chokidar      | inbox adapter                        |
+| Search     | fuse.js       | fuzzy keyword                        |
 
 **Why:**
 
@@ -76,13 +76,13 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 
 ## Frontend
 
-| Layer      | Choice                | Notes                        |
-| ---------- | --------------------- | ---------------------------- |
-| Framework  | React 19              | local-first SPA              |
-| Build      | Vite 5                | dev server, prod bundle      |
-| Styling    | Tailwind CSS 4        | utility-first, no global CSS |
-| Components | shadcn/ui             | copy-paste, own the source   |
-| Graph UI   | React Flow            | knowledge + decision graph   |
+| Layer      | Choice                          | Notes                                 |
+| ---------- | ------------------------------- | ------------------------------------- |
+| Framework  | React 19                        | local-first SPA                       |
+| Build      | Vite 5                          | dev server, prod bundle               |
+| Styling    | Tailwind CSS 4                  | utility-first, no global CSS          |
+| Components | shadcn/ui                       | copy-paste, own the source            |
+| Graph UI   | React Flow                      | knowledge + decision graph            |
 | Forms      | react-hook-form + Effect Schema | type-safe, shared schemas with `core` |
 
 **Why:**

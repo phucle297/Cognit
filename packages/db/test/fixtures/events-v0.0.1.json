@@ -1,0 +1,32 @@
+[
+  {
+    "id": "01fixture0000000000000000000a",
+    "project_id": "01projectxxxxxxxxxxxxxxxxx",
+    "session_id": "01sessionxxxxxxxxxxxxxxxxx",
+    "actor_id": "01actor00000000000000000000a",
+    "type": "session_created",
+    "version": "0.0.1",
+    "payload_json": "{\"summary\":\"Investigate flaky test in checkout\",\"parent\":null}",
+    "created_at": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "01fixture0000000000000000000b",
+    "project_id": "01projectxxxxxxxxxxxxxxxxx",
+    "session_id": "01sessionxxxxxxxxxxxxxxxxx",
+    "actor_id": "01actor00000000000000000000b",
+    "type": "observation_recorded",
+    "version": "0.0.1",
+    "payload_json": "{\"summary\":\"Test passes locally, fails in CI 50% of the time\"}",
+    "created_at": "2025-01-01T00:01:00.000Z"
+  },
+  {
+    "id": "01fixture0000000000000000000c",
+    "project_id": "01projectxxxxxxxxxxxxxxxxx",
+    "session_id": "01sessionxxxxxxxxxxxxxxxxx",
+    "actor_id": "01actor00000000000000000000c",
+    "type": "hypothesis_created",
+    "version": "0.0.1",
+    "payload_json": "{\"summary\":\"Race condition between two test setup hooks\",\"explanation\":\"The two hooks run concurrently and the second one depends on state the first hasn't finished writing.\"}",
+    "created_at": "2025-01-01T00:02:00.000Z"
+  }
+]

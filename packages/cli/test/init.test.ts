@@ -1,73 +1,73 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 
-const CLI_ENTRY = path.resolve(__dirname, '..', 'src', 'index.ts');
+const CLI_ENTRY = path.resolve(__dirname, "..", "src", "index.ts");
 // `tsx` binary lives in the CLI package's own devDeps (pnpm hoists off
 // by default). Resolve it through the test's own __dirname so the path
 // is stable across the test runner's working directory.
-const TSX = path.resolve(__dirname, '..', 'node_modules', '.bin', 'tsx');
+const TSX = path.resolve(__dirname, "..", "node_modules", ".bin", "tsx");
 
 function runCli(cwd: string, args: string[]): { status: number; stdout: string; stderr: string } {
   const result = spawnSync(TSX, [CLI_ENTRY, ...args], {
     cwd,
-    encoding: 'utf8',
+    encoding: "utf8",
   });
   return {
     status: result.status ?? -1,
-    stdout: result.stdout ?? '',
-    stderr: result.stderr ?? '',
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
   };
 }
 
 let tmp: string;
 
 beforeEach(async () => {
-  tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cognit-init-'));
+  tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "cognit-init-"));
 });
 
 afterEach(async () => {
   await fs.promises.rm(tmp, { recursive: true, force: true });
 });
 
-describe('cognit init', () => {
-  it('creates .cognit/ tree, cognit.yaml, and the .gitignore snippet', async () => {
-    const { status, stdout } = runCli(tmp, ['init']);
+describe("cognit init", () => {
+  it("creates .cognit/ tree, cognit.yaml, and the .gitignore snippet", async () => {
+    const { status, stdout } = runCli(tmp, ["init"]);
     expect(status).toBe(0);
-    expect(stdout).toContain('Initialised Cognit project');
+    expect(stdout).toContain("Initialised Cognit project");
 
-    const dir = path.join(tmp, '.cognit');
+    const dir = path.join(tmp, ".cognit");
     expect(fs.existsSync(dir)).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'cognit.yaml'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, '.gitignore'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'inbox', '_error'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'artifacts', 'curated'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'snapshots'))).toBe(true);
-    expect(fs.existsSync(path.join(dir, 'archive'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "cognit.yaml"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, ".gitignore"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "inbox", "_error"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "artifacts", "curated"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "snapshots"))).toBe(true);
+    expect(fs.existsSync(path.join(dir, "archive"))).toBe(true);
   });
 
-  it('uses --project to override the directory-derived name', async () => {
-    const { status, stdout } = runCli(tmp, ['init', '--project', 'cognit-fixture']);
+  it("uses --project to override the directory-derived name", async () => {
+    const { status, stdout } = runCli(tmp, ["init", "--project", "cognit-fixture"]);
     expect(status).toBe(0);
-    const cfg = fs.readFileSync(path.join(tmp, '.cognit', 'cognit.yaml'), 'utf8');
-    expect(cfg).toContain('cognit-fixture');
-    expect(stdout).toContain('cognit-fixture');
+    const cfg = fs.readFileSync(path.join(tmp, ".cognit", "cognit.yaml"), "utf8");
+    expect(cfg).toContain("cognit-fixture");
+    expect(stdout).toContain("cognit-fixture");
   });
 
-  it('refuses to overwrite an existing project without --force', async () => {
-    runCli(tmp, ['init']);
-    const second = runCli(tmp, ['init']);
+  it("refuses to overwrite an existing project without --force", async () => {
+    runCli(tmp, ["init"]);
+    const second = runCli(tmp, ["init"]);
     expect(second.status).toBe(2);
-    expect(second.stderr).toContain('already exists');
+    expect(second.stderr).toContain("already exists");
   });
 
-  it('overwrites when --force is passed', async () => {
-    runCli(tmp, ['init', '--project', 'first']);
-    const second = runCli(tmp, ['init', '--project', 'second', '--force']);
+  it("overwrites when --force is passed", async () => {
+    runCli(tmp, ["init", "--project", "first"]);
+    const second = runCli(tmp, ["init", "--project", "second", "--force"]);
     expect(second.status).toBe(0);
-    const cfg = fs.readFileSync(path.join(tmp, '.cognit', 'cognit.yaml'), 'utf8');
-    expect(cfg).toContain('second');
+    const cfg = fs.readFileSync(path.join(tmp, ".cognit", "cognit.yaml"), "utf8");
+    expect(cfg).toContain("second");
   });
 });

@@ -1,6 +1,6 @@
-import path from 'node:path';
-import os from 'node:os';
-import fs from 'node:fs';
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
 
 /**
  * Resolve the local Cognit project root (the directory that contains
@@ -12,7 +12,7 @@ export function findProjectRoot(start: string = process.cwd()): string | null {
   const stop = path.parse(current).root;
 
   while (true) {
-    const candidate = path.join(current, '.cognit', 'cognit.yaml');
+    const candidate = path.join(current, ".cognit", "cognit.yaml");
     if (fs.existsSync(candidate)) {
       return current;
     }
@@ -28,7 +28,7 @@ export function findProjectRoot(start: string = process.cwd()): string | null {
  * the project has not been initialised.
  */
 export function cognitDir(projectRoot: string): string {
-  return path.join(projectRoot, '.cognit');
+  return path.join(projectRoot, ".cognit");
 }
 
 /**
@@ -37,15 +37,15 @@ export function cognitDir(projectRoot: string): string {
  * phases. See `plan.xml <local_files>`.
  */
 export const COGNIT_SUBDIRS = [
-  'inbox',
-  'inbox/_error',
-  'artifacts',
-  'artifacts/curated',
-  'snapshots',
-  'archive',
+  "inbox",
+  "inbox/_error",
+  "artifacts",
+  "artifacts/curated",
+  "snapshots",
+  "archive",
 ] as const;
 
-export const COGNIT_FILES = ['cognit.yaml', '.gitignore'] as const;
+export const COGNIT_FILES = ["cognit.yaml", ".gitignore"] as const;
 
 export interface ProjectPaths {
   root: string;
@@ -66,27 +66,27 @@ export function projectPaths(projectRoot: string): ProjectPaths {
   return {
     root: projectRoot,
     dir,
-    config: path.join(dir, 'cognit.yaml'),
-    db: path.join(dir, 'cognit.db'),
-    gitignore: path.join(dir, '.gitignore'),
-    inbox: path.join(dir, 'inbox'),
-    inboxError: path.join(dir, 'inbox', '_error'),
-    artifacts: path.join(dir, 'artifacts'),
-    artifactsCurated: path.join(dir, 'artifacts', 'curated'),
-    snapshots: path.join(dir, 'snapshots'),
-    archive: path.join(dir, 'archive'),
+    config: path.join(dir, "cognit.yaml"),
+    db: path.join(dir, "cognit.db"),
+    gitignore: path.join(dir, ".gitignore"),
+    inbox: path.join(dir, "inbox"),
+    inboxError: path.join(dir, "inbox", "_error"),
+    artifacts: path.join(dir, "artifacts"),
+    artifactsCurated: path.join(dir, "artifacts", "curated"),
+    snapshots: path.join(dir, "snapshots"),
+    archive: path.join(dir, "archive"),
   };
 }
 
 export function isCognitProject(projectRoot: string): boolean {
-  return fs.existsSync(path.join(cognitDir(projectRoot), 'cognit.yaml'));
+  return fs.existsSync(path.join(cognitDir(projectRoot), "cognit.yaml"));
 }
 
 export function expandHome(p: string): string {
-  if (p === '~') {
+  if (p === "~") {
     return os.homedir();
   }
-  if (p.startsWith('~/')) {
+  if (p.startsWith("~/")) {
     return path.join(os.homedir(), p.slice(2));
   }
   return p;

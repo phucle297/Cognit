@@ -35,15 +35,15 @@ sdk           ┤         ◄── verification
 
 ## Module map
 
-| Package        | Owns                                                  | Does not own                                |
-| -------------- | ----------------------------------------------------- | ------------------------------------------- |
-| `core`         | Types, Effect schemas, reducer, redaction patterns, DSLs | I/O, SQLite, HTTP, subprocess               |
-| `db`           | Drizzle schema, migrations, `appendEvent` boundary    | UI, HTTP routes, business policy             |
-| `cli`          | Commander command tree, stdout formatting             | Domain logic (delegates to `core` + `db`)   |
-| `sdk`          | Typed calls into `db` for workers                    | File watching, subprocess                   |
-| `verification` | Spawn, signal, timeout, stream stdout/stderr         | Decision policy, store writes               |
-| `server`       | Hono routes, SSE stream, session-scoped reads        | Reducer internals (calls into `core`)       |
-| `dashboard`    | React pages, React Flow graph layout                 | Data fetching policy beyond what API exposes |
+| Package        | Owns                                                     | Does not own                                 |
+| -------------- | -------------------------------------------------------- | -------------------------------------------- |
+| `core`         | Types, Effect schemas, reducer, redaction patterns, DSLs | I/O, SQLite, HTTP, subprocess                |
+| `db`           | Drizzle schema, migrations, `appendEvent` boundary       | UI, HTTP routes, business policy             |
+| `cli`          | Commander command tree, stdout formatting                | Domain logic (delegates to `core` + `db`)    |
+| `sdk`          | Typed calls into `db` for workers                        | File watching, subprocess                    |
+| `verification` | Spawn, signal, timeout, stream stdout/stderr             | Decision policy, store writes                |
+| `server`       | Hono routes, SSE stream, session-scoped reads            | Reducer internals (calls into `core`)        |
+| `dashboard`    | React pages, React Flow graph layout                     | Data fetching policy beyond what API exposes |
 
 ---
 
@@ -220,22 +220,22 @@ The future Gravity Engine consumes `actor.trust_score` of contributing events wh
 
 Edges are first-class in the `edges` table. The graph in the dashboard is rendered by querying edges, not by scanning events.
 
-| Edge type       | From → To                             | Why explicit                     |
-| --------------- | ------------------------------------- | -------------------------------- |
-| `tests`         | experiment → hypothesis               | provenance for "why this ran"     |
-| `supports`      | finding/conclusion → hypothesis       | the "evidence" axis              |
-| `contradicts`   | finding/conclusion → hypothesis       | the "counter-evidence" axis       |
-| `supersedes`    | hypothesis→h / decision→d             | chains of replacement            |
-| `caused`        | decision → experiment                 | "this decision ran this test"    |
-| `based_on`      | decision → conclusion                 | separates knowledge from action  |
-| `verified_by`   | conclusion → verification             | grounds a claim in a run         |
-| `belongs_to`    | hypothesis → theory                   | thematic grouping                 |
-| `derived_from`  | finding → observation/finding         | lineage of interpretation         |
-| `references`    | any → artifact                        | evidence attachment               |
+| Edge type      | From → To                       | Why explicit                    |
+| -------------- | ------------------------------- | ------------------------------- |
+| `tests`        | experiment → hypothesis         | provenance for "why this ran"   |
+| `supports`     | finding/conclusion → hypothesis | the "evidence" axis             |
+| `contradicts`  | finding/conclusion → hypothesis | the "counter-evidence" axis     |
+| `supersedes`   | hypothesis→h / decision→d       | chains of replacement           |
+| `caused`       | decision → experiment           | "this decision ran this test"   |
+| `based_on`     | decision → conclusion           | separates knowledge from action |
+| `verified_by`  | conclusion → verification       | grounds a claim in a run        |
+| `belongs_to`   | hypothesis → theory             | thematic grouping               |
+| `derived_from` | finding → observation/finding   | lineage of interpretation       |
+| `references`   | any → artifact                  | evidence attachment             |
 
 A `edge_created` event is emitted for every edge; the `edges` table is the queryable mirror. The two stay in sync via `appendEvent` (which writes both).
 
-> **Special case:** verifications link to the hypothesis they tested via the `linked_hypothesis_id` column on the event row, not via a `tests` edge. A `tests` edge is experiment → hypothesis (the *plan* of the test); a verification is the *result* of a run.
+> **Special case:** verifications link to the hypothesis they tested via the `linked_hypothesis_id` column on the event row, not via a `tests` edge. A `tests` edge is experiment → hypothesis (the _plan_ of the test); a verification is the _result_ of a run.
 
 ---
 
@@ -301,14 +301,14 @@ Watcher responsibilities (chokidar):
 
 `.cognit/cognit.yaml` is the single config file. Committed to the repo (the `.cognit/cognit.db` is gitignored). Sections:
 
-| Section   | Purpose                                                   |
-| --------- | --------------------------------------------------------- |
-| `project` | name (defaulted from directory at init)                   |
-| `redaction` | enabled (default true) + extra patterns                |
-| `cleanup` | `artifact_max_age_days`, `unreferenced_action`, `max_db_size_mb` |
-| `session` | `snapshot_every_n_events`, `fork_on_resume`               |
-| `actors`  | per-type defaults + per-name overrides                    |
-| `inbox`   | `watch`, `debounce_ms`, `atomic_write_required`           |
+| Section     | Purpose                                                          |
+| ----------- | ---------------------------------------------------------------- |
+| `project`   | name (defaulted from directory at init)                          |
+| `redaction` | enabled (default true) + extra patterns                          |
+| `cleanup`   | `artifact_max_age_days`, `unreferenced_action`, `max_db_size_mb` |
+| `session`   | `snapshot_every_n_events`, `fork_on_resume`                      |
+| `actors`    | per-type defaults + per-name overrides                           |
+| `inbox`     | `watch`, `debounce_ms`, `atomic_write_required`                  |
 
 Edit with `cognit config --edit`. Show with `cognit config --show`. The file is Effect-Schema-validated at read time.
 
@@ -316,21 +316,21 @@ Edit with `cognit config --edit`. Show with `cognit config --show`. The file is 
 
 ## Failure modes
 
-| Mode                                 | What happens                                                                                          |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| Inbox file with invalid JSON         | Moved to `.cognit/inbox/_error/<name>.json` with `<name>.reason.txt`                                  |
-| Inbox file with unknown session_id   | Same as above                                                                                          |
-| Inbox file failing Schema validation    | Same as above                                                                                          |
-| Secret detected at ingest            | `payload_json` redacted; `redaction_applied` event written with pattern name + entity id (no content) |
-| Trust score = 0 on registered actor  | Bug — `appendEvent` must overwrite with the `actors.defaults.<type>` value                             |
-| Old event with older schema version  | Replayed via `core/event-migrations.ts`; never silently dropped                                       |
-| Resume to a missing `parent_session_id` | Refused at the CLI; API returns 404                                                                 |
-| Dashboard cannot connect to API      | Dashboard reads from API; offline mode is post-v0.2                                                  |
-| Redaction in past event              | **Not auto-cleaned.** Restore from a pre-leak `cognit export` and re-import.                          |
+| Mode                                    | What happens                                                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Inbox file with invalid JSON            | Moved to `.cognit/inbox/_error/<name>.json` with `<name>.reason.txt`                                  |
+| Inbox file with unknown session_id      | Same as above                                                                                         |
+| Inbox file failing Schema validation    | Same as above                                                                                         |
+| Secret detected at ingest               | `payload_json` redacted; `redaction_applied` event written with pattern name + entity id (no content) |
+| Trust score = 0 on registered actor     | Bug — `appendEvent` must overwrite with the `actors.defaults.<type>` value                            |
+| Old event with older schema version     | Replayed via `core/event-migrations.ts`; never silently dropped                                       |
+| Resume to a missing `parent_session_id` | Refused at the CLI; API returns 404                                                                   |
+| Dashboard cannot connect to API         | Dashboard reads from API; offline mode is post-v0.2                                                   |
+| Redaction in past event                 | **Not auto-cleaned.** Restore from a pre-leak `cognit export` and re-import.                          |
 
 ---
 
-## What is *not* in the architecture
+## What is _not_ in the architecture
 
 - **No central server.** Local-first. Multi-machine sync is post-v0.2.
 - **No chat history.** Workers can re-emit observations, but the chain-of-thought never enters the store.

@@ -1,9 +1,9 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
-import { Command } from 'commander';
-import { defaultConfig } from '@cognit/core/config';
-import { COGNIT_SUBDIRS, projectPaths, isCognitProject } from '../paths.js';
-import { writeConfig, writeCognitGitignore } from '../yaml-io.js';
+import fs from "node:fs/promises";
+import path from "node:path";
+import { Command } from "commander";
+import { defaultConfig } from "@cognit/core/config";
+import { COGNIT_SUBDIRS, projectPaths, isCognitProject } from "../paths.js";
+import { writeConfig, writeCognitGitignore } from "../yaml-io.js";
 
 interface InitOptions {
   project?: string;
@@ -20,10 +20,10 @@ interface InitOptions {
  */
 export function registerInit(program: Command): void {
   program
-    .command('init')
-    .description('initialise a local Cognit project in the current directory')
-    .option('-p, --project <name>', 'project name (default: directory name)')
-    .option('-f, --force', 're-initialise an existing project (overwrite cognit.yaml)')
+    .command("init")
+    .description("initialise a local Cognit project in the current directory")
+    .option("-p, --project <name>", "project name (default: directory name)")
+    .option("-f, --force", "re-initialise an existing project (overwrite cognit.yaml)")
     .action(async (opts: InitOptions) => {
       const cwd = process.cwd();
       const projectRoot = cwd;
@@ -38,9 +38,7 @@ export function registerInit(program: Command): void {
       }
 
       const projectName =
-        opts.project && opts.project.length > 0
-          ? opts.project
-          : path.basename(projectRoot);
+        opts.project && opts.project.length > 0 ? opts.project : path.basename(projectRoot);
 
       await fs.mkdir(paths.dir, { recursive: true });
       for (const sub of COGNIT_SUBDIRS) {

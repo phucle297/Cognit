@@ -3,8 +3,8 @@
  * Effect-native service boundaries.
  *
  * Public surface:
- *   - Tags: DbConnection, EventStore, Redactor, EventValidator,
- *     MigrationRegistry, Uuid, Logger
+ *   - Tags: DbConnection, EventStore, Redactor, MigrationRegistry,
+ *     Uuid, Logger
  *   - Live layers: DbLive(dbPath), DbTestBase
  *   - Errors: tagged union in `./errors`
  *   - Helpers: openDb, makeRedactor, migratePayload, redactEvent,

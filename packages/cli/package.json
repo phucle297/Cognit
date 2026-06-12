@@ -2,10 +2,10 @@
   "name": "@cognit/cli",
   "version": "0.0.0",
   "private": true,
-  "type": "module",
   "bin": {
     "cognit": "./src/index.ts"
   },
+  "type": "module",
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/index.ts",

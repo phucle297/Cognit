@@ -15,7 +15,6 @@
     "noUnusedParameters": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
-    "esModuleInterop": false,
     "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,

@@ -1,4 +1,4 @@
-import { Context, Effect, Either, Runtime } from "effect";
+import { Context, Effect, Either, Runtime, Schema } from "effect";
 import chokidar from "chokidar";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +9,15 @@ import { ActorType } from "./actor";
 
 type EventStoreService = Context.Tag.Service<typeof EventStore>;
 type LoggerService = Context.Tag.Service<typeof Logger>;
+
+/**
+ * Decode a free-form `actor_type` string from the JSON payload. Rejects
+ * anything that isn't one of the three literal types the DB CHECK
+ * constraint allows, with a clean error rather than a SQLite check
+ * violation surfacing through the append path.
+ */
+const decodeActorType = (s: string): Either.Either<ActorType, unknown> =>
+  Schema.decodeUnknownEither(ActorType)(s);
 
 /**
  * Watch a directory for `.json` files (atomically renamed from `.tmp`).
@@ -113,7 +122,17 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           yield* moveFile(filePath, path.join(config.errorDir, base), logger, "move-to-error");
           return;
         }
-        const actorType = p.actor_type as ActorType;
+        const actorTypeResult = decodeActorType(p.actor_type);
+        if (Either.isLeft(actorTypeResult)) {
+          yield* logger.log(
+            "error",
+            { file: filePath, actor_type: p.actor_type },
+            "inbox: invalid actor_type",
+          );
+          yield* moveFile(filePath, path.join(config.errorDir, base), logger, "move-to-error");
+          return;
+        }
+        const actorType = actorTypeResult.right;
         const appendResult = yield* store
           .append({
             ...(p.id !== undefined ? { id: p.id } : {}),

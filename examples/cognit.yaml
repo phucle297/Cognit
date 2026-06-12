@@ -5,8 +5,8 @@ redaction:
   enabled: true
   patterns:
     - name: internal_bearer
-      regex: 'Bearer [A-Za-z0-9._-]{20,}'
-      replacement: 'Bearer [REDACTED]'
+      regex: "Bearer [A-Za-z0-9._-]{20,}"
+      replacement: "Bearer [REDACTED]"
 
 cleanup:
   artifact_max_age_days: 30

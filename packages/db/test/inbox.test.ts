@@ -14,14 +14,12 @@ import {
   openDb,
 } from "../src";
 import { EventStoreLive } from "../src/event-store";
-import { EventValidatorLive } from "../src/event-schema";
 import { inboxIgnored, makeInboxWatcher, runInboxWatcher, type InboxWatcherConfig } from "../src/inbox";
 
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
   const leafs = Layer.mergeAll(
     RedactorLive,
-    EventValidatorLive,
     MigrationRegistryLive,
     UuidTest,
     LoggerNoop,
@@ -164,6 +162,47 @@ describe("inbox processFile", () => {
       program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<void, never, never>,
     );
     expect(await fs.readdir(dirs.error)).toEqual(["incomplete.json"]);
+  });
+
+  it("moves a file with invalid actor_type to error dir, no DB row", async () => {
+    const config: InboxWatcherConfig = {
+      inboxDir: dirs.inbox,
+      processedDir: dirs.processed,
+      errorDir: dirs.error,
+      debounceMs: 50,
+    };
+    const file = path.join(dirs.inbox, "bad-actor.json");
+    const payload = {
+      type: "observation_recorded",
+      session_id: "01sessionxxxxxxxxxxxxxxxxx",
+      actor_name: "alien-fan",
+      actor_type: "alien",
+      payload: { text: "ET phone home" },
+    };
+    await fs.writeFile(file, JSON.stringify(payload), "utf8");
+
+    const program = Effect.gen(function* () {
+      const conn = yield* DbConnection;
+      setupSession(conn);
+      const { processFile } = yield* makeInboxWatcher(config);
+      yield* processFile(file);
+    });
+
+    await Effect.runPromise(
+      program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<void, never, never>,
+    );
+
+    // File moved to error/, not processed/.
+    expect(await fs.readdir(dirs.error)).toEqual(["bad-actor.json"]);
+    expect(await fs.readdir(dirs.processed)).toEqual([]);
+
+    // No event row landed in the DB.
+    const conn = await Effect.runPromise(openDb(dirs.dbPath) as Effect.Effect<Context.Tag.Service<typeof DbConnection>, never, never>);
+    const row = conn.handle.get<{ c: number }>(
+      "SELECT count(*) as c FROM events WHERE session_id = ?",
+      ["01sessionxxxxxxxxxxxxxxxxx"],
+    );
+    expect(row?.c).toBe(0);
   });
 
   it("runInboxWatcher forks per-file effects with the R-channel intact", async () => {

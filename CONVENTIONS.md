@@ -6,39 +6,39 @@
 
 ## File names
 
-| What                       | Convention                  | Example                       |
-| -------------------------- | --------------------------- | ----------------------------- |
-| TypeScript source          | kebab-case                  | `event-store.ts`              |
-| React component            | kebab-case.tsx              | `decision-graph.tsx`          |
-| Test file                  | `<name>.test.ts` colocated  | `event-store.test.ts`         |
-| Markdown (top-level doc)   | UPPER-CASE                  | `ARCHITECTURE.md`             |
-| Markdown (folder doc)      | lower-kebab                 | `walkthrough-nextjs-leak.md`  |
-| SQL migration              | `NNNN_<name>.sql`           | `0001_init.sql`               |
-| Config (JSON)              | kebab-case                  | `oxlint.json`, `oxfmt.json`    |
-| Config (YAML)              | kebab-case                  | `cognit.yaml`                 |
-| Env file                   | `.env`, `.env.local`        | —                             |
+| What                     | Convention                 | Example                      |
+| ------------------------ | -------------------------- | ---------------------------- |
+| TypeScript source        | kebab-case                 | `event-store.ts`             |
+| React component          | kebab-case.tsx             | `decision-graph.tsx`         |
+| Test file                | `<name>.test.ts` colocated | `event-store.test.ts`        |
+| Markdown (top-level doc) | UPPER-CASE                 | `ARCHITECTURE.md`            |
+| Markdown (folder doc)    | lower-kebab                | `walkthrough-nextjs-leak.md` |
+| SQL migration            | `NNNN_<name>.sql`          | `0001_init.sql`              |
+| Config (JSON)            | kebab-case                 | `oxlint.json`, `oxfmt.json`  |
+| Config (YAML)            | kebab-case                 | `cognit.yaml`                |
+| Env file                 | `.env`, `.env.local`       | —                            |
 
 ---
 
 ## Identifier names
 
-| What                | Convention           | Example                          |
-| ------------------- | -------------------- | -------------------------------- |
-| Variables           | camelCase            | `sessionId`                      |
-| Functions           | camelCase            | `appendEvent`                    |
-| Classes             | PascalCase           | `RedactionRule`                  |
-| Types / interfaces  | PascalCase           | `Hypothesis`                     |
-| Enums               | PascalCase           | `VerificationState`              |
-| Enum members        | PascalCase           | `VerificationState.Failed`       |
-| Constants           | UPPER_SNAKE          | `MAX_DB_SIZE_MB`                 |
-| Event types         | snake_case           | `hypothesis_rejected`            |
-| DB tables           | snake_case plural    | `events`, `sessions`             |
-| DB columns          | snake_case           | `project_id`, `created_at`       |
-| URL paths           | kebab-case           | `/sessions/:id/recovery`         |
-| CLI sub-commands    | space-separated      | `cognit hypothesis reject`       |
-| Effect schemas      | PascalCase + Schema  | `HypothesisCreatedSchema`        |
-| Effect Layers       | PascalCase + Layer   | `EventStoreLayer`                |
-| Effect Errors       | PascalCase + Error   | `HypothesisNotFoundError`        |
+| What               | Convention          | Example                    |
+| ------------------ | ------------------- | -------------------------- |
+| Variables          | camelCase           | `sessionId`                |
+| Functions          | camelCase           | `appendEvent`              |
+| Classes            | PascalCase          | `RedactionRule`            |
+| Types / interfaces | PascalCase          | `Hypothesis`               |
+| Enums              | PascalCase          | `VerificationState`        |
+| Enum members       | PascalCase          | `VerificationState.Failed` |
+| Constants          | UPPER_SNAKE         | `MAX_DB_SIZE_MB`           |
+| Event types        | snake_case          | `hypothesis_rejected`      |
+| DB tables          | snake_case plural   | `events`, `sessions`       |
+| DB columns         | snake_case          | `project_id`, `created_at` |
+| URL paths          | kebab-case          | `/sessions/:id/recovery`   |
+| CLI sub-commands   | space-separated     | `cognit hypothesis reject` |
+| Effect schemas     | PascalCase + Schema | `HypothesisCreatedSchema`  |
+| Effect Layers      | PascalCase + Layer  | `EventStoreLayer`          |
+| Effect Errors      | PascalCase + Error  | `HypothesisNotFoundError`  |
 
 ---
 
@@ -170,7 +170,7 @@ Conventional Commits.
 - **Types:** `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `build`, `ci`.
 - **Scope:** package or area name (`core`, `db`, `cli`, `server`, `dashboard`, `inbox`, …).
 - **Subject:** lowercase, imperative, no period, ≤ 72 chars.
-- **Body:** wrap 100. Explain *why*, not *what*.
+- **Body:** wrap 100. Explain _why_, not _what_.
 - **Footer:** `Refs:`, `BREAKING:`, `Co-Authored-By:`.
 
 Example:

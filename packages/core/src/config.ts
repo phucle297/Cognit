@@ -1,4 +1,4 @@
-import { Schema } from 'effect';
+import { Schema } from "effect";
 
 /**
  * Effect Schema definitions for `.cognit/cognit.yaml`. Validated at read
@@ -12,10 +12,7 @@ import { Schema } from 'effect';
 // --- atoms ---------------------------------------------------------------
 
 const Name = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(128));
-const TrustScore = Schema.Number.pipe(
-  Schema.greaterThanOrEqualTo(0),
-  Schema.lessThanOrEqualTo(1),
-);
+const TrustScore = Schema.Number.pipe(Schema.greaterThanOrEqualTo(0), Schema.lessThanOrEqualTo(1));
 const PositiveInt = Schema.Number.pipe(Schema.int(), Schema.greaterThan(0));
 const NonNegativeInt = Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0));
 const PatternName = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64));
@@ -38,12 +35,14 @@ const RedactionConfig = Schema.Struct({
 });
 type RedactionConfig = Schema.Schema.Type<typeof RedactionConfig>;
 
-const UnreferencedAction = Schema.Literal('archive', 'delete', 'keep');
+const UnreferencedAction = Schema.Literal("archive", "delete", "keep");
 type UnreferencedAction = Schema.Schema.Type<typeof UnreferencedAction>;
 
 const CleanupConfig = Schema.Struct({
   artifact_max_age_days: Schema.optionalWith(PositiveInt, { default: () => 30 }),
-  unreferenced_action: Schema.optionalWith(UnreferencedAction, { default: () => 'archive' as const }),
+  unreferenced_action: Schema.optionalWith(UnreferencedAction, {
+    default: () => "archive" as const,
+  }),
   max_db_size_mb: Schema.optionalWith(PositiveInt, { default: () => 1024 }),
 });
 type CleanupConfig = Schema.Schema.Type<typeof CleanupConfig>;
@@ -90,20 +89,22 @@ export const CognitConfigSchema = Schema.Struct({
     default: () => ({ enabled: true, patterns: [] }) as const,
   }),
   cleanup: Schema.optionalWith(CleanupConfig, {
-    default: () => ({
-      artifact_max_age_days: 30,
-      unreferenced_action: 'archive' as const,
-      max_db_size_mb: 1024,
-    }) as const,
+    default: () =>
+      ({
+        artifact_max_age_days: 30,
+        unreferenced_action: "archive" as const,
+        max_db_size_mb: 1024,
+      }) as const,
   }),
   session: Schema.optionalWith(SessionConfig, {
     default: () => ({ snapshot_every_n_events: 100, fork_on_resume: true }) as const,
   }),
   actors: Schema.optionalWith(ActorsConfig, {
-    default: () => ({
-      defaults: { human: 0.9, worker: 0.6, system: 1.0 } as const,
-      known: [] as readonly ActorKnown[],
-    }) as const,
+    default: () =>
+      ({
+        defaults: { human: 0.9, worker: 0.6, system: 1.0 } as const,
+        known: [] as readonly ActorKnown[],
+      }) as const,
   }),
   inbox: Schema.optionalWith(InboxConfig, {
     default: () => ({ watch: true, debounce_ms: 200, atomic_write_required: true }) as const,
