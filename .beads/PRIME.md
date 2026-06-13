@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 2j. End-to-end: snapshot+tail replay + resume-as-fork
+search: Phase 2: Session Runtime and Reducer
 queue: 
-next: Cognit-3wv
+next: 
