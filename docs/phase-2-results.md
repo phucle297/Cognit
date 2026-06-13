@@ -14,7 +14,7 @@ findings, and the timeline.
 - **Pure reducer** (`packages/core/src/reducer.ts`).
   Total fold over `(created_at, id)` order. Handles every event type
   (state + non-state). Skips non-state events without changing state
-  (the fold is *total*). 35 unit tests in `reducer.test.ts`.
+  (the fold is _total_). 35 unit tests in `reducer.test.ts`.
 - **`SessionState` shape** (`packages/core/src/state.ts`).
   Full session view: observations, findings, hypotheses, theories,
   experiments, decisions, conclusions, verifications, artifacts,
@@ -71,12 +71,12 @@ broke in production. Fixed in `packages/db/src/layers/live.ts:53-97`
 
 ## Test counts
 
-| Package      | Phase 1 end | Phase 2 end | Delta |
-| ------------ | ----------- | ----------- | ----- |
-| `@cognit/db` | 70          | 97          | +27   |
-| `@cognit/cli`| 13          | 36          | +23   |
-| `@cognit/core`| 44         | 44          |  0    |
-| **total**    | 127         | 177         | +50   |
+| Package        | Phase 1 end | Phase 2 end | Delta |
+| -------------- | ----------- | ----------- | ----- |
+| `@cognit/db`   | 70          | 97          | +27   |
+| `@cognit/cli`  | 13          | 36          | +23   |
+| `@cognit/core` | 44          | 44          | 0     |
+| **total**      | 127         | 177         | +50   |
 
 `pnpm -r typecheck` clean. All 177 tests pass.
 

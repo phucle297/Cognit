@@ -103,19 +103,19 @@ from a `--root` path, then runs the effect.
 
 ## Reducer — state sections (per `plan.xml <state_sections>`)
 
-| Section         | Shape                                                                                  |
-| --------------- | -------------------------------------------------------------------------------------- |
-| `observations`  | `ReadonlyArray<{ id, text, created_at }>`                                              |
-| `findings`      | `ReadonlyArray<{ id, text, related_observation_ids, created_at }>`                     |
-| `hypotheses`    | `ReadonlyMap<string, HypothesisState>` (current_state, current_confidence, reason...)  |
-| `theories`      | `ReadonlyMap<string, TheoryState>`                                                     |
-| `experiments`   | `ReadonlyMap<string, ExperimentState>`                                                  |
-| `decisions`     | `ReadonlyMap<string, DecisionState>`                                                   |
-| `conclusions`   | `ReadonlyMap<string, ConclusionState>`                                                 |
-| `verifications` | `ReadonlyMap<string, VerificationState>` (with rerun chain)                            |
-| `artifacts`     | `ReadonlyMap<string, ArtifactState>`                                                   |
-| `edges`         | `ReadonlyArray<EdgeState>`                                                             |
-| `timeline`      | `ReadonlyArray<EventRow>` (the input, normalized to created_at order)                  |
+| Section         | Shape                                                                                 |
+| --------------- | ------------------------------------------------------------------------------------- |
+| `observations`  | `ReadonlyArray<{ id, text, created_at }>`                                             |
+| `findings`      | `ReadonlyArray<{ id, text, related_observation_ids, created_at }>`                    |
+| `hypotheses`    | `ReadonlyMap<string, HypothesisState>` (current_state, current_confidence, reason...) |
+| `theories`      | `ReadonlyMap<string, TheoryState>`                                                    |
+| `experiments`   | `ReadonlyMap<string, ExperimentState>`                                                |
+| `decisions`     | `ReadonlyMap<string, DecisionState>`                                                  |
+| `conclusions`   | `ReadonlyMap<string, ConclusionState>`                                                |
+| `verifications` | `ReadonlyMap<string, VerificationState>` (with rerun chain)                           |
+| `artifacts`     | `ReadonlyMap<string, ArtifactState>`                                                  |
+| `edges`         | `ReadonlyArray<EdgeState>`                                                            |
+| `timeline`      | `ReadonlyArray<EventRow>` (the input, normalized to created_at order)                 |
 
 **State transitions are encoded as pure functions of `(state, event)`.**
 Reducer iterates events; each event type has a registered `apply` function
@@ -158,7 +158,7 @@ event id, event_count = n). Update sessions.last_snapshot_event_id.
    last 3 timeline events).
 4. If `--fork=true` (default), INSERT a new `sessions` row with
    `parent_session_id = target.id` and `goal = target.goal +
-   " (resumed <ISO date>)"`. The forked session is the active one going
+" (resumed <ISO date>)"`. The forked session is the active one going
    forward.
 5. Emit a `session_created` event with `parent_session_id` so the event
    log captures the lineage.
@@ -167,17 +167,17 @@ event id, event_count = n). Update sessions.last_snapshot_event_id.
 
 ## CLI command surface
 
-| Command                                            | Maps to                               |
-| -------------------------------------------------- | ------------------------------------- |
-| `cognit session create "goal" [--parent id]`       | SessionService.create + append event  |
-| `cognit session list [--status X]`                 | SessionService.list                   |
-| `cognit session resume <goal-or-id> [--fork=true]` | SessionService.resume (fork or reopen)|
-| `cognit session pause`                             | SessionService.pause + append event   |
-| `cognit session close`                             | SessionService.close + snapshot       |
-| `cognit session show <goal-or-id>`                 | reducer + formatter                  |
-| `cognit snapshot [--session id]`                   | SnapshotService.takeNow               |
-| `cognit append --type T --payload JSON --session S --actor "name:human"` | EventStore.append |
-| `cognit inbox --watch` / `--process`               | runInboxWatcher / processFile         |
+| Command                                                                  | Maps to                                |
+| ------------------------------------------------------------------------ | -------------------------------------- |
+| `cognit session create "goal" [--parent id]`                             | SessionService.create + append event   |
+| `cognit session list [--status X]`                                       | SessionService.list                    |
+| `cognit session resume <goal-or-id> [--fork=true]`                       | SessionService.resume (fork or reopen) |
+| `cognit session pause`                                                   | SessionService.pause + append event    |
+| `cognit session close`                                                   | SessionService.close + snapshot        |
+| `cognit session show <goal-or-id>`                                       | reducer + formatter                    |
+| `cognit snapshot [--session id]`                                         | SnapshotService.takeNow                |
+| `cognit append --type T --payload JSON --session S --actor "name:human"` | EventStore.append                      |
+| `cognit inbox --watch` / `--process`                                     | runInboxWatcher / processFile          |
 
 All `append` paths go through `EventStore.append` (one boundary, audit of
 record). The CLI just plumbs args.
@@ -188,38 +188,38 @@ record). The CLI just plumbs args.
 
 ### NEW
 
-| File                                                 | Purpose                                              |
-| ---------------------------------------------------- | ---------------------------------------------------- |
-| `packages/core/src/state.ts`                         | `SessionState` + entity-state types                  |
-| `packages/core/src/reducer.ts`                       | `reduce(events, snapshot?)` pure function            |
-| `packages/core/src/events.ts`                       | typed payload decode helpers (re-export of schemas)  |
-| `packages/core/test/state.test.ts`                   | state shape sanity                                   |
-| `packages/core/test/reducer.test.ts`                 | pure reducer: hypotheses, decisions, ... transitions|
-| `packages/db/src/session-service.ts`                | `SessionService` (create/list/get/pause/close/resume) |
-| `packages/db/src/snapshot-service.ts`               | `SnapshotService` (write, latest, takeIfDue)        |
-| `packages/db/test/session-service.test.ts`          | session CRUD + fork                                  |
-| `packages/db/test/snapshot-service.test.ts`         | snapshot policy + take on close                      |
-| `packages/db/test/reducer-integration.test.ts`      | end-to-end: append events → reducer → state matches |
-| `packages/cli/src/commands/session.ts`              | `cognit session ...`                                 |
-| `packages/cli/src/commands/snapshot.ts`             | `cognit snapshot`                                    |
-| `packages/cli/src/commands/append.ts`               | `cognit append` (Cognit-mej)                         |
-| `packages/cli/src/commands/inbox.ts`                | `cognit inbox` (Cognit-mej)                          |
-| `packages/cli/src/layer-build.ts`                   | shared Layer builder for CLI commands                |
-| `packages/cli/test/session.test.ts`                 | CLI integration                                      |
-| `packages/cli/test/snapshot.test.ts`                | CLI integration                                      |
-| `packages/cli/test/append.test.ts`                  | CLI integration (Cognit-mej)                         |
-| `packages/cli/test/inbox.test.ts`                   | CLI integration (Cognit-mej)                         |
+| File                                           | Purpose                                               |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| `packages/core/src/state.ts`                   | `SessionState` + entity-state types                   |
+| `packages/core/src/reducer.ts`                 | `reduce(events, snapshot?)` pure function             |
+| `packages/core/src/events.ts`                  | typed payload decode helpers (re-export of schemas)   |
+| `packages/core/test/state.test.ts`             | state shape sanity                                    |
+| `packages/core/test/reducer.test.ts`           | pure reducer: hypotheses, decisions, ... transitions  |
+| `packages/db/src/session-service.ts`           | `SessionService` (create/list/get/pause/close/resume) |
+| `packages/db/src/snapshot-service.ts`          | `SnapshotService` (write, latest, takeIfDue)          |
+| `packages/db/test/session-service.test.ts`     | session CRUD + fork                                   |
+| `packages/db/test/snapshot-service.test.ts`    | snapshot policy + take on close                       |
+| `packages/db/test/reducer-integration.test.ts` | end-to-end: append events → reducer → state matches   |
+| `packages/cli/src/commands/session.ts`         | `cognit session ...`                                  |
+| `packages/cli/src/commands/snapshot.ts`        | `cognit snapshot`                                     |
+| `packages/cli/src/commands/append.ts`          | `cognit append` (Cognit-mej)                          |
+| `packages/cli/src/commands/inbox.ts`           | `cognit inbox` (Cognit-mej)                           |
+| `packages/cli/src/layer-build.ts`              | shared Layer builder for CLI commands                 |
+| `packages/cli/test/session.test.ts`            | CLI integration                                       |
+| `packages/cli/test/snapshot.test.ts`           | CLI integration                                       |
+| `packages/cli/test/append.test.ts`             | CLI integration (Cognit-mej)                          |
+| `packages/cli/test/inbox.test.ts`              | CLI integration (Cognit-mej)                          |
 
 ### EDITED
 
-| File                                   | Change                                                         |
-| -------------------------------------- | -------------------------------------------------------------- |
-| `packages/core/src/index.ts`           | re-export `state`, `reducer`                                   |
-| `packages/db/src/index.ts`             | re-export new services                                        |
-| `packages/db/src/layers/live.ts`       | add new services to `leafs` / `DbLive`                         |
-| `packages/db/src/errors.ts`            | add `UnknownSessionForResume`, `SnapshotNotFound`              |
-| `packages/cli/src/index.ts`            | register all new commands                                      |
-| `packages/cli/package.json`            | add `@cognit/db` dep                                           |
+| File                             | Change                                            |
+| -------------------------------- | ------------------------------------------------- |
+| `packages/core/src/index.ts`     | re-export `state`, `reducer`                      |
+| `packages/db/src/index.ts`       | re-export new services                            |
+| `packages/db/src/layers/live.ts` | add new services to `leafs` / `DbLive`            |
+| `packages/db/src/errors.ts`      | add `UnknownSessionForResume`, `SnapshotNotFound` |
+| `packages/cli/src/index.ts`      | register all new commands                         |
+| `packages/cli/package.json`      | add `@cognit/db` dep                              |
 
 ---
 
@@ -251,7 +251,7 @@ End-to-end test in `packages/db/test/reducer-integration.test.ts`:
 ## Risks
 
 - **Reducer ordering**: events must sort by `(created_at, id)` and the
-  reducer must be a *total* function — every event type is handled, even
+  reducer must be a _total_ function — every event type is handled, even
   non-state ones. A `default: return state` keeps the fold total; tests
   enumerate every event type and assert "non-state events do not change
   state" so we never silently drop a transition.
@@ -278,21 +278,21 @@ End-to-end test in `packages/db/test/reducer-integration.test.ts`:
 
 Phase 2 epic: `Cognit-<epic>` (Phase 2: Session Runtime and Reducer).
 
-| Bead        | Title                                                                                          | Depends on  | Type     |
-| ----------- | ---------------------------------------------------------------------------------------------- | ----------- | -------- |
-| `2a`        | Reducer state types + pure `reduce()` in core                                                  | —           | task     |
-| `2b`        | Reducer unit tests (every event type, snapshot restore + tail replay)                          | 2a          | task     |
-| `2c`        | `SessionService` in db: create / list / getByGoalOrId / pause / close                           | 2a          | task     |
-| `2d`        | `SessionService` tests                                                                         | 2c          | task     |
-| `2e`        | `SessionService.resume` (fork or reopen) + `session show` reducer view                          | 2a, 2c      | task     |
-| `2f`        | `SnapshotService` in db: write / latestForSession / takeIfDue                                  | 2a          | task     |
-| `2g`        | Snapshot policy integration: explicit trigger + on-close (auto-N deferred)                      | 2c, 2f      | task     |
-| `2h`        | CLI `cognit append` + `cognit inbox` (Cognit-mej, the last phase-1 piece)                       | —           | task     |
-| `2i`        | CLI `cognit session {create,list,resume,pause,close,show}` + `cognit snapshot`                  | 2c, 2e, 2f  | task     |
-| `2j`        | End-to-end test: append 100+ events, snapshot, resume-as-fork, state matches expectation       | 2g, 2i      | task     |
-| `2k`        | Phase 2 docs in plan.xml (no plan changes; add a phase-2-results md) + commit + push            | 2j          | chore    |
+| Bead | Title                                                                                    | Depends on | Type  |
+| ---- | ---------------------------------------------------------------------------------------- | ---------- | ----- |
+| `2a` | Reducer state types + pure `reduce()` in core                                            | —          | task  |
+| `2b` | Reducer unit tests (every event type, snapshot restore + tail replay)                    | 2a         | task  |
+| `2c` | `SessionService` in db: create / list / getByGoalOrId / pause / close                    | 2a         | task  |
+| `2d` | `SessionService` tests                                                                   | 2c         | task  |
+| `2e` | `SessionService.resume` (fork or reopen) + `session show` reducer view                   | 2a, 2c     | task  |
+| `2f` | `SnapshotService` in db: write / latestForSession / takeIfDue                            | 2a         | task  |
+| `2g` | Snapshot policy integration: explicit trigger + on-close (auto-N deferred)               | 2c, 2f     | task  |
+| `2h` | CLI `cognit append` + `cognit inbox` (Cognit-mej, the last phase-1 piece)                | —          | task  |
+| `2i` | CLI `cognit session {create,list,resume,pause,close,show}` + `cognit snapshot`           | 2c, 2e, 2f | task  |
+| `2j` | End-to-end test: append 100+ events, snapshot, resume-as-fork, state matches expectation | 2g, 2i     | task  |
+| `2k` | Phase 2 docs in plan.xml (no plan changes; add a phase-2-results md) + commit + push     | 2j         | chore |
 
-Auto-N snapshot trigger is *deferred* behind `2g` if it fits in the cycle;
+Auto-N snapshot trigger is _deferred_ behind `2g` if it fits in the cycle;
 otherwise it becomes a phase-2.5 bead in a follow-up commit.
 
 ---

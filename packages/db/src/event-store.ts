@@ -1,6 +1,14 @@
 import { Context, Effect, Either, Layer, Schema } from "effect";
 import { DbConnection, EventStore, Logger, Redactor } from "./context";
-import { DbError, DuplicateEventId, NotFound, UnknownEventType, UnknownSession, ValidationFailure, trySync } from "./errors";
+import {
+  DbError,
+  DuplicateEventId,
+  NotFound,
+  UnknownEventType,
+  UnknownSession,
+  ValidationFailure,
+  trySync,
+} from "./errors";
 import { CURRENT_VERSION, EVENT_TYPES, PAYLOAD_SCHEMAS_V1 } from "./event-schema";
 import { redactEvent } from "./redaction";
 import type { EventRow } from "./schema/rows";
@@ -208,151 +216,145 @@ export const EventStoreLive: Layer.Layer<
           }
 
           // Run append + redaction side-effects in one transaction.
-          return yield* conn.handle
-            .tx(() =>
-              Effect.gen(function* () {
-                // Idempotency check INSIDE the tx, before insert. Two
-                // concurrent appends with the same id may both miss this
-                // check; the INSERT below then fails with a UNIQUE
-                // constraint, which is caught and re-fetched.
-                const existing = yield* trySync(
-                  () => fetchEvent(conn, eventId),
-                  (e) => new DbError({ message: "append: idempotency fetch", cause: e }),
+          return yield* conn.handle.tx(() =>
+            Effect.gen(function* () {
+              // Idempotency check INSIDE the tx, before insert. Two
+              // concurrent appends with the same id may both miss this
+              // check; the INSERT below then fails with a UNIQUE
+              // constraint, which is caught and re-fetched.
+              const existing = yield* trySync(
+                () => fetchEvent(conn, eventId),
+                (e) => new DbError({ message: "append: idempotency fetch", cause: e }),
+              );
+              if (existing) {
+                yield* logger.log(
+                  "debug",
+                  { eventId, type: input.type },
+                  "append: duplicate id, returning existing",
                 );
-                if (existing) {
-                  yield* logger.log(
-                    "debug",
-                    { eventId, type: input.type },
-                    "append: duplicate id, returning existing",
-                  );
-                  return existing;
-                }
+                return existing;
+              }
 
-                const actorId = yield* ensureActor(
-                  conn,
-                  uuid,
-                  input.actor.name,
-                  input.actor.type,
-                );
+              const actorId = yield* ensureActor(conn, uuid, input.actor.name, input.actor.type);
 
-                // Apply redaction. Redaction must be inside the tx so that
-                // the redaction_applied event is atomic with the main row.
-                const sourceJson = input.source
-                  ? {
-                      tool: input.source.tool,
-                      command: input.source.command,
-                      file_path: input.source.filePath,
-                    }
-                  : undefined;
+              // Apply redaction. Redaction must be inside the tx so that
+              // the redaction_applied event is atomic with the main row.
+              const sourceJson = input.source
+                ? {
+                    tool: input.source.tool,
+                    command: input.source.command,
+                    file_path: input.source.filePath,
+                  }
+                : undefined;
 
-                const { redactedPayload, redactedSource, hits } = redactEvent(
-                  input.payload,
-                  sourceJson,
-                  redactor,
-                );
+              const { redactedPayload, redactedSource, hits } = redactEvent(
+                input.payload,
+                sourceJson,
+                redactor,
+              );
 
-                // Capture created_at once and reuse for the main event and
-                // every redaction_applied hit so the side-effect rows
-                // cannot sort after the main row.
-                const createdAt = nowIso();
-                const inserted = yield* trySync(
+              // Capture created_at once and reuse for the main event and
+              // every redaction_applied hit so the side-effect rows
+              // cannot sort after the main row.
+              const createdAt = nowIso();
+              const inserted = yield* trySync(
+                () =>
+                  insertEvent(conn, {
+                    id: eventId,
+                    project_id: session.project_id,
+                    session_id: input.sessionId,
+                    actor_id: actorId,
+                    type: input.type,
+                    version: CURRENT_VERSION,
+                    payload_json: JSON.stringify(redactedPayload),
+                    source_json:
+                      redactedSource === undefined ? null : JSON.stringify(redactedSource),
+                    artifact_refs_json: input.artifactRefs
+                      ? JSON.stringify(input.artifactRefs)
+                      : null,
+                    causation_id: input.causationId ?? null,
+                    correlation_id: input.correlationId ?? null,
+                    confidence: input.confidence ?? null,
+                    parent_verification_id: input.parentVerificationId ?? null,
+                    linked_hypothesis_id: input.linkedHypothesisId ?? null,
+                    created_at: createdAt,
+                  }),
+                (e) => {
+                  if (
+                    e !== null &&
+                    typeof e === "object" &&
+                    "code" in e &&
+                    (e as { code: string }).code === "SQLITE_CONSTRAINT_PRIMARYKEY"
+                  ) {
+                    return new DuplicateEventId({ id: eventId });
+                  }
+                  return new DbError({ message: "append: insert event", cause: e });
+                },
+              ).pipe(
+                // Lost the idempotency race: another tx inserted first.
+                // Re-fetch and return the canonical row.
+                Effect.catchTag("DuplicateEventId", () =>
+                  trySync(
+                    () => {
+                      const row = fetchEvent(conn, eventId);
+                      if (!row) {
+                        throw new DbError({
+                          message: "append: duplicate but row missing on re-fetch",
+                          cause: undefined,
+                        });
+                      }
+                      return row;
+                    },
+                    (e) => new DbError({ message: "append: re-fetch on duplicate", cause: e }),
+                  ),
+                ),
+              );
+
+              // Emit redaction_applied per hit. Each gets its own id.
+              for (const hit of hits) {
+                if (hit.fieldPath === "") continue;
+                const redactionId = yield* uuid.make();
+                yield* trySync(
                   () =>
                     insertEvent(conn, {
-                      id: eventId,
+                      id: redactionId,
                       project_id: session.project_id,
                       session_id: input.sessionId,
                       actor_id: actorId,
-                      type: input.type,
+                      type: "redaction_applied",
                       version: CURRENT_VERSION,
-                      payload_json: JSON.stringify(redactedPayload),
-                      source_json:
-                        redactedSource === undefined ? null : JSON.stringify(redactedSource),
-                      artifact_refs_json: input.artifactRefs
-                        ? JSON.stringify(input.artifactRefs)
-                        : null,
-                      causation_id: input.causationId ?? null,
+                      payload_json: JSON.stringify({
+                        pattern: hit.pattern,
+                        entity_type: input.type,
+                        entity_id: eventId,
+                        field_path: hit.fieldPath,
+                      }),
+                      source_json: null,
+                      artifact_refs_json: null,
+                      causation_id: eventId,
                       correlation_id: input.correlationId ?? null,
-                      confidence: input.confidence ?? null,
-                      parent_verification_id: input.parentVerificationId ?? null,
-                      linked_hypothesis_id: input.linkedHypothesisId ?? null,
+                      confidence: null,
+                      parent_verification_id: null,
+                      linked_hypothesis_id: null,
                       created_at: createdAt,
                     }),
-                  (e) => {
-                    if (
-                      e !== null &&
-                      typeof e === "object" &&
-                      "code" in e &&
-                      (e as { code: string }).code === "SQLITE_CONSTRAINT_PRIMARYKEY"
-                    ) {
-                      return new DuplicateEventId({ id: eventId });
-                    }
-                    return new DbError({ message: "append: insert event", cause: e });
-                  },
-                ).pipe(
-                  // Lost the idempotency race: another tx inserted first.
-                  // Re-fetch and return the canonical row.
-                  Effect.catchTag("DuplicateEventId", () =>
-                    trySync(
-                      () => {
-                        const row = fetchEvent(conn, eventId);
-                        if (!row) {
-                          throw new DbError({
-                            message: "append: duplicate but row missing on re-fetch",
-                            cause: undefined,
-                          });
-                        }
-                        return row;
-                      },
-                      (e) => new DbError({ message: "append: re-fetch on duplicate", cause: e }),
-                    ),
-                  ),
+                  (e) => new DbError({ message: "append: insert redaction_applied", cause: e }),
                 );
+              }
 
-                // Emit redaction_applied per hit. Each gets its own id.
-                for (const hit of hits) {
-                  if (hit.fieldPath === "") continue;
-                  const redactionId = yield* uuid.make();
-                  yield* trySync(
-                    () =>
-                      insertEvent(conn, {
-                        id: redactionId,
-                        project_id: session.project_id,
-                        session_id: input.sessionId,
-                        actor_id: actorId,
-                        type: "redaction_applied",
-                        version: CURRENT_VERSION,
-                        payload_json: JSON.stringify({
-                          pattern: hit.pattern,
-                          entity_type: input.type,
-                          entity_id: eventId,
-                          field_path: hit.fieldPath,
-                        }),
-                        source_json: null,
-                        artifact_refs_json: null,
-                        causation_id: eventId,
-                        correlation_id: input.correlationId ?? null,
-                        confidence: null,
-                        parent_verification_id: null,
-                        linked_hypothesis_id: null,
-                        created_at: createdAt,
-                      }),
-                    (e) => new DbError({ message: "append: insert redaction_applied", cause: e }),
-                  );
-                }
-
-                yield* logger.log(
-                  "info",
-                  {
-                    eventId,
-                    type: input.type,
-                    sessionId: input.sessionId,
-                    redactions: hits.length,
-                  },
-                  "append: ok",
-                );
-                return inserted;
-              }),
-            );
+              yield* logger.log(
+                "info",
+                {
+                  eventId,
+                  type: input.type,
+                  sessionId: input.sessionId,
+                  redactions: hits.length,
+                },
+                "append: ok",
+              );
+              return inserted;
+            }),
+          );
         }),
 
       list: (q) =>

@@ -1,12 +1,9 @@
 import fs from "node:fs";
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
-import {
-  EventStore,
-  type ActorType,
-} from "@cognit/db";
+import { SessionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
-import { withAppLayer } from "../layer-build.js";
+import { withAppLayerAndConfig } from "../layer-build.js";
 
 interface AppendOptions {
   type?: string;
@@ -31,9 +28,7 @@ const parseActor = (
   const name = raw.slice(0, idx);
   const type = raw.slice(idx + 1) as ActorType;
   if (!VALID_ACTOR_TYPES.has(type)) {
-    process.stderr.write(
-      `cognit: --actor type must be one of human|worker|system, got: ${type}\n`,
-    );
+    process.stderr.write(`cognit: --actor type must be one of human|worker|system, got: ${type}\n`);
     process.exitCode = 2;
     return { name: defaultName, type: defaultType };
   }
@@ -98,28 +93,40 @@ const requireProjectRoot = (): string => {
 };
 
 const runAppend = async (
-  eff: Effect.Effect<{ id: string; type: string; sessionId: string }, unknown, never>,
-): Promise<{ id: string; type: string; sessionId: string }> => {
+  eff: Effect.Effect<
+    { event: { id: string; type: string; session_id: string }; snapshotTaken: boolean },
+    unknown,
+    never
+  >,
+): Promise<{ event: { id: string; type: string; session_id: string }; snapshotTaken: boolean }> => {
   const exit = await Effect.runPromiseExit(eff);
   if (Exit.isFailure(exit)) {
     const err = Cause.failureOption(exit.cause);
     if (err._tag === "Some") {
-      const fail = err.value as { _tag?: string; type?: string; sessionId?: string; issues?: string; message?: string };
+      const fail = err.value as {
+        _tag?: string;
+        type?: string;
+        sessionId?: string;
+        issues?: string;
+        message?: string;
+      };
       switch (fail._tag) {
         case "UnknownEventType":
-          process.stderr.write(
-            `cognit: --type "${fail.type}" is not a known event type\n`,
-          );
+          process.stderr.write(`cognit: --type "${fail.type}" is not a known event type\n`);
           break;
         case "UnknownSession":
-          process.stderr.write(
-            `cognit: --session "${fail.sessionId}" does not exist\n`,
-          );
+          process.stderr.write(`cognit: --session "${fail.sessionId}" does not exist\n`);
+          break;
+        case "SessionClosed":
+          process.stderr.write(`cognit: --session "${fail.sessionId}" is closed\n`);
           break;
         case "ValidationFailure":
           process.stderr.write(
             `cognit: --type "${fail.type}" payload failed schema validation: ${fail.issues}\n`,
           );
+          break;
+        case "DbError":
+          process.stderr.write(`cognit: ${fail.message ?? String(fail)}\n`);
           break;
         default:
           process.stderr.write(`cognit: ${fail.message ?? String(fail)}\n`);
@@ -160,23 +167,24 @@ export function registerAppend(program: Command): void {
       const eventType = opts.type!;
       const sessionId = opts.session!;
 
-      const result = await runAppend(
-        withAppLayer(
-          root,
-          Effect.gen(function* () {
-            const store = yield* EventStore;
-            const row = yield* store.append({
-              type: eventType,
-              payload,
-              sessionId,
-              actor,
-            });
-            return { id: row.id, type: row.type, sessionId: row.session_id };
-          }),
-        ),
-      );
-      process.stdout.write(`event:    ${result.id}\n`);
-      process.stdout.write(`type:     ${result.type}\n`);
-      process.stdout.write(`session:  ${result.sessionId}\n`);
+      const program = Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const result = yield* sessions.appendEvent({
+          type: eventType,
+          payload,
+          sessionId,
+          actor,
+        });
+        return { event: result.event, snapshotTaken: result.snapshotTaken };
+      });
+      // withAppLayerAndConfig reads cognit.yaml once and threads the
+      // derived SessionPolicy into the app layer; this is the path
+      // that triggers auto-snapshot when everyN events accumulate.
+      const provided = await withAppLayerAndConfig(root, program);
+      const result = await runAppend(provided);
+      process.stdout.write(`event:    ${result.event.id}\n`);
+      process.stdout.write(`type:     ${result.event.type}\n`);
+      process.stdout.write(`session:  ${result.event.session_id}\n`);
+      process.stdout.write(`snapshot: ${result.snapshotTaken ? "yes" : "no"}\n`);
     });
 }

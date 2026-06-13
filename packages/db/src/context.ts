@@ -3,7 +3,13 @@ import type { Database, RunResult } from "better-sqlite3";
 import type { AppendEventInput, EventRow, ListEventsQuery } from "./event-store";
 import type { RedactionHit } from "./redaction";
 import type { Transform } from "./migrate";
-import type { DbError, NotFound, UnknownEventType, ValidationFailure, UnknownSession } from "./errors";
+import type {
+  DbError,
+  NotFound,
+  UnknownEventType,
+  ValidationFailure,
+  UnknownSession,
+} from "./errors";
 
 /**
  * Raw better-sqlite3 handle. Wrapped so the rest of the code never imports

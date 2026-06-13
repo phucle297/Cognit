@@ -191,6 +191,8 @@ Snapshot trigger policy (configurable per project):
 
 Snapshots are append-only. Replay from a snapshot is still possible from events alone if the snapshot is corrupted or lost. Snapshots never replace events.
 
+**Auto-snapshot trigger**: every N events (default 100, configurable via `session.snapshot_every_n_events` in `cognit.yaml`). Triggered inline on `cognit append` / inbox processing. See `docs/phase-2.5-results.md`.
+
 ---
 
 ## Trust boundary

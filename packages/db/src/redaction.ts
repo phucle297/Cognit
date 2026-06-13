@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Layer } from "effect";
 import { Redactor } from "./context";
 import { BUILT_IN_REDACTION_PATTERNS, type BuiltInRedactionPattern } from "@cognit/core/redaction";
 
@@ -116,7 +116,3 @@ export const redactEvent = (
     hits: [...payloadHits, ...sourceHits],
   };
 };
-
-/** Test helper: assert a layer has the Redactor tag. */
-export const withRedactor = <A, E, R>(eff: Effect.Effect<A, E, R>) =>
-  eff as Effect.Effect<A, E, R | Redactor>;

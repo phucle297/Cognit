@@ -19,6 +19,7 @@ import { Context, Effect, Layer } from "effect";
 import { DbConnection, EventStore, Logger } from "./context";
 import {
   DbError,
+  SessionClosed,
   UnknownEventType,
   UnknownSession,
   ValidationFailure,
@@ -30,8 +31,15 @@ import { Uuid } from "./ulid";
 import { reduce } from "@cognit/core/reducer";
 import { emptySessionState, type SessionState } from "@cognit/core/state";
 import { SnapshotService } from "./snapshot-service";
+import { SessionPolicy } from "./session-policy";
+import type { AppendEventInput } from "./event-store";
 
-export type SessionError = DbError | UnknownEventType | ValidationFailure | UnknownSession;
+export type SessionError =
+  | DbError
+  | SessionClosed
+  | UnknownEventType
+  | ValidationFailure
+  | UnknownSession;
 
 type DbConnService = Context.Tag.Service<typeof DbConnection>;
 type EventStoreService = Context.Tag.Service<typeof EventStore>;
@@ -46,6 +54,31 @@ export interface SessionCreateInput {
   readonly goal: string;
   readonly parentSessionId?: string | null;
   readonly actor: { readonly name: string; readonly type: ActorType };
+}
+
+export interface SessionAppendEventInput {
+  readonly sessionId: string;
+  readonly type: string;
+  readonly payload: unknown;
+  readonly actor: { readonly name: string; readonly type: ActorType };
+  /**
+   * Optional explicit event id. Mirrors `AppendEventInput.id` and is
+   * forwarded to `EventStore.append` unchanged. The inbox pipeline
+   * uses this to make writes idempotent on file rename + reprocess.
+   */
+  readonly id?: string;
+  readonly source?: AppendEventInput["source"];
+  readonly artifactRefs?: AppendEventInput["artifactRefs"];
+  readonly causationId?: string;
+  readonly correlationId?: string;
+  readonly confidence?: number;
+  readonly parentVerificationId?: string;
+  readonly linkedHypothesisId?: string;
+}
+
+export interface SessionAppendEventResult {
+  readonly event: EventRow;
+  readonly snapshotTaken: boolean;
 }
 
 export interface SessionListQuery {
@@ -92,9 +125,7 @@ export interface SessionServiceShape {
   readonly create: (
     input: SessionCreateInput,
   ) => Effect.Effect<{ session: SessionRow; event: EventRow }, SessionError>;
-  readonly list: (
-    q: SessionListQuery,
-  ) => Effect.Effect<ReadonlyArray<SessionRow>, DbError>;
+  readonly list: (q: SessionListQuery) => Effect.Effect<ReadonlyArray<SessionRow>, DbError>;
   readonly getByGoalOrId: (
     input: GetByGoalOrIdInput,
   ) => Effect.Effect<
@@ -109,9 +140,7 @@ export interface SessionServiceShape {
     sessionId: string,
     actor: { readonly name: string; readonly type: ActorType },
   ) => Effect.Effect<{ session: SessionRow; event: EventRow }, SessionError>;
-  readonly resume: (
-    input: SessionResumeInput,
-  ) => Effect.Effect<
+  readonly resume: (input: SessionResumeInput) => Effect.Effect<
     { session: SessionRow; event: EventRow; parent: SessionRow; forked: boolean },
     | SessionError
     | {
@@ -134,6 +163,15 @@ export interface SessionServiceShape {
   readonly takeSnapshot: (
     sessionId: string,
   ) => Effect.Effect<{ snapshot: SnapshotRow; taken: boolean }, SessionError | UnknownSession>;
+  /**
+   * Append an event to an open session, triggering an auto-snapshot
+   * via `SessionPolicy.everyN` when the threshold is crossed. Fails
+   * with `UnknownSession` if the session id is unknown, and with
+   * `DbError` if the session is already closed.
+   */
+  readonly appendEvent: (
+    input: SessionAppendEventInput,
+  ) => Effect.Effect<SessionAppendEventResult, SessionError>;
 }
 
 export class SessionService extends Context.Tag("@cognit/db/SessionService")<
@@ -271,7 +309,7 @@ const rehydrateSessionState = (parsed: Record<string, unknown>): SessionState =>
 export const SessionServiceLive: Layer.Layer<
   SessionService,
   never,
-  DbConnection | EventStore | SnapshotService | Uuid | Logger
+  DbConnection | EventStore | SnapshotService | Uuid | Logger | SessionPolicy
 > = Layer.effect(
   SessionService,
   Effect.gen(function* () {
@@ -280,6 +318,49 @@ export const SessionServiceLive: Layer.Layer<
     const snapshots: SnapshotServiceT = yield* SnapshotService;
     const uuid: UuidService = yield* Uuid;
     const logger: LoggerService = yield* Logger;
+    const policy: Context.Tag.Service<typeof SessionPolicy> = yield* SessionPolicy;
+
+    /**
+     * Append an event to the store and, if the per-session event
+     * count crosses the policy threshold, trigger an auto-snapshot.
+     *
+     * The snapshot step is best-effort: a `takeIfDue` failure is
+     * logged and swallowed so the append still succeeds. The event
+     * log is the source of truth; the snapshot is a rebuild
+     * optimisation.
+     */
+    const _appendAndMaybeSnapshot = (
+      input: AppendEventInput,
+    ): Effect.Effect<SessionAppendEventResult, SessionError> =>
+      Effect.gen(function* () {
+        const event = yield* store.append(input);
+        const row = yield* trySync(
+          () =>
+            conn.handle.get<{ c: number }>(
+              "SELECT COUNT(*) AS c FROM events WHERE session_id = ?",
+              [input.sessionId],
+            ),
+          (e) => new DbError({ message: "session append: count events", cause: e }),
+        );
+        const count = row?.c ?? 0;
+        const result = yield* snapshots
+          .takeIfDue({
+            sessionId: input.sessionId,
+            currentEventCount: count,
+            everyN: policy.everyN,
+            build: reduce,
+          })
+          .pipe(Effect.either);
+        if (result._tag === "Left") {
+          yield* logger.log(
+            "warning",
+            { sessionId: input.sessionId, error: String(result.left) },
+            "session append: auto-snapshot failed (continuing)",
+          );
+          return { event, snapshotTaken: false };
+        }
+        return { event, snapshotTaken: result.right !== null };
+      });
 
     return {
       create: (input) =>
@@ -310,18 +391,14 @@ export const SessionServiceLive: Layer.Layer<
               }),
             (e) => new DbError({ message: "session create: insert", cause: e }),
           );
-          const event = yield* store.append({
+          const { event } = yield* _appendAndMaybeSnapshot({
             id: sessionId,
             type: "session_created",
             payload: { goal, parent_session_id: input.parentSessionId ?? null },
             sessionId,
             actor: input.actor,
           });
-          yield* logger.log(
-            "info",
-            { sessionId, goal: goal.slice(0, 80) },
-            "session: created",
-          );
+          yield* logger.log("info", { sessionId, goal: goal.slice(0, 80) }, "session: created");
           const row = fetchSession(conn, sessionId);
           if (!row) {
             return yield* Effect.fail(
@@ -353,16 +430,12 @@ export const SessionServiceLive: Layer.Layer<
               (e) => new DbError({ message: "session getByGoalOrId: id", cause: e }),
             );
             if (!row) {
-              return yield* Effect.fail(
-                new UnknownGoalOrIdError(input.id as string),
-              );
+              return yield* Effect.fail(new UnknownGoalOrIdError(input.id as string));
             }
             return { session: row, matches: [row], ambiguous: false };
           }
           if (input.goal === undefined || input.goal.length === 0) {
-            return yield* Effect.fail(
-              new UnknownGoalOrIdError("(empty goal)"),
-            );
+            return yield* Effect.fail(new UnknownGoalOrIdError("(empty goal)"));
           }
           const goal = input.goal;
           const matches = yield* trySync(
@@ -380,7 +453,9 @@ export const SessionServiceLive: Layer.Layer<
           }
           const preferRecent = input.preferMostRecent ?? true;
           const ambiguous = matches.length > 1;
-          const session = preferRecent ? (matches[0] as SessionRow) : (matches[matches.length - 1] as SessionRow);
+          const session = preferRecent
+            ? (matches[0] as SessionRow)
+            : (matches[matches.length - 1] as SessionRow);
           return { session, matches, ambiguous };
         }),
 
@@ -413,7 +488,7 @@ export const SessionServiceLive: Layer.Layer<
             () => updateSessionStatus(conn, sessionId, "paused", row.closed_at),
             (e) => new DbError({ message: "session pause: update", cause: e }),
           );
-          const event = yield* store.append({
+          const { event } = yield* _appendAndMaybeSnapshot({
             type: "session_paused",
             payload: {},
             sessionId,
@@ -451,7 +526,7 @@ export const SessionServiceLive: Layer.Layer<
             () => updateSessionStatus(conn, sessionId, "closed", closedAt),
             (e) => new DbError({ message: "session close: update", cause: e }),
           );
-          const event = yield* store.append({
+          const { event } = yield* _appendAndMaybeSnapshot({
             type: "session_closed",
             payload: {},
             sessionId,
@@ -461,26 +536,45 @@ export const SessionServiceLive: Layer.Layer<
           // last event. Failure here is logged but does not roll back
           // the close — the event log is the source of truth, the
           // snapshot is a rebuild optimisation.
-          const folded = yield* foldSession(conn, { ...row, status: "closed", closed_at: closedAt });
+          const folded = yield* foldSession(conn, {
+            ...row,
+            status: "closed",
+            closed_at: closedAt,
+          });
           if (folded.events.length > 0) {
             const lastEvent = folded.events[folded.events.length - 1] as EventRow;
-            yield* Effect.gen(function* () {
-              const result = yield* snapshots
-                .write({
+            // If a previous auto-snapshot (e.g. with everyN=1) already
+            // covers every event, skip the redundant write.
+            const existing = yield* snapshots.latestForSession(sessionId);
+            if (existing && existing.event_count >= folded.events.length) {
+              yield* logger.log(
+                "info",
+                {
                   sessionId,
-                  state: folded.state,
-                  eventId: lastEvent.id,
                   eventCount: folded.events.length,
-                })
-                .pipe(Effect.either);
-              if (result._tag === "Left") {
-                yield* logger.log(
-                  "warning",
-                  { sessionId, error: String(result.left) },
-                  "session close: snapshot write failed (continuing)",
-                );
-              }
-            });
+                  snapshotId: existing.id,
+                },
+                "session close: snapshot already current, skipping",
+              );
+            } else {
+              yield* Effect.gen(function* () {
+                const result = yield* snapshots
+                  .write({
+                    sessionId,
+                    state: folded.state,
+                    eventId: lastEvent.id,
+                    eventCount: folded.events.length,
+                  })
+                  .pipe(Effect.either);
+                if (result._tag === "Left") {
+                  yield* logger.log(
+                    "warning",
+                    { sessionId, error: String(result.left) },
+                    "session close: snapshot write failed (continuing)",
+                  );
+                }
+              });
+            }
           }
           yield* logger.log("info", { sessionId }, "session: closed");
           const updated = fetchSession(conn, sessionId);
@@ -505,9 +599,7 @@ export const SessionServiceLive: Layer.Layer<
               (e) => new DbError({ message: "session resume: id fetch", cause: e }),
             );
             if (!row) {
-              return yield* Effect.fail(
-                new UnknownSessionForResumeError(input.idOrGoal),
-              );
+              return yield* Effect.fail(new UnknownSessionForResumeError(input.idOrGoal));
             }
             target = row;
           } else {
@@ -554,7 +646,7 @@ export const SessionServiceLive: Layer.Layer<
                 }),
               (e) => new DbError({ message: "session resume: fork insert", cause: e }),
             );
-            const event = yield* store.append({
+            const { event } = yield* _appendAndMaybeSnapshot({
               id: newSessionId,
               type: "session_created",
               payload: { goal: newGoal, parent_session_id: target.id },
@@ -581,7 +673,7 @@ export const SessionServiceLive: Layer.Layer<
             () => updateSessionStatus(conn, target.id, "active", null),
             (e) => new DbError({ message: "session resume: reopen update", cause: e }),
           );
-          const event = yield* store.append({
+          const { event } = yield* _appendAndMaybeSnapshot({
             type: "session_created",
             payload: { goal: target.goal, parent_session_id: target.parent_session_id },
             sessionId: target.id,
@@ -628,7 +720,12 @@ export const SessionServiceLive: Layer.Layer<
             try {
               const parsed = JSON.parse(snapshot.state_json) as Record<string, unknown>;
               base = rehydrateSessionState(parsed);
-            } catch {
+            } catch (e) {
+              yield* logger.log(
+                "warning",
+                { sessionId, snapshotId: snapshot.id, error: String(e) },
+                "session show: snapshot state_json corrupt, falling back to full replay",
+              );
               base = undefined;
             }
             tail = events.filter((e) => e.id > snapshot.event_id);
@@ -636,12 +733,14 @@ export const SessionServiceLive: Layer.Layer<
             base = undefined;
             tail = events;
           }
-          const initial: SessionState = base ?? emptySessionState({
-            session_id: row.id,
-            project_id: row.project_id,
-            goal: row.goal,
-            parent_session_id: row.parent_session_id,
-          });
+          const initial: SessionState =
+            base ??
+            emptySessionState({
+              session_id: row.id,
+              project_id: row.project_id,
+              goal: row.goal,
+              parent_session_id: row.parent_session_id,
+            });
           const state = reduce(tail, initial);
           return {
             session: row,
@@ -702,6 +801,38 @@ export const SessionServiceLive: Layer.Layer<
             "session: snapshot taken",
           );
           return { snapshot: written, taken: true };
+        }),
+
+      appendEvent: (input) =>
+        Effect.gen(function* () {
+          const row = yield* trySync(
+            () => fetchSession(conn, input.sessionId),
+            (e) => new DbError({ message: "session appendEvent: fetch", cause: e }),
+          );
+          if (!row) {
+            return yield* Effect.fail(new UnknownSession({ sessionId: input.sessionId }));
+          }
+          if (row.status === "closed") {
+            return yield* Effect.fail(new SessionClosed({ sessionId: input.sessionId }));
+          }
+          return yield* _appendAndMaybeSnapshot({
+            type: input.type,
+            payload: input.payload,
+            sessionId: input.sessionId,
+            actor: input.actor,
+            ...(input.id !== undefined ? { id: input.id } : {}),
+            ...(input.source !== undefined ? { source: input.source } : {}),
+            ...(input.artifactRefs !== undefined ? { artifactRefs: input.artifactRefs } : {}),
+            ...(input.causationId !== undefined ? { causationId: input.causationId } : {}),
+            ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+            ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
+            ...(input.parentVerificationId !== undefined
+              ? { parentVerificationId: input.parentVerificationId }
+              : {}),
+            ...(input.linkedHypothesisId !== undefined
+              ? { linkedHypothesisId: input.linkedHypothesisId }
+              : {}),
+          });
         }),
     };
   }),

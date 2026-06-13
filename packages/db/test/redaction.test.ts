@@ -79,11 +79,7 @@ describe("redactEvent (event-store boundary)", () => {
   });
 
   it("emits hits with payload.<dotted.path> for nested object payload", () => {
-    const result = redactEvent(
-      { user: { token: "api_key=abcdefghijklmnop1234" } },
-      undefined,
-      r,
-    );
+    const result = redactEvent({ user: { token: "api_key=abcdefghijklmnop1234" } }, undefined, r);
     expect(result.hits.length).toBeGreaterThan(0);
     expect(result.hits.some((h) => h.fieldPath === "payload.value.user.token")).toBe(true);
   });

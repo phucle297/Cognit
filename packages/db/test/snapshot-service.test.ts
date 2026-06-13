@@ -24,12 +24,7 @@ import {
  */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(
-    RedactorLive,
-    MigrationRegistryLive,
-    UuidTest,
-    LoggerNoop,
-  );
+  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
   const snapshot = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   return Layer.merge(snapshot, Layer.merge(dbConn, LoggerNoop)) as Layer.Layer<
     SnapshotService | DbConnection | Logger,
@@ -39,9 +34,7 @@ const makeTestLayer = (dbPath: string) => {
 };
 
 const withTempDb = (): Promise<string> =>
-  fs
-    .mkdtemp(path.join(os.tmpdir(), "cognit-snap-"))
-    .then((dir) => path.join(dir, "cognit.db"));
+  fs.mkdtemp(path.join(os.tmpdir(), "cognit-snap-")).then((dir) => path.join(dir, "cognit.db"));
 
 const ACTOR_ID = "01actor00000000000000000000a";
 const setupProjectAndSession = (
@@ -51,10 +44,11 @@ const setupProjectAndSession = (
   const sessionId = "01sessionxxxxxxxxxxxxxxxxx";
   const eventId = "01eventxxxxxxxxxxxxxxxxxx1";
   const now = new Date().toISOString();
-  conn.handle.run(
-    "INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)",
-    [projectId, "test-project", now],
-  );
+  conn.handle.run("INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)", [
+    projectId,
+    "test-project",
+    now,
+  ]);
   conn.handle.run(
     `INSERT INTO actors (id, type, name, trust_score, first_seen_at, last_seen_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
@@ -143,9 +137,7 @@ describe("SnapshotService", () => {
     dbPath = await withTempDb();
   });
 
-  const runWithLayer = <A, E, R>(
-    eff: Effect.Effect<A, E, R>,
-  ): Promise<A> =>
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
     Effect.runPromise(
       eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
     );

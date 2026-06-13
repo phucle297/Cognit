@@ -32,14 +32,14 @@ packages/db/
 
 ## Services (Context.Tag)
 
-| Tag                 | Methods                                                    | Depends on                                          |
-| ------------------- | ---------------------------------------------------------- | --------------------------------------------------- |
-| `DbConnection`      | `db`, `close`, `tx<T>(fn): Effect<T, DbError>`             | —                                                   |
-| `EventStore`        | `appendEvent`, `listEvents`, `getEvent`                    | DbConnection, Redactor, Clock, Uuid                  |
-| `Redactor`          | `redact(text): RedactionResult` (built-in + user patterns) | @cognit/core                                        |
-| `MigrationRegistry` | `transformsFor(from, to): ReadonlyArray<Transform>`        | — (pure)                                            |
-| `Clock`             | `now(): Effect<Date>`                                      | —                                                   |
-| `Uuid`              | `ulid(): Effect<string>`                                   | Clock                                               |
+| Tag                 | Methods                                                    | Depends on                          |
+| ------------------- | ---------------------------------------------------------- | ----------------------------------- |
+| `DbConnection`      | `db`, `close`, `tx<T>(fn): Effect<T, DbError>`             | —                                   |
+| `EventStore`        | `appendEvent`, `listEvents`, `getEvent`                    | DbConnection, Redactor, Clock, Uuid |
+| `Redactor`          | `redact(text): RedactionResult` (built-in + user patterns) | @cognit/core                        |
+| `MigrationRegistry` | `transformsFor(from, to): ReadonlyArray<Transform>`        | — (pure)                            |
+| `Clock`             | `now(): Effect<Date>`                                      | —                                   |
+| `Uuid`              | `ulid(): Effect<string>`                                   | Clock                               |
 
 ## appendEvent flow (single tx)
 

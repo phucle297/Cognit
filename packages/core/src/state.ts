@@ -45,12 +45,7 @@ export type RejectReasonType = "evidence" | "superseded" | "constraint";
 export type TheoryLifecycle = "active" | "merged" | "archived";
 export type DecisionLifecycle = "proposed" | "accepted" | "rejected" | "superseded";
 export type ConclusionLifecycle = "unverified" | "verified" | "rejected";
-export type VerificationLifecycle =
-  | "started"
-  | "passed"
-  | "failed"
-  | "errored"
-  | "cancelled";
+export type VerificationLifecycle = "started" | "passed" | "failed" | "errored" | "cancelled";
 export type SessionLifecycle = "active" | "paused" | "closed";
 export type VerificationKind = "test" | "lint" | "build" | "exec" | "typecheck";
 export type ArtifactRole = "evidence" | "code" | "log" | "config";

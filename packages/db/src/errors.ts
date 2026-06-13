@@ -42,6 +42,10 @@ export class UnknownSession extends Data.TaggedError("UnknownSession")<{
   readonly sessionId: string;
 }> {}
 
+export class SessionClosed extends Data.TaggedError("SessionClosed")<{
+  readonly sessionId: string;
+}> {}
+
 export class DuplicateEventId extends Data.TaggedError("DuplicateEventId")<{
   readonly id: string;
 }> {}
@@ -63,6 +67,7 @@ export type AppendError =
   | UnknownEventVersion
   | ValidationFailure
   | UnknownSession
+  | SessionClosed
   | DbError;
 
 export type ReadError = DbError | NotFound;

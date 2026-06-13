@@ -11,6 +11,7 @@ import {
   MigrationRegistryLive,
   openDb,
   RedactorLive,
+  SessionPolicy,
   SessionService,
   SessionServiceLive,
   SnapshotService,
@@ -40,19 +41,20 @@ import { emptySessionState } from "@cognit/core/state";
 /** Test layer composing the services we need for the full E2E. */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(
-    RedactorLive,
-    MigrationRegistryLive,
-    UuidTest,
-    LoggerNoop,
-  );
+  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
   // eventStore consumes DbConnection once; dbConn is merged back in below.
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
-  // sessionService needs EventStore + SnapshotService + leafs + DbConnection.
+  // sessionService needs EventStore + SnapshotService + leafs + DbConnection
+  // and now also SessionPolicy. Use a high everyN so the auto-snapshot
+  // path doesn't trip on the manual takeIfDue call inside the test.
+  const policyLayer = Layer.succeed(SessionPolicy)({
+    everyN: 999_999,
+    forkOnResume: true,
+  });
   const sessionService = Layer.provide(
-    Layer.provide(SessionServiceLive, leafs),
+    Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
     Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
   );
   return Layer.merge(
@@ -66,16 +68,15 @@ const makeTestLayer = (dbPath: string) => {
 };
 
 const withTempDb = (): Promise<string> =>
-  fs
-    .mkdtemp(path.join(os.tmpdir(), "cognit-redux-"))
-    .then((dir) => path.join(dir, "cognit.db"));
+  fs.mkdtemp(path.join(os.tmpdir(), "cognit-redux-")).then((dir) => path.join(dir, "cognit.db"));
 
 const setupProject = (conn: Context.Tag.Service<typeof DbConnection>): string => {
   const projectId = "01projectxxxxxxxxxxxxxxxxx";
-  conn.handle.run(
-    `INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`,
-    [projectId, "test-project", new Date().toISOString()],
-  );
+  conn.handle.run(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`, [
+    projectId,
+    "test-project",
+    new Date().toISOString(),
+  ]);
   return projectId;
 };
 
@@ -87,15 +88,9 @@ describe("reducer integration — the done_when", () => {
     dbPath = await withTempDb();
   });
 
-  const runWithLayer = <A, E, R>(
-    eff: Effect.Effect<A, E, R>,
-  ): Promise<A> =>
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
     Effect.runPromise(
-      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<
-        A,
-        E,
-        never
-      >,
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
     );
 
   it("appends 100+ events, snapshots, replays tail, closes, resume-as-forks", async () => {
@@ -308,16 +303,8 @@ describe("reducer integration — the done_when", () => {
         // The timeline on the snapshot+tail path must contain the 5
         // tail observation events we just appended (in addition to
         // whatever the snapshot's serialized state had).
-        const tailTexts = r.state.timeline
-          .slice(-5)
-          .map((e) => JSON.parse(e.payload_json).text);
-        expect(tailTexts).toEqual([
-          "tail-0",
-          "tail-1",
-          "tail-2",
-          "tail-3",
-          "tail-4",
-        ]);
+        const tailTexts = r.state.timeline.slice(-5).map((e) => JSON.parse(e.payload_json).text);
+        expect(tailTexts).toEqual(["tail-0", "tail-1", "tail-2", "tail-3", "tail-4"]);
 
         // Rich state assertions on the snapshot+tail path. Before the
         // serializeState Map-roundtrip fix, these would have returned
@@ -408,6 +395,91 @@ describe("reducer integration — the done_when", () => {
         expect(r.session.parent_session_id).toBe(original.session.id);
         const payload = JSON.parse(r.event.payload_json);
         expect(payload.parent_session_id).toBe(original.session.id);
+      }),
+    );
+  });
+});
+
+/**
+ * Phase 2.5: a sibling describe that uses everyN=3 to exercise the
+ * auto-snapshot trigger path on SessionService.appendEvent end-to-end.
+ * Mirrors the policy behaviour a project with
+ * `session.snapshot_every_n_events: 3` in cognit.yaml would get.
+ */
+describe("reducer integration — auto-snapshot trigger", () => {
+  // Custom layer factory with everyN=3.
+  const makeAutoSnapLayer = (dbPath: string) => {
+    const dbConn = Layer.effect(DbConnection, openDb(dbPath));
+    const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+    const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
+    const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
+    const policyLayer = Layer.succeed(SessionPolicy)({
+      everyN: 3,
+      forkOnResume: true,
+    });
+    const sessionService = Layer.provide(
+      Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
+      Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
+    );
+    return Layer.merge(
+      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+      Layer.merge(dbConn, LoggerNoop),
+    ) as Layer.Layer<
+      EventStore | DbConnection | SessionService | SnapshotService | Logger,
+      never,
+      never
+    >;
+  };
+
+  let dbPath = "";
+  beforeEach(async () => {
+    dbPath = await withTempDb();
+  });
+
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
+    Effect.runPromise(
+      eff.pipe(Effect.provide(makeAutoSnapLayer(dbPath))) as Effect.Effect<A, E, never>,
+    );
+
+  it("writes auto-snapshots at event_count=3 and event_count=6 when everyN=3", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "auto-snap",
+          actor: ACTOR,
+        });
+        const sid = created.session.id;
+
+        // Append 5 events (session_created is #1, so total count=6).
+        for (let i = 0; i < 5; i++) {
+          yield* service.appendEvent({
+            sessionId: sid,
+            type: "observation_recorded",
+            payload: { text: `obs-${i}` },
+            actor: ACTOR,
+          });
+        }
+
+        // After 5 appends: session_created + 5 = 6 total events.
+        // everyN=3: snapshot at count=3, next at count=6 (6-3=3).
+        const snaps = conn.handle.all<{ event_count: number }>(
+          "SELECT event_count FROM snapshots WHERE session_id = ? ORDER BY event_count ASC",
+          [sid],
+        );
+        expect(snaps).toHaveLength(2);
+        expect(snaps[0]?.event_count).toBe(3);
+        expect(snaps[1]?.event_count).toBe(6);
+
+        // last_snapshot_event_id points to the 6th event (the latest).
+        const sessionRow = conn.handle.get<{ last_snapshot_event_id: string | null }>(
+          "SELECT last_snapshot_event_id FROM sessions WHERE id = ?",
+          [sid],
+        );
+        expect(sessionRow?.last_snapshot_event_id).not.toBeNull();
       }),
     );
   });

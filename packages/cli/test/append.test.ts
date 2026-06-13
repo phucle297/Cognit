@@ -3,6 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import BetterSqlite3 from "better-sqlite3";
+import YAML from "yaml";
 
 const CLI_ENTRY = path.resolve(__dirname, "..", "src", "index.ts");
 const TSX = path.resolve(__dirname, "..", "node_modules", ".bin", "tsx");
@@ -162,5 +164,76 @@ describe("cognit append", () => {
     ]);
     expect(append.status).not.toBe(0);
     expect(append.stderr).toContain("no .cognit/cognit.yaml found");
+  });
+});
+
+describe("auto-snapshot trigger", () => {
+  it("writes a snapshot row after everyN appends when session.snapshot_every_n_events is set", async () => {
+    // 1. init a fresh project in tmp.
+    expect(runCli(tmp, ["init", "--project", "demo"]).status).toBe(0);
+
+    // 2. Edit cognit.yaml to set snapshot_every_n_events: 3. The
+    //    file is hand-edited (not via a CLI command) so the test
+    //    exercises the read-path that derives SessionPolicy from the
+    //    on-disk config.
+    const configPath = path.join(tmp, ".cognit", "cognit.yaml");
+    const original = fs.readFileSync(configPath, "utf8");
+    // Parse + mutate + stringify rather than a brittle regex over the
+    // sorted top-level keys.
+    const parsed = YAML.parse(original) as Record<string, unknown>;
+    parsed.session = {
+      ...((parsed.session ?? {}) as Record<string, unknown>),
+      snapshot_every_n_events: 3,
+    };
+    const updated = YAML.stringify(parsed, { indent: 2, sortMapEntries: true });
+    fs.writeFileSync(configPath, updated, "utf8");
+
+    // 3. Create a session and capture its id.
+    const create = runCli(tmp, ["session", "create", "auto-snapshot e2e"]);
+    expect(create.status).toBe(0);
+    const idMatch = create.stdout.match(/session:\s+(01[A-Z0-9]+)/i);
+    expect(idMatch).not.toBeNull();
+    const sessionId = idMatch![1]!;
+
+    // 4. Append three events. With everyN=3 and a session_created
+    //    event already in the table, the 1st append is event #2
+    //    (no snapshot), the 2nd is event #3 (crosses threshold ->
+    //    snapshot: yes), the 3rd is event #4 (4-3=1 < 3, no new snap).
+    const results: { stdout: string }[] = [];
+    for (const text of ["a", "b", "c"]) {
+      const out = runCli(tmp, [
+        "append",
+        "--type",
+        "observation_recorded",
+        "--payload",
+        JSON.stringify({ text }),
+        "--session",
+        sessionId,
+      ]);
+      expect(out.status).toBe(0);
+      results.push({ stdout: out.stdout });
+    }
+
+    // 5. Stdout contract: append reports `snapshot: yes|no`.
+    expect(results[0]!.stdout).toContain("snapshot: no");
+    expect(results[1]!.stdout).toContain("snapshot: yes");
+    expect(results[2]!.stdout).toContain("snapshot: no");
+
+    // 6. Open the DB directly and assert exactly one snapshot row.
+    const dbPath = path.join(tmp, ".cognit", "cognit.db");
+    const db = new BetterSqlite3(dbPath, { readonly: true });
+    try {
+      const count = db
+        .prepare("SELECT COUNT(*) as n FROM snapshots WHERE session_id = ?")
+        .get(sessionId) as { n: number };
+      expect(count.n).toBe(1);
+
+      const row = db
+        .prepare("SELECT event_count, event_id FROM snapshots WHERE session_id = ?")
+        .get(sessionId) as { event_count: number; event_id: string };
+      expect(row.event_count).toBe(3);
+    } finally {
+      db.close();
+    }
   });
 });

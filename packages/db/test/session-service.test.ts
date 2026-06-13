@@ -11,6 +11,7 @@ import {
   MigrationRegistryLive,
   openDb,
   RedactorLive,
+  SessionPolicy,
   SessionService,
   SessionServiceLive,
   SnapshotService,
@@ -25,22 +26,28 @@ import { EventStoreLive } from "../src/event-store";
  * Layer.provide is used to satisfy R channels; Layer.merge is used to
  * combine outputs. The result provides DbConnection, EventStore,
  * SessionService, and SnapshotService so test bodies can yield any of them.
+ *
+ * `policyLayer` is the SessionPolicy layer to inject. Defaults to the
+ * library default (everyN: 100). Tests that exercise auto-snapshot
+ * thresholds pass a custom one (e.g. everyN: 3).
  */
-const makeTestLayer = (dbPath: string) => {
+const makeTestLayer = (
+  dbPath: string,
+  policyLayer: Layer.Layer<SessionPolicy> = Layer.succeed(SessionPolicy)({
+    everyN: 100,
+    forkOnResume: true,
+  }),
+) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(
-    RedactorLive,
-    MigrationRegistryLive,
-    UuidTest,
-    LoggerNoop,
-  );
+  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
   // eventStore consumes DbConnection once; dbConn is merged back in below.
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
-  // sessionService needs EventStore + SnapshotService + leafs + DbConnection.
+  // sessionService needs EventStore + SnapshotService + leafs + DbConnection
+  // and now also SessionPolicy.
   const sessionService = Layer.provide(
-    Layer.provide(SessionServiceLive, leafs),
+    Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
     Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
   );
   return Layer.merge(
@@ -54,16 +61,15 @@ const makeTestLayer = (dbPath: string) => {
 };
 
 const withTempDb = (): Promise<string> =>
-  fs
-    .mkdtemp(path.join(os.tmpdir(), "cognit-sess-"))
-    .then((dir) => path.join(dir, "cognit.db"));
+  fs.mkdtemp(path.join(os.tmpdir(), "cognit-sess-")).then((dir) => path.join(dir, "cognit.db"));
 
 const setupProject = (conn: Context.Tag.Service<typeof DbConnection>): string => {
   const projectId = "01projectxxxxxxxxxxxxxxxxx";
-  conn.handle.run(
-    `INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`,
-    [projectId, "test-project", new Date().toISOString()],
-  );
+  conn.handle.run(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`, [
+    projectId,
+    "test-project",
+    new Date().toISOString(),
+  ]);
   return projectId;
 };
 
@@ -75,15 +81,9 @@ describe("SessionService", () => {
     dbPath = await withTempDb();
   });
 
-  const runWithLayer = <A, E, R>(
-    eff: Effect.Effect<A, E, R>,
-  ): Promise<A> =>
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
     Effect.runPromise(
-      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<
-        A,
-        E,
-        never
-      >,
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
     );
 
   it("create inserts a sessions row and a session_created event", async () => {
@@ -329,13 +329,9 @@ describe("SessionService", () => {
     await runWithLayer(
       Effect.gen(function* () {
         const service = yield* SessionService;
-        const p1 = yield* service
-          .pause("01nothere", ACTOR)
-          .pipe(Effect.either);
+        const p1 = yield* service.pause("01nothere", ACTOR).pipe(Effect.either);
         expect(Either.isLeft(p1)).toBe(true);
-        const c1 = yield* service
-          .close("01nothere", ACTOR)
-          .pipe(Effect.either);
+        const c1 = yield* service.close("01nothere", ACTOR).pipe(Effect.either);
         expect(Either.isLeft(c1)).toBe(true);
       }),
     );
@@ -380,15 +376,9 @@ describe("SessionService.resume", () => {
     dbPath = await withTempDb();
   });
 
-  const runWithLayer = <A, E, R>(
-    eff: Effect.Effect<A, E, R>,
-  ): Promise<A> =>
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
     Effect.runPromise(
-      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<
-        A,
-        E,
-        never
-      >,
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
     );
 
   it("fork=true (default) creates a new session with parent_session_id set", async () => {
@@ -515,15 +505,9 @@ describe("SessionService.show (reducer view)", () => {
     dbPath = await withTempDb();
   });
 
-  const runWithLayer = <A, E, R>(
-    eff: Effect.Effect<A, E, R>,
-  ): Promise<A> =>
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
     Effect.runPromise(
-      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<
-        A,
-        E,
-        never
-      >,
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
     );
 
   it("show returns the SessionState derived from all events", async () => {
@@ -573,9 +557,7 @@ describe("SessionService.show (reducer view)", () => {
     await runWithLayer(
       Effect.gen(function* () {
         const service = yield* SessionService;
-        const r = yield* service
-          .show("01nosuchsessionhere00000000")
-          .pipe(Effect.either);
+        const r = yield* service.show("01nosuchsessionhere00000000").pipe(Effect.either);
         expect(Either.isLeft(r)).toBe(true);
       }),
     );
@@ -625,9 +607,7 @@ describe("SessionService.show (reducer view)", () => {
           (h) => h.current_state === "rejected",
         );
         expect(rej).toBeDefined();
-        const ver = Array.from(r.state.conclusions.values()).find(
-          (c) => c.state === "verified",
-        );
+        const ver = Array.from(r.state.conclusions.values()).find((c) => c.state === "verified");
         expect(ver).toBeDefined();
         expect(ver?.verification_id).toBe("01vr");
       }),
@@ -766,8 +746,180 @@ describe("SessionService.show (reducer view)", () => {
     await runWithLayer(
       Effect.gen(function* () {
         const service = yield* SessionService;
+        const r = yield* service.takeSnapshot("01nosuchsessionhere00000").pipe(Effect.either);
+        expect(r._tag).toBe("Left");
+        if (r._tag === "Left") {
+          expect(r.left._tag).toBe("UnknownSession");
+        }
+      }),
+    );
+  });
+});
+
+// ─── 2.5b: SessionService.appendEvent + auto-snapshot helper ──────
+
+describe("SessionService.appendEvent (auto-snapshot)", () => {
+  let dbPath = "";
+  beforeEach(async () => {
+    dbPath = await withTempDb();
+  });
+
+  const runWithLayer = <A, E, R>(
+    eff: Effect.Effect<A, E, R>,
+    policyLayer?: Layer.Layer<SessionPolicy>,
+  ): Promise<A> =>
+    Effect.runPromise(
+      eff.pipe(Effect.provide(makeTestLayer(dbPath, policyLayer))) as Effect.Effect<A, E, never>,
+    );
+
+  it("appendEvent happy path: returns event + snapshotTaken=false (1 < everyN)", async () => {
+    const r = await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        return yield* service.appendEvent({
+          sessionId: created.session.id,
+          type: "observation_recorded",
+          payload: { text: "first" },
+          actor: ACTOR,
+        });
+      }),
+    );
+    expect(r.event.type).toBe("observation_recorded");
+    expect(r.snapshotTaken).toBe(false);
+  });
+
+  it("appendEvent below threshold: 99 appends, no snapshot row", async () => {
+    const r = await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        const sid = created.session.id;
+        let lastResult: { snapshotTaken: boolean } | null = null;
+        // session_created adds 1 event; append 99 more = 100 total.
+        // everyN=999 keeps us well below the snapshot threshold.
+        for (let i = 0; i < 99; i++) {
+          lastResult = yield* service.appendEvent({
+            sessionId: sid,
+            type: "observation_recorded",
+            payload: { text: `obs-${i}` },
+            actor: ACTOR,
+          });
+        }
+        const snapCount = conn.handle.get<{ n: number }>(
+          "SELECT COUNT(*) as n FROM snapshots WHERE session_id = ?",
+          [sid],
+        );
+        return { lastResult, snapCount };
+      }),
+      Layer.succeed(SessionPolicy)({ everyN: 999, forkOnResume: true }),
+    );
+    expect(r.lastResult?.snapshotTaken).toBe(false);
+    expect(r.snapCount?.n).toBe(0);
+  });
+
+  it("appendEvent crosses threshold: 3rd append returns snapshotTaken=true and writes a snapshot row", async () => {
+    const r = await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        const sid = created.session.id;
+        // everyN=3: 1st append (after session_created = 2 events) should
+        // not trigger; 2nd (3 events) crosses the 3 threshold.
+        const r1 = yield* service.appendEvent({
+          sessionId: sid,
+          type: "observation_recorded",
+          payload: { text: "a" },
+          actor: ACTOR,
+        });
+        const r2 = yield* service.appendEvent({
+          sessionId: sid,
+          type: "observation_recorded",
+          payload: { text: "b" },
+          actor: ACTOR,
+        });
+        const r3 = yield* service.appendEvent({
+          sessionId: sid,
+          type: "observation_recorded",
+          payload: { text: "c" },
+          actor: ACTOR,
+        });
+        const snap = conn.handle.get<{ event_count: number; event_id: string }>(
+          "SELECT event_count, event_id FROM snapshots WHERE session_id = ?",
+          [sid],
+        );
+        const snapCount = conn.handle.get<{ n: number }>(
+          "SELECT COUNT(*) as n FROM snapshots WHERE session_id = ?",
+          [sid],
+        );
+        return { r1, r2, r3, snap, snapCount };
+      }),
+      Layer.succeed(SessionPolicy)({ everyN: 3, forkOnResume: true }),
+    );
+    expect(r.r1.snapshotTaken).toBe(false);
+    expect(r.r2.snapshotTaken).toBe(true);
+    expect(r.r3.snapshotTaken).toBe(false); // 4 - 3 < 3, no new snap
+    expect(r.snapCount?.n).toBe(1);
+    expect(r.snap?.event_count).toBe(3);
+  });
+
+  it("appendEvent on a closed session fails with SessionClosed", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        yield* service.close(created.session.id, ACTOR);
         const r = yield* service
-          .takeSnapshot("01nosuchsessionhere00000")
+          .appendEvent({
+            sessionId: created.session.id,
+            type: "observation_recorded",
+            payload: { text: "x" },
+            actor: ACTOR,
+          })
+          .pipe(Effect.either);
+        expect(r._tag).toBe("Left");
+        if (r._tag === "Left") {
+          expect(r.left._tag).toBe("SessionClosed");
+        }
+      }),
+    );
+  });
+
+  it("appendEvent on an unknown session id fails with UnknownSession", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const service = yield* SessionService;
+        const r = yield* service
+          .appendEvent({
+            sessionId: "01nosuchsessionhere00000",
+            type: "observation_recorded",
+            payload: { text: "x" },
+            actor: ACTOR,
+          })
           .pipe(Effect.either);
         expect(r._tag).toBe("Left");
         if (r._tag === "Left") {

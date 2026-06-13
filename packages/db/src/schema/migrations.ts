@@ -65,19 +65,17 @@ export const applyMigrations = (
       });
 
       // Run migration; on failure rollback and rethrow (no COMMIT below)
-      yield* m
-        .up(db)
-        .pipe(
-          Effect.tapError(() =>
-            Effect.sync(() => {
-              try {
-                db.exec("ROLLBACK");
-              } catch {
-                /* ignore */
-              }
-            }),
-          ),
-        );
+      yield* m.up(db).pipe(
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            try {
+              db.exec("ROLLBACK");
+            } catch {
+              /* ignore */
+            }
+          }),
+        ),
+      );
 
       yield* Effect.try({
         try: () => db.exec("COMMIT"),

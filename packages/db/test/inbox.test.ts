@@ -10,24 +10,50 @@ import {
   LoggerNoop,
   MigrationRegistryLive,
   RedactorLive,
+  SessionPolicy,
+  SessionPolicyDefault,
+  SessionService,
+  SnapshotService,
   UuidTest,
   openDb,
 } from "../src";
 import { EventStoreLive } from "../src/event-store";
-import { inboxIgnored, makeInboxWatcher, runInboxWatcher, type InboxWatcherConfig } from "../src/inbox";
+import { SessionServiceLive } from "../src/session-service";
+import { SnapshotServiceLive } from "../src/snapshot-service";
+import {
+  inboxIgnored,
+  makeInboxWatcher,
+  runInboxWatcher,
+  type InboxWatcherConfig,
+} from "../src/inbox";
 
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(
-    RedactorLive,
-    MigrationRegistryLive,
-    UuidTest,
-    LoggerNoop,
+  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  // Build a complete live layer the same way `DbLive` does in
+  // production, but with our test connection. The watcher needs
+  // `SessionService` on its R channel; `SessionService` pulls in
+  // `EventStore`, `SnapshotService`, and `SessionPolicy` internally.
+  // Default `everyN=100` keeps the test runs from accidentally
+  // snapshotting (each test appends a handful of events at most).
+  //
+  // Note: `SessionPolicy` is provided FIRST (innermost) so the layer
+  // composition yields a working runtime. The order is mirrored from
+  // the working `session-service.test.ts` test layer.
+  const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
+  const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
+  const sessionService = Layer.provide(
+    Layer.provide(Layer.provide(SessionServiceLive, SessionPolicyDefault), leafs),
+    Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
   );
   return Layer.merge(
-    Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn),
+    Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
     Layer.merge(dbConn, LoggerNoop),
-  ) as Layer.Layer<EventStore | DbConnection | Logger, never, never>;
+  ) as unknown as Layer.Layer<
+    EventStore | SessionService | SnapshotService | SessionPolicy | DbConnection | Logger,
+    never,
+    never
+  >;
 };
 
 const withTempDirs = async (): Promise<{
@@ -197,7 +223,9 @@ describe("inbox processFile", () => {
     expect(await fs.readdir(dirs.processed)).toEqual([]);
 
     // No event row landed in the DB.
-    const conn = await Effect.runPromise(openDb(dirs.dbPath) as Effect.Effect<Context.Tag.Service<typeof DbConnection>, never, never>);
+    const conn = await Effect.runPromise(
+      openDb(dirs.dbPath) as Effect.Effect<Context.Tag.Service<typeof DbConnection>, never, never>,
+    );
     const row = conn.handle.get<{ c: number }>(
       "SELECT count(*) as c FROM events WHERE session_id = ?",
       ["01sessionxxxxxxxxxxxxxxxxx"],
@@ -256,7 +284,9 @@ describe("inbox processFile", () => {
     expect(moved[0]).toMatch(/\.json$/);
 
     // Event persisted to DB.
-    const conn = await Effect.runPromise(openDb(dirs.dbPath) as Effect.Effect<Context.Tag.Service<typeof DbConnection>, never, never>);
+    const conn = await Effect.runPromise(
+      openDb(dirs.dbPath) as Effect.Effect<Context.Tag.Service<typeof DbConnection>, never, never>,
+    );
     const row = conn.handle.get<{ c: number }>(
       "SELECT count(*) as c FROM events WHERE session_id = ?",
       [sessionId],

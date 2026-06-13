@@ -11,9 +11,7 @@ import { emptySessionState, type ReducerEvent, type SessionState } from "../src/
  */
 
 let nowCounter = 0;
-const mkEvent = (
-  overrides: Partial<ReducerEvent> & Pick<ReducerEvent, "id">,
-): ReducerEvent => {
+const mkEvent = (overrides: Partial<ReducerEvent> & Pick<ReducerEvent, "id">): ReducerEvent => {
   nowCounter += 1;
   const created_at = new Date(Date.UTC(2026, 0, 1, 0, 0, 0, nowCounter)).toISOString();
   return {
@@ -58,8 +56,14 @@ describe("reducer — sortEvents", () => {
 
   it("uses id as a stable tiebreaker when created_at collides", () => {
     resetClock();
-    const e1: ReducerEvent = { ...mkEvent({ id: "01zzz" }), created_at: "2026-01-01T00:00:00.000Z" };
-    const e2: ReducerEvent = { ...mkEvent({ id: "01aaa" }), created_at: "2026-01-01T00:00:00.000Z" };
+    const e1: ReducerEvent = {
+      ...mkEvent({ id: "01zzz" }),
+      created_at: "2026-01-01T00:00:00.000Z",
+    };
+    const e2: ReducerEvent = {
+      ...mkEvent({ id: "01aaa" }),
+      created_at: "2026-01-01T00:00:00.000Z",
+    };
     const sorted = sortEvents([e1, e2]);
     expect(sorted.map((e) => e.id)).toEqual(["01aaa", "01zzz"]);
   });
@@ -70,11 +74,32 @@ describe("reducer — non-state events are no-ops on entity state", () => {
     resetClock();
     const events: ReducerEvent[] = [
       mkEvent({ id: "01proj", type: "project_created", payload_json: '{"name":"p"}' }),
-      mkEvent({ id: "01act", type: "actor_registered", payload_json: '{"actor_type":"human","actor_name":"alice","trust_score":0.9}' }),
-      mkEvent({ id: "01red", type: "redaction_applied", payload_json: '{"pattern":"jwt","entity_type":"observation_recorded","entity_id":"x","field_path":"payload.value.text"}' }),
-      mkEvent({ id: "01cra", type: "constraint_rule_added", payload_json: '{"rule_id":"r1","condition_json":"{}","actions_json":"[]"}' }),
-      mkEvent({ id: "01cap", type: "constraint_rule_applied", payload_json: '{"rule_id":"r1","affected_hypothesis_ids":[]}' }),
-      mkEvent({ id: "01snap", type: "snapshot_created", payload_json: '{"event_count_up_to":1,"state_json":"{}"}' }),
+      mkEvent({
+        id: "01act",
+        type: "actor_registered",
+        payload_json: '{"actor_type":"human","actor_name":"alice","trust_score":0.9}',
+      }),
+      mkEvent({
+        id: "01red",
+        type: "redaction_applied",
+        payload_json:
+          '{"pattern":"jwt","entity_type":"observation_recorded","entity_id":"x","field_path":"payload.value.text"}',
+      }),
+      mkEvent({
+        id: "01cra",
+        type: "constraint_rule_added",
+        payload_json: '{"rule_id":"r1","condition_json":"{}","actions_json":"[]"}',
+      }),
+      mkEvent({
+        id: "01cap",
+        type: "constraint_rule_applied",
+        payload_json: '{"rule_id":"r1","affected_hypothesis_ids":[]}',
+      }),
+      mkEvent({
+        id: "01snap",
+        type: "snapshot_created",
+        payload_json: '{"event_count_up_to":1,"state_json":"{}"}',
+      }),
     ];
     const state = reduce(events, baseState());
     expect(state.timeline).toHaveLength(6);
@@ -207,7 +232,11 @@ describe("reducer — hypothesis state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01h", type: "hypothesis_created", payload_json: '{"title":"X","text":"x"}' }),
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"X","text":"x"}',
+        }),
         mkEvent({
           id: "01r",
           type: "hypothesis_rejected",
@@ -227,7 +256,11 @@ describe("reducer — hypothesis state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01h", type: "hypothesis_created", payload_json: '{"title":"X","text":"x"}' }),
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"X","text":"x"}',
+        }),
         mkEvent({
           id: "01r",
           type: "hypothesis_rejected",
@@ -245,7 +278,11 @@ describe("reducer — hypothesis state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01h", type: "hypothesis_created", payload_json: '{"title":"X","text":"x"}' }),
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"X","text":"x"}',
+        }),
         mkEvent({
           id: "01p",
           type: "hypothesis_promoted",
@@ -262,7 +299,11 @@ describe("reducer — hypothesis state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01h", type: "hypothesis_created", payload_json: '{"title":"X","text":"x"}' }),
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"X","text":"x"}',
+        }),
         mkEvent({
           id: "01r",
           type: "hypothesis_rejected",
@@ -291,8 +332,16 @@ describe("reducer — hypothesis state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01h1", type: "hypothesis_created", payload_json: '{"title":"A","text":"a"}' }),
-        mkEvent({ id: "01h2", type: "hypothesis_created", payload_json: '{"title":"B","text":"b"}' }),
+        mkEvent({
+          id: "01h1",
+          type: "hypothesis_created",
+          payload_json: '{"title":"A","text":"a"}',
+        }),
+        mkEvent({
+          id: "01h2",
+          type: "hypothesis_created",
+          payload_json: '{"title":"B","text":"b"}',
+        }),
       ],
       baseState(),
     );
@@ -329,7 +378,11 @@ describe("reducer — theory state machine", () => {
         mkEvent({ id: "01t1", type: "theory_created", payload_json: '{"title":"A","text":"a"}' }),
         mkEvent({ id: "01t2", type: "theory_created", payload_json: '{"title":"B","text":"b"}' }),
         // merged applies to current_theory_id = 01t2
-        mkEvent({ id: "01m", type: "theory_merged", payload_json: '{"merged_into_theory_id":"01t1"}' }),
+        mkEvent({
+          id: "01m",
+          type: "theory_merged",
+          payload_json: '{"merged_into_theory_id":"01t1"}',
+        }),
         // archived still applies to 01t2 (merged does not advance the pointer)
         mkEvent({ id: "01a", type: "theory_archived" }),
       ],
@@ -349,7 +402,8 @@ describe("reducer — experiment", () => {
         mkEvent({
           id: "01x",
           type: "experiment_created",
-          payload_json: '{"tests_hypothesis_id":"01h","design":"disable turbopack, measure memory"}',
+          payload_json:
+            '{"tests_hypothesis_id":"01h","design":"disable turbopack, measure memory"}',
         }),
         mkEvent({
           id: "01c",
@@ -424,13 +478,29 @@ describe("reducer — decision state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01d1", type: "decision_proposed", payload_json: '{"text":"x","based_on_conclusion_ids":[]}' }),
-        mkEvent({ id: "01d2", type: "decision_proposed", payload_json: '{"text":"y","based_on_conclusion_ids":[]}' }),
+        mkEvent({
+          id: "01d1",
+          type: "decision_proposed",
+          payload_json: '{"text":"x","based_on_conclusion_ids":[]}',
+        }),
+        mkEvent({
+          id: "01d2",
+          type: "decision_proposed",
+          payload_json: '{"text":"y","based_on_conclusion_ids":[]}',
+        }),
         // rejected applies to current = 01d2; then a third proposed advances
         mkEvent({ id: "01r", type: "decision_rejected", payload_json: '{"reason":"too risky"}' }),
-        mkEvent({ id: "01d3", type: "decision_proposed", payload_json: '{"text":"z","based_on_conclusion_ids":[]}' }),
+        mkEvent({
+          id: "01d3",
+          type: "decision_proposed",
+          payload_json: '{"text":"z","based_on_conclusion_ids":[]}',
+        }),
         // superseded applies to current = 01d3
-        mkEvent({ id: "01s", type: "decision_superseded", payload_json: '{"superseded_by_decision_id":"01d1"}' }),
+        mkEvent({
+          id: "01s",
+          type: "decision_superseded",
+          payload_json: '{"superseded_by_decision_id":"01d1"}',
+        }),
       ],
       baseState(),
     );
@@ -471,7 +541,11 @@ describe("reducer — conclusion state machine", () => {
     const s = reduce(
       [
         mkEvent({ id: "01c", type: "conclusion_proposed", payload_json: '{"text":"x"}' }),
-        mkEvent({ id: "01r", type: "conclusion_rejected", payload_json: '{"reason":"insufficient evidence"}' }),
+        mkEvent({
+          id: "01r",
+          type: "conclusion_rejected",
+          payload_json: '{"reason":"insufficient evidence"}',
+        }),
       ],
       baseState(),
     );
@@ -504,8 +578,16 @@ describe("reducer — verification state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01v", type: "verification_started", payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}' }),
-        mkEvent({ id: "01f", type: "verification_failed", payload_json: '{"stderr_excerpt":"TypeError: undefined"}' }),
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}',
+        }),
+        mkEvent({
+          id: "01f",
+          type: "verification_failed",
+          payload_json: '{"stderr_excerpt":"TypeError: undefined"}',
+        }),
       ],
       baseState(),
     );
@@ -517,7 +599,11 @@ describe("reducer — verification state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01v", type: "verification_started", payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}' }),
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}',
+        }),
         mkEvent({ id: "01e", type: "verification_errored", payload_json: '{"error":"ENOENT"}' }),
       ],
       baseState(),
@@ -530,9 +616,17 @@ describe("reducer — verification state machine", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01v", type: "verification_started", payload_json: '{"command":"npm test","type":"test","linked_hypothesis_id":null}' }),
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"npm test","type":"test","linked_hypothesis_id":null}',
+        }),
         mkEvent({ id: "01f", type: "verification_failed", payload_json: '{"stderr_excerpt":"x"}' }),
-        mkEvent({ id: "01r", type: "verification_rerun", payload_json: '{"parent_verification_id":"01v"}' }),
+        mkEvent({
+          id: "01r",
+          type: "verification_rerun",
+          payload_json: '{"parent_verification_id":"01v"}',
+        }),
       ],
       baseState(),
     );
@@ -565,7 +659,11 @@ describe("reducer — artifact_attached and edge_created", () => {
     resetClock();
     const s = reduce(
       [
-        mkEvent({ id: "01h", type: "hypothesis_created", payload_json: '{"title":"X","text":"x"}' }),
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"X","text":"x"}',
+        }),
         mkEvent({ id: "01t", type: "theory_created", payload_json: '{"title":"T","text":"t"}' }),
         mkEvent({
           id: "01e",
@@ -593,9 +691,17 @@ describe("reducer — reduce (entry point)", () => {
     const s = reduce(
       [
         mkEvent({ id: "01obs", type: "observation_recorded", payload_json: '{"text":"x"}' }),
-        mkEvent({ id: "01h", type: "hypothesis_created", payload_json: '{"title":"X","text":"x"}' }),
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"X","text":"x"}',
+        }),
         mkEvent({ id: "01w", type: "hypothesis_weakened", payload_json: '{"reason":"r"}' }),
-        mkEvent({ id: "01r", type: "hypothesis_rejected", payload_json: '{"reason_type":"evidence","superseded_by_id":null}' }),
+        mkEvent({
+          id: "01r",
+          type: "hypothesis_rejected",
+          payload_json: '{"reason_type":"evidence","superseded_by_id":null}',
+        }),
       ],
       baseState(),
     );
@@ -607,7 +713,12 @@ describe("reducer — reduce (entry point)", () => {
   it("re-folding the same events is idempotent (deterministic output)", () => {
     resetClock();
     const events: ReducerEvent[] = [
-      mkEvent({ id: "01h", type: "hypothesis_created", payload_json: '{"title":"X","text":"x"}', confidence: 0.5 }),
+      mkEvent({
+        id: "01h",
+        type: "hypothesis_created",
+        payload_json: '{"title":"X","text":"x"}',
+        confidence: 0.5,
+      }),
       mkEvent({ id: "01w", type: "hypothesis_weakened", payload_json: '{"reason":"r"}' }),
     ];
     const a = reduce(events, baseState());

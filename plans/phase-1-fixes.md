@@ -13,6 +13,7 @@ Tests still pass (30/30) and `tsc --noEmit` is clean, because the bugs are runti
 ## Goal
 
 After this plan executes:
+
 - `pnpm -F @cognit/db test` passes 30+ → 40+ tests.
 - `pnpm -r exec tsc --noEmit` clean.
 - `plans/phase-1.md` and `plan.xml` reflect what the code actually does (no drift).
@@ -58,12 +59,12 @@ Two options, both close the audit gap:
 
 The fixes are bundled into 4 cycles. Each cycle = one agent + one quality gate. Cycles run sequentially; P0 first, then P1 schema/row/FK, then P1 event-store correctness, then cleanup.
 
-| Cycle | Fixes | Beads | Files touched | Cycle scope |
-|-------|-------|-------|---------------|-------------|
-| **1** | P0-1 inbox fiber R-channel | `Cognit-2k5` | `packages/db/src/inbox.ts`, `packages/db/test/inbox.test.ts` | small |
-| **2** | P0-3 migration runner + P1-5 rows.ts + P1-6 FK | `Cognit-7hw`, `Cognit-44u`, `Cognit-muu` | `packages/db/src/schema/migrations.ts` (NEW), `packages/db/src/schema/rows.ts`, `packages/db/src/schema/tables.ts`, `packages/db/src/connection.ts`, `packages/db/test/migrate.test.ts` | medium |
-| **3** | P0-2 redaction audit gap | `Cognit-ezs` | `packages/db/src/redaction.ts`, `packages/db/src/event-store.ts`, `packages/db/test/redaction.test.ts`, `packages/db/test/event-store.test.ts` | medium |
-| **4** | P1 event-store correctness + inbox P1 + cleanup + P2 | `Cognit-nl1`, `Cognit-cpz`, `Cognit-ppf`, `Cognit-825`, `Cognit-eeg`, `Cognit-xtb`, and the 2 P2 items | `packages/db/src/event-store.ts`, `packages/db/src/inbox.ts`, `packages/db/src/event-schema.ts`, `packages/db/src/layers/live.ts`, `packages/db/src/index.ts`, all test files | large |
+| Cycle | Fixes                                                | Beads                                                                                                  | Files touched                                                                                                                                                                           | Cycle scope |
+| ----- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| **1** | P0-1 inbox fiber R-channel                           | `Cognit-2k5`                                                                                           | `packages/db/src/inbox.ts`, `packages/db/test/inbox.test.ts`                                                                                                                            | small       |
+| **2** | P0-3 migration runner + P1-5 rows.ts + P1-6 FK       | `Cognit-7hw`, `Cognit-44u`, `Cognit-muu`                                                               | `packages/db/src/schema/migrations.ts` (NEW), `packages/db/src/schema/rows.ts`, `packages/db/src/schema/tables.ts`, `packages/db/src/connection.ts`, `packages/db/test/migrate.test.ts` | medium      |
+| **3** | P0-2 redaction audit gap                             | `Cognit-ezs`                                                                                           | `packages/db/src/redaction.ts`, `packages/db/src/event-store.ts`, `packages/db/test/redaction.test.ts`, `packages/db/test/event-store.test.ts`                                          | medium      |
+| **4** | P1 event-store correctness + inbox P1 + cleanup + P2 | `Cognit-nl1`, `Cognit-cpz`, `Cognit-ppf`, `Cognit-825`, `Cognit-eeg`, `Cognit-xtb`, and the 2 P2 items | `packages/db/src/event-store.ts`, `packages/db/src/inbox.ts`, `packages/db/src/event-schema.ts`, `packages/db/src/layers/live.ts`, `packages/db/src/index.ts`, all test files           | large       |
 
 Cycle 1 must run first (inbox is dead in prod). Cycle 2 and 3 are independent of each other (touches different files) and can run in parallel. Cycle 4 depends on 1, 2, 3 being merged.
 
@@ -85,6 +86,7 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
 ### Change
 
 1. Refactor `runInboxWatcher` to build a `ManagedRuntime` from the caller's R-channel:
+
    ```ts
    export const runInboxWatcher = (
      config: InboxWatcherConfig,
@@ -100,9 +102,11 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
        return { stop: () => watcher.close() };
      });
    ```
+
    - `Effect.runtime<R>()` materialises the current fiber's environment into a `Runtime` (Effect 3.10+).
    - `runtime.runFork(effect)` runs the effect on a fiber with that R baked in.
    - This removes the unsafe `as Effect<...>` cast.
+
 2. Update `makeInboxWatcher` docstring to reflect that callers must provide `EventStore | Logger` to `runInboxWatcher`.
 
 ### Verification
@@ -136,6 +140,7 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
 ### Change
 
 1. **New `schema/migrations.ts`**:
+
    ```ts
    export interface Migration {
      readonly version: string;
@@ -145,9 +150,10 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
    const MIGRATIONS: ReadonlyArray<Migration> = [
      {
        version: "1.0.0",
-       up: (db) => Effect.sync(() => {
-         for (const ddl of TABLES_DDL) db.exec(ddl);
-       }),
+       up: (db) =>
+         Effect.sync(() => {
+           for (const ddl of TABLES_DDL) db.exec(ddl);
+         }),
      },
    ];
 
@@ -156,7 +162,9 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
    ): Effect.Effect<{ applied: ReadonlyArray<string> }, DbError> =>
      Effect.gen(function* () {
        // Ensure schema_version table exists (idempotent — first migration creates it via DDL).
-       const current = db.get<{ version: string }>("SELECT version FROM schema_version WHERE id = 1");
+       const current = db.get<{ version: string }>(
+         "SELECT version FROM schema_version WHERE id = 1",
+       );
        const currentVersion = current?.version ?? "0.0.0";
        const applied: string[] = [];
        for (const m of MIGRATIONS) {
@@ -165,24 +173,31 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
            try: () => db.exec("BEGIN"),
            catch: (e) => new DbError({ message: "begin failed", cause: e }),
          });
-         const upResult = yield* m.up(db).pipe(
-           Effect.tapError(() => Effect.sync(() => db.exec("ROLLBACK"))),
-         );
+         const upResult = yield* m
+           .up(db)
+           .pipe(Effect.tapError(() => Effect.sync(() => db.exec("ROLLBACK"))));
          yield* Effect.try({
            try: () => db.exec("COMMIT"),
            catch: (e) => new DbError({ message: "commit failed", cause: e }),
          });
          // upsert version
          if (current) {
-           db.run("UPDATE schema_version SET version = ?, applied_at = ? WHERE id = 1", [m.version, nowIso()]);
+           db.run("UPDATE schema_version SET version = ?, applied_at = ? WHERE id = 1", [
+             m.version,
+             nowIso(),
+           ]);
          } else {
-           db.run("INSERT INTO schema_version (id, version, applied_at) VALUES (1, ?, ?)", [m.version, nowIso()]);
+           db.run("INSERT INTO schema_version (id, version, applied_at) VALUES (1, ?, ?)", [
+             m.version,
+             nowIso(),
+           ]);
          }
          applied.push(m.version);
        }
        return { applied };
      });
    ```
+
    - Migrations are ordered, idempotent, transactional.
    - The first migration (`1.0.0`) applies the current `TABLES_DDL` set; future versions add new DDL.
 
@@ -237,6 +252,7 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
 ### Change (per decision D1.a)
 
 1. **`redaction.ts` line 99-111**: change `redactEvent` to wrap payload + source in an envelope so `scanValue` produces non-empty paths:
+
    ```ts
    export const redactEvent = (
      payload: unknown,
@@ -246,9 +262,7 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
      const payloadEnvelope = { value: payload };
      const sourceEnvelope = source === undefined ? undefined : { value: source };
      const payloadHits = redactor.scanValue(payloadEnvelope, "payload");
-     const sourceHits = sourceEnvelope
-       ? redactor.scanValue(sourceEnvelope, "source")
-       : [];
+     const sourceHits = sourceEnvelope ? redactor.scanValue(sourceEnvelope, "source") : [];
      return {
        redactedPayload: redactor.redactValue(payload),
        redactedSource: source === undefined ? undefined : redactor.redactValue(source),
@@ -256,8 +270,10 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
      };
    };
    ```
+
    - All hits now have `fieldPath` starting with `payload.` or `source.`.
    - `redactValue` still operates on the raw payload/source so the `payload_json` shape is unchanged.
+
 2. **`event-store.ts` line 234**: keep the filter (it now only drops truly empty paths, which shouldn't occur, but is a defensive guard). No code change needed beyond the `redactEvent` rewrite.
 
 ### Verification
@@ -377,13 +393,13 @@ After all four cycles: update `plans/phase-1.md` and `plan.xml` to reflect the a
 
 ## Risk register
 
-| Risk | Likelihood | Mitigation |
-|------|-----------|-----------|
-| Cycle 2's migration rewrite breaks existing tests that depend on the inline DDL apply | medium | migrate.test.ts has 6 cases; if any fail, the rewrite is incomplete — fix and re-run |
-| Cycle 3's `redactEvent` envelope change breaks the JWT redaction test | low | the test only checks `payload_json` doesn't contain the secret + contains `[REDACTED:jwt]`; envelope change only affects `hits[].fieldPath` |
-| Cycle 4's idempotency race fix changes the order of operations in the tx | low | the new test for Promise.all duplicate appends catches regressions |
-| Cycle 4 deleting `EventValidator` ripples into more files than expected | low | grep before delete; only 4 files reference it |
-| `nowIso` capture at top of tx may collide with the `actor_registered` autoreg path | low | `actor_registered` events go through the same append path; no special handling needed |
+| Risk                                                                                  | Likelihood | Mitigation                                                                                                                                  |
+| ------------------------------------------------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cycle 2's migration rewrite breaks existing tests that depend on the inline DDL apply | medium     | migrate.test.ts has 6 cases; if any fail, the rewrite is incomplete — fix and re-run                                                        |
+| Cycle 3's `redactEvent` envelope change breaks the JWT redaction test                 | low        | the test only checks `payload_json` doesn't contain the secret + contains `[REDACTED:jwt]`; envelope change only affects `hits[].fieldPath` |
+| Cycle 4's idempotency race fix changes the order of operations in the tx              | low        | the new test for Promise.all duplicate appends catches regressions                                                                          |
+| Cycle 4 deleting `EventValidator` ripples into more files than expected               | low        | grep before delete; only 4 files reference it                                                                                               |
+| `nowIso` capture at top of tx may collide with the `actor_registered` autoreg path    | low        | `actor_registered` events go through the same append path; no special handling needed                                                       |
 
 ---
 

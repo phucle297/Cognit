@@ -23,9 +23,7 @@ const parseActor = (
   const name = raw.slice(0, idx);
   const type = raw.slice(idx + 1);
   if (!VALID_ACTOR_TYPES.has(type)) {
-    process.stderr.write(
-      `cognit: --actor type must be one of human|worker|system, got: ${type}\n`,
-    );
+    process.stderr.write(`cognit: --actor type must be one of human|worker|system, got: ${type}\n`);
     process.exitCode = 2;
     return { name: defaultName, type: defaultType };
   }
@@ -43,9 +41,7 @@ const requireProjectRoot = (): string => {
 };
 
 const loadProject = (root: string): Promise<{ id: string; name: string }> =>
-  Effect.runPromise(
-    withAppLayer(root, loadProjectEffect(root)),
-  );
+  Effect.runPromise(withAppLayer(root, loadProjectEffect(root)));
 
 const loadProjectEffect = (root: string) =>
   Effect.gen(function* () {
@@ -90,10 +86,7 @@ const resolveTargetSession = async (
   return id;
 };
 
-const runCommand = <A, E, R>(
-  root: string,
-  eff: Effect.Effect<A, E, R>,
-): Promise<A> => {
+const runCommand = <A, E, R>(root: string, eff: Effect.Effect<A, E, R>): Promise<A> => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const provided = withAppLayer(root, eff) as any as Effect.Effect<A, E, never>;
   return Effect.runPromise(provided).catch((e: unknown) => {

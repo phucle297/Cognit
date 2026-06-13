@@ -23,12 +23,7 @@ import {
  */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(
-    RedactorLive,
-    MigrationRegistryLive,
-    UuidTest,
-    LoggerNoop,
-  );
+  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
   const project = Layer.provide(ProjectServiceLive, Layer.merge(leafs, dbConn));
   return Layer.merge(project, Layer.merge(dbConn, LoggerNoop)) as Layer.Layer<
     ProjectService | DbConnection | Logger,
@@ -38,9 +33,7 @@ const makeTestLayer = (dbPath: string) => {
 };
 
 const withTempDb = (): Promise<string> =>
-  fs
-    .mkdtemp(path.join(os.tmpdir(), "cognit-proj-"))
-    .then((dir) => path.join(dir, "cognit.db"));
+  fs.mkdtemp(path.join(os.tmpdir(), "cognit-proj-")).then((dir) => path.join(dir, "cognit.db"));
 
 describe("ProjectService", () => {
   let dbPath = "";
@@ -49,9 +42,7 @@ describe("ProjectService", () => {
     resetUuidTestCounter();
   });
 
-  const runWithLayer = <A, E, R>(
-    eff: Effect.Effect<A, E, R>,
-  ): Promise<A> =>
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
     Effect.runPromise(
       eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
     );

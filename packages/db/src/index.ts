@@ -3,12 +3,12 @@
  * Effect-native service boundaries.
  *
  * Public surface:
- *   - Tags: DbConnection, EventStore, SessionService, Redactor,
- *     MigrationRegistry, Uuid, Logger
- *   - Live layers: DbLive(dbPath), DbTestBase
+ *   - Tags: DbConnection, EventStore, SessionService, SessionPolicy,
+ *     Redactor, MigrationRegistry, Uuid, Logger
+ *   - Live layers: DbLive(dbPath, policy?), DbTestBase
  *   - Errors: tagged union in `./errors`
  *   - Helpers: openDb, makeRedactor, migratePayload, redactEvent,
- *     CURRENT_VERSION, EVENT_TYPES
+ *     sessionPolicyFromConfig, CURRENT_VERSION, EVENT_TYPES
  */
 
 export * from "./context";
@@ -23,6 +23,7 @@ export * from "./inbox";
 export * from "./connection";
 export * from "./project-service";
 export * from "./session-service";
+export * from "./session-policy";
 export * from "./snapshot-service";
 export * from "./layers/live";
 export * from "./schema/rows";

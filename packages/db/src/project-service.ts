@@ -52,58 +52,62 @@ const fetchByName = (conn: DbConnService, name: string): ProjectRow | undefined 
     [name],
   );
 
-export const ProjectServiceLive: Layer.Layer<ProjectService, never, DbConnection | Uuid> = Layer.effect(
-  ProjectService,
-  Effect.gen(function* () {
-    const conn: DbConnService = yield* DbConnection;
-    const uuid: UuidService = yield* Uuid;
+export const ProjectServiceLive: Layer.Layer<ProjectService, never, DbConnection | Uuid> =
+  Layer.effect(
+    ProjectService,
+    Effect.gen(function* () {
+      const conn: DbConnService = yield* DbConnection;
+      const uuid: UuidService = yield* Uuid;
 
-    return {
-      ensure: (input) =>
-        Effect.gen(function* () {
-          const name = input.name.trim();
-          if (name.length === 0) {
-            return yield* Effect.fail(
-              new DbError({ message: "project ensure: empty name", cause: undefined }),
+      return {
+        ensure: (input) =>
+          Effect.gen(function* () {
+            const name = input.name.trim();
+            if (name.length === 0) {
+              return yield* Effect.fail(
+                new DbError({ message: "project ensure: empty name", cause: undefined }),
+              );
+            }
+            const existing = yield* trySync(
+              () => fetchByName(conn, name),
+              (e) => new DbError({ message: "project ensure: select", cause: e }),
             );
-          }
-          const existing = yield* trySync(
-            () => fetchByName(conn, name),
-            (e) => new DbError({ message: "project ensure: select", cause: e }),
-          );
-          if (existing) {
-            return existing;
-          }
-          const id = yield* uuid.make();
-          const createdAt = nowIso();
-          yield* trySync(
-            () =>
-              conn.handle.run(
-                `INSERT INTO projects (id, name, repo_url, created_at) VALUES (?, ?, ?, ?)`,
-                [id, name, null, createdAt],
-              ),
-            (e) => new DbError({ message: "project ensure: insert", cause: e }),
-          );
-          // Re-read so the caller gets the row as stored (handles any
-          // driver-side normalization of timestamps, defaults, etc.).
-          const row = fetchById(conn, id);
-          if (!row) {
-            return yield* Effect.fail(
-              new DbError({ message: "project ensure: row missing post-insert", cause: undefined }),
+            if (existing) {
+              return existing;
+            }
+            const id = yield* uuid.make();
+            const createdAt = nowIso();
+            yield* trySync(
+              () =>
+                conn.handle.run(
+                  `INSERT INTO projects (id, name, repo_url, created_at) VALUES (?, ?, ?, ?)`,
+                  [id, name, null, createdAt],
+                ),
+              (e) => new DbError({ message: "project ensure: insert", cause: e }),
             );
-          }
-          return row;
-        }),
+            // Re-read so the caller gets the row as stored (handles any
+            // driver-side normalization of timestamps, defaults, etc.).
+            const row = fetchById(conn, id);
+            if (!row) {
+              return yield* Effect.fail(
+                new DbError({
+                  message: "project ensure: row missing post-insert",
+                  cause: undefined,
+                }),
+              );
+            }
+            return row;
+          }),
 
-      get: (id) =>
-        Effect.sync((): ProjectRow | null => fetchById(conn, id) ?? null).pipe(
-          Effect.mapError((e) => new DbError({ message: "project get", cause: e })),
-        ),
+        get: (id) =>
+          Effect.sync((): ProjectRow | null => fetchById(conn, id) ?? null).pipe(
+            Effect.mapError((e) => new DbError({ message: "project get", cause: e })),
+          ),
 
-      byName: (name) =>
-        Effect.sync((): ProjectRow | null => fetchByName(conn, name) ?? null).pipe(
-          Effect.mapError((e) => new DbError({ message: "project byName", cause: e })),
-        ),
-    };
-  }),
-);
+        byName: (name) =>
+          Effect.sync((): ProjectRow | null => fetchByName(conn, name) ?? null).pipe(
+            Effect.mapError((e) => new DbError({ message: "project byName", cause: e })),
+          ),
+      };
+    }),
+  );

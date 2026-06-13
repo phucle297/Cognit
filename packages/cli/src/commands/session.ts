@@ -47,9 +47,7 @@ const parseActor = (
   const name = raw.slice(0, idx);
   const type = raw.slice(idx + 1) as ActorType;
   if (!VALID_ACTOR_TYPES.has(type)) {
-    process.stderr.write(
-      `cognit: --actor type must be one of human|worker|system, got: ${type}\n`,
-    );
+    process.stderr.write(`cognit: --actor type must be one of human|worker|system, got: ${type}\n`);
     process.exitCode = 2;
     return { name: defaultName, type: defaultType };
   }
@@ -67,9 +65,7 @@ const requireProjectRoot = (): string => {
 };
 
 const loadProject = (root: string): Promise<{ id: string; name: string }> =>
-  Effect.runPromise(
-    withAppLayer(root, loadProjectEffect(root)),
-  );
+  Effect.runPromise(withAppLayer(root, loadProjectEffect(root)));
 
 const loadProjectEffect = (root: string) =>
   Effect.gen(function* () {
@@ -141,30 +137,20 @@ const printSessionTable = (sessions: ReadonlyArray<SessionRow>): void => {
   // Compute max width per column for readable output. Goal is allowed
   // to truncate; everything else fits in the row.
   const truncate = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
-  const header = ["ID", "STATUS", "GOAL", "CREATED_AT", "EVENTS", "LAST_SNAPSHOT"];
-  const eventCounts = sessions.map((s) =>
-    `${eventCountOf(s)}`.padStart(6),
-  );
+  const header = ["ID", "STATUS", "GOAL", "CREATED_AT", "SNAPSHOTTED", "LAST_SNAPSHOT"];
+  const snapshotted = sessions.map((s) => (s.last_snapshot_event_id ? "yes" : "no"));
   const rows = sessions.map((s, i) => [
     s.id,
     s.status,
     truncate(s.goal, 40),
     s.created_at,
-    eventCounts[i] ?? "     0",
+    snapshotted[i] ?? "no",
     s.last_snapshot_event_id ?? "-",
   ]);
   // All rows have the same length as header
   process.stdout.write(header.join(" | ") + "\n");
   process.stdout.write(header.map((h) => "-".repeat(h.length)).join("-+-") + "\n");
   for (const r of rows) process.stdout.write(r.join(" | ") + "\n");
-};
-
-const eventCountOf = (s: SessionRow): number => {
-  // We don't have an event count column on SessionRow; the CLI's
-  // `session list` is meant to be a quick overview, so we render "-"
-  // for the column when the pointer is null. (Plan says columns
-  // include events and last_snapshot.)
-  return s.last_snapshot_event_id ? 1 : 0;
 };
 
 const printSessionShow = (result: SessionShowResult): void => {
@@ -175,9 +161,13 @@ const printSessionShow = (result: SessionShowResult): void => {
   process.stdout.write(`  parent_session_id:     ${s.parent_session_id ?? "-"}\n`);
   process.stdout.write(`  created_at:            ${s.created_at}\n`);
   process.stdout.write(`  closed_at:             ${s.closed_at ?? "-"}\n`);
-  process.stdout.write(`  last_snapshot_event_id:${s.last_snapshot_event_id ? " " + s.last_snapshot_event_id : " -"}\n`);
+  process.stdout.write(
+    `  last_snapshot_event_id:${s.last_snapshot_event_id ? " " + s.last_snapshot_event_id : " -"}\n`,
+  );
   process.stdout.write(`  snapshot_event_id:     ${result.snapshot?.id ?? "-"}\n`);
-  process.stdout.write(`  event_count:           ${result.snapshot?.event_count ?? result.tail_event_count}\n`);
+  process.stdout.write(
+    `  event_count:           ${result.snapshot?.event_count ?? result.tail_event_count}\n`,
+  );
   process.stdout.write(`  tail_event_count:      ${result.tail_event_count}\n`);
 
   const st = result.state;
@@ -237,10 +227,7 @@ const printSessionShow = (result: SessionShowResult): void => {
 // "cognit:" prefix and sets a non-zero exit code. The caller passes
 // an Effect whose R-channel is satisfied by the app layer; we wrap
 // it in `withAppLayer` here so the command bodies don't have to.
-const runCommand = <A, E, R>(
-  root: string,
-  eff: Effect.Effect<A, E, R>,
-): Promise<A> => {
+const runCommand = <A, E, R>(root: string, eff: Effect.Effect<A, E, R>): Promise<A> => {
   // Provide the app layer. The effect's R-channel is partially
   // stripped by `withAppLayer`; the cast lets us run it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

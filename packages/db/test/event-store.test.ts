@@ -29,12 +29,7 @@ import { EventStoreLive } from "../src/event-store";
  */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(
-    RedactorLive,
-    MigrationRegistryLive,
-    UuidTest,
-    LoggerNoop,
-  );
+  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
   return Layer.merge(
     Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn),
     Layer.merge(dbConn, LoggerNoop),
@@ -42,19 +37,16 @@ const makeTestLayer = (dbPath: string) => {
 };
 
 const withTempDb = (): Promise<string> =>
-  fs
-    .mkdtemp(path.join(os.tmpdir(), "cognit-test-"))
-    .then((dir) => path.join(dir, "cognit.db"));
+  fs.mkdtemp(path.join(os.tmpdir(), "cognit-test-")).then((dir) => path.join(dir, "cognit.db"));
 
-const setupProjectAndSession = (
-  conn: Context.Tag.Service<typeof DbConnection>,
-): string => {
+const setupProjectAndSession = (conn: Context.Tag.Service<typeof DbConnection>): string => {
   const projectId = "01projectxxxxxxxxxxxxxxxxx";
   const sessionId = "01sessionxxxxxxxxxxxxxxxxx";
-  conn.handle.run(
-    `INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`,
-    [projectId, "test-project", new Date().toISOString()],
-  );
+  conn.handle.run(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`, [
+    projectId,
+    "test-project",
+    new Date().toISOString(),
+  ]);
   conn.handle.run(
     `INSERT INTO sessions (id, project_id, goal, status, created_at) VALUES (?, ?, ?, ?, ?)`,
     [sessionId, projectId, "goal", "active", new Date().toISOString()],
@@ -70,11 +62,7 @@ describe("EventStore", () => {
 
   const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
     Effect.runPromise(
-      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<
-        A,
-        E,
-        never
-      >,
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
     );
 
   it("appends an event and reads it back", async () => {
@@ -91,12 +79,8 @@ describe("EventStore", () => {
         });
         expect(inserted.type).toBe("observation_recorded");
         expect(inserted.version).toBe(CURRENT_VERSION);
-        expect(JSON.parse(inserted.payload_json).text).toBe(
-          "the moon is made of cheese",
-        );
-        const got = yield* store
-          .get(inserted.id)
-          .pipe(Effect.either);
+        expect(JSON.parse(inserted.payload_json).text).toBe("the moon is made of cheese");
+        const got = yield* store.get(inserted.id).pipe(Effect.either);
         expect(Either.isRight(got)).toBe(true);
         if (Either.isRight(got)) {
           expect(got.right.id).toBe(inserted.id);
@@ -112,9 +96,7 @@ describe("EventStore", () => {
         const conn = yield* DbConnection;
         setupProjectAndSession(conn);
         const store = yield* EventStore;
-        const result = yield* store
-          .get("01nonexistentxxxxxxxxxxxx")
-          .pipe(Effect.either);
+        const result = yield* store.get("01nonexistentxxxxxxxxxxxx").pipe(Effect.either);
         expect(Either.isLeft(result)).toBe(true);
         if (Either.isLeft(result)) {
           expect((result.left as { _tag: string })._tag).toBe("NotFound");
@@ -179,9 +161,7 @@ describe("EventStore", () => {
           .pipe(Effect.either);
         expect(Either.isLeft(result)).toBe(true);
         if (Either.isLeft(result)) {
-          expect((result.left as { _tag: string })._tag).toBe(
-            "ValidationFailure",
-          );
+          expect((result.left as { _tag: string })._tag).toBe("ValidationFailure");
         }
       }),
     );
@@ -329,9 +309,7 @@ describe("EventStore", () => {
           .pipe(Effect.either);
         expect(Either.isLeft(result)).toBe(true);
         if (Either.isLeft(result)) {
-          expect((result.left as { _tag: string })._tag).toBe(
-            "UnknownEventType",
-          );
+          expect((result.left as { _tag: string })._tag).toBe("UnknownEventType");
         }
       }),
     );
@@ -353,9 +331,7 @@ describe("EventStore", () => {
           .pipe(Effect.either);
         expect(Either.isLeft(result)).toBe(true);
         if (Either.isLeft(result)) {
-          expect((result.left as { _tag: string })._tag).toBe(
-            "ValidationFailure",
-          );
+          expect((result.left as { _tag: string })._tag).toBe("ValidationFailure");
         }
       }),
     );

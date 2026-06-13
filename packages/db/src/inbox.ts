@@ -2,13 +2,14 @@ import { Context, Effect, Either, Runtime, Schema } from "effect";
 import chokidar from "chokidar";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { EventStore, Logger } from "./context";
+import { Logger } from "./context";
 import { InboxError } from "./errors";
 import type { AppendEventInput } from "./event-store";
 import { ActorType } from "./actor";
+import { SessionService, type SessionAppendEventInput } from "./session-service";
 
-type EventStoreService = Context.Tag.Service<typeof EventStore>;
 type LoggerService = Context.Tag.Service<typeof Logger>;
+type SessionServiceT = Context.Tag.Service<typeof SessionService>;
 
 /**
  * Decode a free-form `actor_type` string from the JSON payload. Rejects
@@ -27,6 +28,9 @@ const decodeActorType = (s: string): Either.Either<ActorType, unknown> =>
  *
  * Idempotency is enforced by `appendEvent` (duplicate `id` returns the
  * existing row, no double insert).
+ *
+ * The snapshot policy is sourced from the `SessionPolicy` service on
+ * the R channel (see `SessionService.appendEvent` → `SessionPolicy.everyN`).
  */
 export interface InboxWatcherConfig {
   readonly inboxDir: string;
@@ -51,7 +55,7 @@ const moveFile = (from: string, to: string, logger: LoggerService, label: string
 
 export const makeInboxWatcher = (config: InboxWatcherConfig) =>
   Effect.gen(function* () {
-    const store: EventStoreService = yield* EventStore;
+    const sessions: SessionServiceT = yield* SessionService;
     const logger: LoggerService = yield* Logger;
 
     yield* Effect.tryPromise({
@@ -72,7 +76,7 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
      * Pure processing step: read file, parse, attempt append, move to
      * success or error dir. This is what unit tests exercise.
      */
-    const processFile = (filePath: string): Effect.Effect<void, never, EventStore | Logger> =>
+    const processFile = (filePath: string): Effect.Effect<void, never, SessionService | Logger> =>
       Effect.gen(function* () {
         const base = path.basename(filePath);
         let text: string;
@@ -133,26 +137,31 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           return;
         }
         const actorType = actorTypeResult.right;
-        const appendResult = yield* store
-          .append({
-            ...(p.id !== undefined ? { id: p.id } : {}),
-            type: p.type,
-            payload: p.payload,
-            sessionId: p.session_id,
-            actor: { name: p.actor_name, type: actorType },
-            ...(p.source !== undefined ? { source: p.source } : {}),
-            ...(p.artifactRefs !== undefined ? { artifactRefs: p.artifactRefs } : {}),
-            ...(p.causationId !== undefined ? { causationId: p.causationId } : {}),
-            ...(p.correlationId !== undefined ? { correlationId: p.correlationId } : {}),
-            ...(p.confidence !== undefined ? { confidence: p.confidence } : {}),
-            ...(p.parentVerificationId !== undefined
-              ? { parentVerificationId: p.parentVerificationId }
-              : {}),
-            ...(p.linkedHypothesisId !== undefined
-              ? { linkedHypothesisId: p.linkedHypothesisId }
-              : {}),
-          })
-          .pipe(Effect.either);
+        // Build the input for SessionService.appendEvent. The explicit
+        // `id` from the inbox JSON is forwarded so duplicate-rename
+        // reprocessing is idempotent at the event-store layer.
+        // `SessionService.appendEvent` reads the configured
+        // `SessionPolicy.everyN` to trigger an auto-snapshot when the
+        // threshold is crossed.
+        const sessionInput: SessionAppendEventInput = {
+          type: p.type,
+          payload: p.payload,
+          sessionId: p.session_id,
+          actor: { name: p.actor_name, type: actorType },
+          ...(p.id !== undefined ? { id: p.id } : {}),
+          ...(p.source !== undefined ? { source: p.source } : {}),
+          ...(p.artifactRefs !== undefined ? { artifactRefs: p.artifactRefs } : {}),
+          ...(p.causationId !== undefined ? { causationId: p.causationId } : {}),
+          ...(p.correlationId !== undefined ? { correlationId: p.correlationId } : {}),
+          ...(p.confidence !== undefined ? { confidence: p.confidence } : {}),
+          ...(p.parentVerificationId !== undefined
+            ? { parentVerificationId: p.parentVerificationId }
+            : {}),
+          ...(p.linkedHypothesisId !== undefined
+            ? { linkedHypothesisId: p.linkedHypothesisId }
+            : {}),
+        };
+        const appendResult = yield* sessions.appendEvent(sessionInput).pipe(Effect.either);
         if (Either.isLeft(appendResult)) {
           yield* logger.log(
             "error",
@@ -163,10 +172,14 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           return;
         }
         const result = appendResult.right;
-        yield* logger.log("info", { eventId: result.id, type: p.type }, "inbox: appended");
+        yield* logger.log(
+          "info",
+          { eventId: result.event.id, type: p.type, snapshotTaken: result.snapshotTaken },
+          "inbox: appended",
+        );
         yield* moveFile(
           filePath,
-          path.join(config.processedDir, `${result.id}.json`),
+          path.join(config.processedDir, `${result.event.id}.json`),
           logger,
           "move-to-processed",
         );
@@ -203,7 +216,7 @@ export const inboxIgnored = (p: string): boolean => {
  */
 export const drainInbox = (
   config: InboxWatcherConfig,
-): Effect.Effect<{ processed: number; errored: number }, never, EventStore | Logger> =>
+): Effect.Effect<{ processed: number; errored: number }, never, SessionService | Logger> =>
   Effect.gen(function* () {
     const { processFile } = yield* makeInboxWatcher(config);
     const listDir = (dir: string): Effect.Effect<ReadonlyArray<string>, never, never> =>
@@ -239,17 +252,17 @@ export const drainInbox = (
  * and hands each stable `.json` to `processFile`. Returns an Effect that
  * runs forever (use `Effect.scoped` or `Fiber` to cancel).
  *
- * Callers must provide `EventStore | Logger` to satisfy the R-channel.
+ * Callers must provide `SessionService | Logger` to satisfy the R-channel.
  * The watcher materialises this R into a `Runtime` once, then forks each
  * per-file effect onto that runtime — avoiding the `MissingServiceError`
  * trap of an unsafe effect-channel-narrowing cast.
  */
 export const runInboxWatcher = (
   config: InboxWatcherConfig,
-): Effect.Effect<{ stop: () => Promise<void> }, never, EventStore | Logger> =>
+): Effect.Effect<{ stop: () => Promise<void> }, never, SessionService | Logger> =>
   Effect.gen(function* () {
     const { processFile } = yield* makeInboxWatcher(config);
-    const runtime = yield* Effect.runtime<EventStore | Logger>();
+    const runtime = yield* Effect.runtime<SessionService | Logger>();
     const watcher = chokidar.watch(config.inboxDir, {
       ignored: inboxIgnored,
       persistent: true,
@@ -258,7 +271,7 @@ export const runInboxWatcher = (
     watcher.on("add", (filePath) => {
       if (!filePath.endsWith(".json")) return;
       // Fire-and-forget; the store handles its own retries via idempotency.
-      // The runtime carries the EventStore | Logger R-channel into the fork.
+      // The runtime carries the SessionService | Logger R-channel into the fork.
       Runtime.runFork(runtime, processFile(filePath));
     });
     return {

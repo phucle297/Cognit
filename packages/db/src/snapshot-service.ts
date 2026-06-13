@@ -48,19 +48,15 @@ export interface SnapshotTakeIfDueInput {
 }
 
 export interface SnapshotServiceShape {
-  readonly write: (
-    input: SnapshotWriteInput,
-  ) => Effect.Effect<SnapshotRow, DbError>;
-  readonly latestForSession: (
-    sessionId: string,
-  ) => Effect.Effect<SnapshotRow | null, DbError>;
-  readonly takeIfDue: (
-    input: SnapshotTakeIfDueInput,
-  ) => Effect.Effect<SnapshotRow | null, DbError>;
+  readonly write: (input: SnapshotWriteInput) => Effect.Effect<SnapshotRow, DbError>;
+  readonly latestForSession: (sessionId: string) => Effect.Effect<SnapshotRow | null, DbError>;
+  readonly takeIfDue: (input: SnapshotTakeIfDueInput) => Effect.Effect<SnapshotRow | null, DbError>;
   /** Lower-level: just write a row, used by tests. */
-  readonly _writeRaw: (row: Omit<SnapshotRow, "created_at"> & {
-    created_at: string;
-  }) => Effect.Effect<SnapshotRow, DbError>;
+  readonly _writeRaw: (
+    row: Omit<SnapshotRow, "created_at"> & {
+      created_at: string;
+    },
+  ) => Effect.Effect<SnapshotRow, DbError>;
 }
 
 export class SnapshotService extends Context.Tag("@cognit/db/SnapshotService")<
@@ -125,16 +121,23 @@ export const SnapshotServiceLive: Layer.Layer<
             conn.handle.run(
               `INSERT INTO snapshots (id, session_id, event_id, state_json, event_count, created_at)
                VALUES (?, ?, ?, ?, ?, ?)`,
-              [row.id, row.session_id, row.event_id, row.state_json, row.event_count, row.created_at],
+              [
+                row.id,
+                row.session_id,
+                row.event_id,
+                row.state_json,
+                row.event_count,
+                row.created_at,
+              ],
             ),
           (e) => new DbError({ message: "snapshot: write", cause: e }),
         );
         yield* trySync(
           () =>
-            conn.handle.run(
-              "UPDATE sessions SET last_snapshot_event_id = ? WHERE id = ?",
-              [row.event_id, row.session_id],
-            ),
+            conn.handle.run("UPDATE sessions SET last_snapshot_event_id = ? WHERE id = ?", [
+              row.event_id,
+              row.session_id,
+            ]),
           (e) => new DbError({ message: "snapshot: update session", cause: e }),
         );
         yield* logger.log(

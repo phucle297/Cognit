@@ -142,11 +142,7 @@ const isConclusionLifecycle = (s: string): s is ConclusionLifecycle =>
   s === "unverified" || s === "verified" || s === "rejected";
 
 const isVerificationLifecycle = (s: string): s is VerificationLifecycle =>
-  s === "started" ||
-  s === "passed" ||
-  s === "failed" ||
-  s === "errored" ||
-  s === "cancelled";
+  s === "started" || s === "passed" || s === "failed" || s === "errored" || s === "cancelled";
 
 const isSessionLifecycle = (s: string): s is SessionLifecycle =>
   s === "active" || s === "paused" || s === "closed";
@@ -184,9 +180,19 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       };
     }
     case "session_paused":
-      return { ...next, status: "paused", last_event_id: event.id, last_event_at: event.created_at };
+      return {
+        ...next,
+        status: "paused",
+        last_event_id: event.id,
+        last_event_at: event.created_at,
+      };
     case "session_closed":
-      return { ...next, status: "closed", last_event_id: event.id, last_event_at: event.created_at };
+      return {
+        ...next,
+        status: "closed",
+        last_event_id: event.id,
+        last_event_at: event.created_at,
+      };
 
     case "observation_recorded": {
       const text = getString(payload, "text") ?? "";
@@ -820,11 +826,13 @@ export const reduce = (
       }
     }
   }
-  let state: SessionState = initial ?? emptySessionState({
-    session_id: "",
-    project_id: "",
-    goal: "",
-  });
+  let state: SessionState =
+    initial ??
+    emptySessionState({
+      session_id: "",
+      project_id: "",
+      goal: "",
+    });
   for (let i = startIndex; i < ordered.length; i++) {
     const e = ordered[i];
     if (!e) continue;
