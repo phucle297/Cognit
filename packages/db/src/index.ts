@@ -21,6 +21,7 @@ export * from "./redaction";
 export * from "./event-store";
 export * from "./inbox";
 export * from "./connection";
+export * from "./project-service";
 export * from "./session-service";
 export * from "./snapshot-service";
 export * from "./layers/live";

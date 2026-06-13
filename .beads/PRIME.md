@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 2f. SnapshotService: write / latestForSession / takeIfDue
+search: 2g. Snapshot policy integration: explicit + on-close
 queue: 
 next: Cognit-i9v

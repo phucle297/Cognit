@@ -1,10 +1,11 @@
 import { Layer } from "effect";
-import { EventStore, LoggerNoop } from "../context";
+import { DbConnection, EventStore, LoggerNoop } from "../context";
 import { DbConnectionLive } from "../connection";
 import { EventStoreLive } from "../event-store";
 import { RedactorLive } from "../redaction";
 import { MigrationRegistryLive } from "../migrate";
 import { UuidLive } from "../ulid";
+import { ProjectService, ProjectServiceLive } from "../project-service";
 import { SessionService, SessionServiceLive } from "../session-service";
 import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
 import type { DbError, DbCorrupted } from "../errors";
@@ -17,13 +18,18 @@ import type { DbError, DbCorrupted } from "../errors";
  *   - EventStore       (append / list / get)
  *   - SessionService   (CRUD over `sessions` + lifecycle events)
  *   - SnapshotService  (write / latest / takeIfDue)
+ *   - ProjectService   (read + idempotent insert on `projects`)
  *   - Redactor         (built-in patterns, no user patterns)
  *   - MigrationRegistry (pure transforms)
  *   - Uuid             (monotonic ulid)
  *   - Logger           (no-op; replace with a structured one in prod)
  *
- * Layer composition is dep-aware: each consumer's R channel is satisfied
- * by `Layer.provide`, not by `Layer.mergeAll` (which only zips outputs).
+ * Layer composition: ONE DbConnection is built per DbLive call and
+ * shared by all services. If you build `DbConnectionLive(dbPath)` more
+ * than once and merge the results, each service gets its own sqlite
+ * handle and the database appears empty from the others' point of
+ * view. The build pattern below uses a single connection layer to
+ * prevent that footgun.
  */
 const leafs = Layer.mergeAll(
   RedactorLive,
@@ -32,42 +38,59 @@ const leafs = Layer.mergeAll(
   LoggerNoop,
 );
 
-/** Base layer: DbConnection + EventStore, deps satisfied. */
-const baseLayer = (dbPath: string) =>
-  Layer.provide(Layer.provide(EventStoreLive, leafs), DbConnectionLive(dbPath));
-
-/** SnapshotServiceLive depends on DbConnection + leafs (Uuid + Logger). */
-const snapshotServiceLayer = (dbPath: string) =>
-  Layer.provide(
-    SnapshotServiceLive,
-    Layer.provide(leafs, DbConnectionLive(dbPath)),
-  );
-
 /**
- * Full live layer for the local `.cognit/cognit.db`. Provides EventStore,
- * SessionService, and SnapshotService. The Layer's R channel is `never`
- * — all deps are satisfied internally.
- *
- * SessionServiceLive now also depends on SnapshotService (for on-close
- * snapshots). We pre-build the snapshot layer and feed it to the session
- * layer's R channel, then merge all three into one.
+ * Full live layer for the local `.cognit/cognit.db`. Provides DbConnection,
+ * EventStore, SessionService, SnapshotService, and ProjectService.
+ * The Layer's R channel is `never` — all deps are satisfied internally.
  */
 export const DbLive = (
   dbPath: string,
 ): Layer.Layer<
-  EventStore | SessionService | SnapshotService,
+  DbConnection | EventStore | SessionService | SnapshotService | ProjectService,
   DbError | DbCorrupted,
   never
 > => {
-  const base = baseLayer(dbPath);
-  const snapshots = snapshotServiceLayer(dbPath);
-  // SessionService needs EventStore + SnapshotService + leafs.
-  const sessions = Layer.provide(
-    Layer.provide(SessionServiceLive, leafs),
-    Layer.merge(base, snapshots),
+  // Build ONE DbConnection and feed it to every service. This is the
+  // critical change from the earlier pattern where each service had
+  // its own connection: that pattern only worked in tests where the
+  // test layer constructed its own shared `dbConn` and provided it
+  // explicitly. Production code (e.g. the CLI) hits the multi-conn
+  // footgun and gets "Service not found" at runtime.
+  const dbConn = DbConnectionLive(dbPath);
+  // EventStore needs DbConnection + Redactor + Uuid + Logger (leafs).
+  const eventStore = Layer.provide(
+    Layer.provide(EventStoreLive, leafs),
+    dbConn,
   );
-  return Layer.merge(Layer.merge(base, sessions), snapshots) as Layer.Layer<
-    EventStore | SessionService | SnapshotService,
+  // SnapshotService needs DbConnection + Uuid + Logger.
+  const snapshots = Layer.provide(
+    SnapshotServiceLive,
+    Layer.merge(leafs, dbConn),
+  );
+  // ProjectService needs DbConnection + Uuid + Logger.
+  const projects = Layer.provide(
+    ProjectServiceLive,
+    Layer.merge(leafs, dbConn),
+  );
+  // SessionService needs EventStore + SnapshotService + leafs.
+  // After we provide eventStore and snapshots below, the only
+  // remaining dep on R is from the leafs, which we already provided.
+  const sessions = Layer.provide(
+    Layer.provide(
+      Layer.provide(SessionServiceLive, leafs),
+      Layer.merge(eventStore, snapshots),
+    ),
+    leafs,
+  );
+  // Build a public layer providing DbConnection + the four services.
+  // Using Layer.provide on a Layer.merge merges the outputs and
+  // satisfies the R channel.
+  const inner = Layer.merge(
+    Layer.merge(Layer.merge(eventStore, sessions), snapshots),
+    projects,
+  );
+  return Layer.provide(inner, dbConn) as Layer.Layer<
+    DbConnection | EventStore | SessionService | SnapshotService | ProjectService,
     DbError | DbCorrupted,
     never
   >;
