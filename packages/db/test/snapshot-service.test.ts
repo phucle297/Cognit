@@ -382,4 +382,51 @@ describe("SnapshotService", () => {
       }),
     );
   });
+
+  it("serializeState round-trips Map fields (the bug that bit the E2E test)", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SnapshotService;
+        const { sessionId, eventId } = setupProjectAndSession(conn);
+        // Build a state with a non-empty Map; the original bug dropped
+        // Map contents on serialize, leaving the JSON with an empty
+        // `{}` for the field.
+        const state = {
+          ...sampleState(),
+          hypotheses: new Map([
+            [
+              "h1",
+              {
+                id: "h1",
+                title: "leak",
+                text: "turbopack bug",
+                current_state: "rejected" as const,
+                current_confidence: 0.1,
+                current_reason: "evidence",
+                reason_type: "evidence" as const,
+                superseded_by_id: null,
+                promoted_to_theory_id: null,
+                belongs_to_theory_id: null,
+                created_at: "2026-01-01T00:00:00.000Z",
+                last_event_id: "01eventxxxxxxxxxxxxxxxxxx1",
+                last_event_at: "2026-01-01T00:00:00.000Z",
+              },
+            ],
+          ]),
+        };
+        const written = yield* service.write({
+          sessionId,
+          state,
+          eventId,
+          eventCount: 1,
+        });
+        // The serialized JSON must contain the Map's entries by key.
+        const parsed = JSON.parse(written.state_json) as { hypotheses: Record<string, unknown> };
+        expect(parsed.hypotheses).toBeDefined();
+        expect(Object.keys(parsed.hypotheses)).toContain("h1");
+        expect((parsed.hypotheses.h1 as { id: string }).id).toBe("h1");
+      }),
+    );
+  });
 });

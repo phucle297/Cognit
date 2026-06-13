@@ -74,9 +74,23 @@ const nowIso = (): string => new Date().toISOString();
  * Serialize a SessionState to a deterministic JSON string. Object keys
  * are sorted at every nesting level so two snapshots of the same state
  * produce byte-equal output. This keeps snapshot dedup trivial.
+ *
+ * Map handling: `SessionState` carries several `ReadonlyMap`s
+ * (hypotheses, decisions, …). `JSON.stringify` silently drops Map
+ * contents because `Object.keys(new Map())` is `[]`. We explicitly
+ * convert each Map to an object keyed by its entries (the map's `id`
+ * field), then recurse into the values, so a snapshot round-trip
+ * preserves the entity state.
  */
 const serializeState = (state: SessionState): string => {
   const sortKeys = (v: unknown): unknown => {
+    if (v instanceof Map) {
+      const obj: Record<string, unknown> = {};
+      for (const [k, val] of v.entries()) {
+        obj[String(k)] = val;
+      }
+      return sortKeys(obj);
+    }
     if (Array.isArray(v)) return v.map(sortKeys);
     if (v && typeof v === "object") {
       const obj = v as Record<string, unknown>;

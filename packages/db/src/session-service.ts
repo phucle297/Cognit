@@ -230,6 +230,44 @@ const foldSession = (
     return { state, events };
   });
 
+/**
+ * Field names on `SessionState` that hold a `ReadonlyMap`. Used by
+ * `rehydrateSessionState` to convert the JSON object form back to
+ * Maps. Adding a new Map field to `SessionState`? Add it here.
+ */
+const MAP_FIELDS: ReadonlySet<string> = new Set([
+  "hypotheses",
+  "theories",
+  "experiments",
+  "decisions",
+  "conclusions",
+  "verifications",
+  "artifacts",
+]);
+
+/**
+ * Convert the JSON-parsed `state_json` of a snapshot back into a
+ * `SessionState` shape that the reducer accepts. Map-typed fields
+ * are rebuilt from their object form (the serializer converts each
+ * Map to a key-sorted plain object on write).
+ */
+const rehydrateSessionState = (parsed: Record<string, unknown>): SessionState => {
+  const out: Record<string, unknown> = { ...parsed };
+  for (const k of MAP_FIELDS) {
+    const v = out[k];
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const m = new Map<string, unknown>();
+      for (const [id, val] of Object.entries(v as Record<string, unknown>)) {
+        m.set(id, val);
+      }
+      out[k] = m;
+    } else {
+      out[k] = new Map();
+    }
+  }
+  return out as unknown as SessionState;
+};
+
 export const SessionServiceLive: Layer.Layer<
   SessionService,
   never,
@@ -588,8 +626,8 @@ export const SessionServiceLive: Layer.Layer<
           let tail: ReadonlyArray<EventRow>;
           if (snapshot) {
             try {
-              const parsed = JSON.parse(snapshot.state_json) as SessionState;
-              base = parsed;
+              const parsed = JSON.parse(snapshot.state_json) as Record<string, unknown>;
+              base = rehydrateSessionState(parsed);
             } catch {
               base = undefined;
             }

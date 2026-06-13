@@ -3,3 +3,5 @@
 {"id":"int-2250ce45","kind":"field_change","created_at":"2026-06-13T14:59:13.931400564Z","actor":"PerMees","issue_id":"Cognit-i9v","extra":{"field":"assignee","new_value":"PerMees","old_value":""}}
 {"id":"int-759a28c4","kind":"field_change","created_at":"2026-06-13T15:20:12.801057567Z","actor":"PerMees","issue_id":"Cognit-i9v","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-6179519c","kind":"field_change","created_at":"2026-06-13T15:20:58.231075269Z","actor":"PerMees","issue_id":"Cognit-mej","extra":{"field":"assignee","new_value":"PerMees","old_value":""}}
+{"id":"int-9da74860","kind":"field_change","created_at":"2026-06-13T15:32:07.079665983Z","actor":"PerMees","issue_id":"Cognit-mej","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-d386f9a5","kind":"field_change","created_at":"2026-06-13T15:32:40.984570655Z","actor":"PerMees","issue_id":"Cognit-x3n","extra":{"field":"assignee","new_value":"PerMees","old_value":""}}

@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 2i. CLI: cognit session {create,list,resume,pause,close,show} + cognit snapshot
+search: 1i. Wire CLI: cognit append (manual event write) + cognit inbox watch (daemon)
 queue: 
 next: Cognit-x3n
