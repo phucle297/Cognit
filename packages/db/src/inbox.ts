@@ -189,6 +189,52 @@ export const inboxIgnored = (p: string): boolean => {
 };
 
 /**
+ * One-shot drain of every `.json` file currently in `inboxDir`. Each
+ * file is processed exactly once through `processFile` (which moves
+ * successful files to `processedDir` and failed files to `errorDir`).
+ *
+ * Returns counts of how many ended up in each dir. The way we count
+ * is: snapshot processed/error dir lengths before processing, then
+ * subtract from the post-processing length. This is correct in the
+ * face of pre-existing files in either dir from earlier runs.
+ *
+ * This is the CLI's `--process` path. The long-running `--watch` path
+ * uses `runInboxWatcher` instead.
+ */
+export const drainInbox = (
+  config: InboxWatcherConfig,
+): Effect.Effect<{ processed: number; errored: number }, never, EventStore | Logger> =>
+  Effect.gen(function* () {
+    const { processFile } = yield* makeInboxWatcher(config);
+    const listDir = (dir: string): Effect.Effect<ReadonlyArray<string>, never, never> =>
+      Effect.tryPromise({
+        try: () => fs.readdir(dir),
+        catch: () => [] as ReadonlyArray<string>,
+      }).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+    const beforeProcessed = (yield* listDir(config.processedDir)).filter((n) =>
+      n.endsWith(".json"),
+    ).length;
+    const beforeErrored = (yield* listDir(config.errorDir)).filter((n) =>
+      n.endsWith(".json"),
+    ).length;
+    const entries = yield* listDir(config.inboxDir);
+    for (const name of entries) {
+      if (!name.endsWith(".json")) continue;
+      yield* processFile(path.join(config.inboxDir, name));
+    }
+    const afterProcessed = (yield* listDir(config.processedDir)).filter((n) =>
+      n.endsWith(".json"),
+    ).length;
+    const afterErrored = (yield* listDir(config.errorDir)).filter((n) =>
+      n.endsWith(".json"),
+    ).length;
+    return {
+      processed: afterProcessed - beforeProcessed,
+      errored: afterErrored - beforeErrored,
+    };
+  });
+
+/**
  * Long-running watcher. Spawns a chokidar FSWatcher on inboxDir, debounces,
  * and hands each stable `.json` to `processFile`. Returns an Effect that
  * runs forever (use `Effect.scoped` or `Fiber` to cancel).

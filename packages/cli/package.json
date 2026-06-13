@@ -17,6 +17,7 @@
   "dependencies": {
     "@cognit/core": "workspace:*",
     "@cognit/db": "workspace:*",
+    "chokidar": "^4.0.0",
     "commander": "12.1.0",
     "effect": "3.21.3",
     "yaml": "2.6.1"

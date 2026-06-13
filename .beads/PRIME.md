@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 2g. Snapshot policy integration: explicit + on-close
+search: 2i. CLI: cognit session {create,list,resume,pause,close,show} + cognit snapshot
 queue: 
-next: Cognit-i9v
+next: Cognit-x3n

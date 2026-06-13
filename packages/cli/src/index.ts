@@ -4,6 +4,8 @@ import { registerInit } from "./commands/init.js";
 import { registerConfig } from "./commands/config.js";
 import { registerSession } from "./commands/session.js";
 import { registerSnapshot } from "./commands/snapshot.js";
+import { registerAppend } from "./commands/append.js";
+import { registerInbox } from "./commands/inbox.js";
 
 const program = new Command();
 
@@ -16,6 +18,8 @@ registerInit(program);
 registerConfig(program);
 registerSession(program);
 registerSnapshot(program);
+registerAppend(program);
+registerInbox(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`cognit: ${(err as Error).message}\n`);
