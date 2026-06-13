@@ -13,6 +13,8 @@ import {
   RedactorLive,
   SessionService,
   SessionServiceLive,
+  SnapshotService,
+  SnapshotServiceLive,
   UuidTest,
 } from "../src";
 import { EventStoreLive } from "../src/event-store";
@@ -21,8 +23,8 @@ import { EventStoreLive } from "../src/event-store";
  * Test layer composing all the services the SessionService test needs.
  *
  * Layer.provide is used to satisfy R channels; Layer.merge is used to
- * combine outputs. The result provides DbConnection, EventStore, and
- * SessionService so test bodies can yield any of them.
+ * combine outputs. The result provides DbConnection, EventStore,
+ * SessionService, and SnapshotService so test bodies can yield any of them.
  */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
@@ -34,17 +36,18 @@ const makeTestLayer = (dbPath: string) => {
   );
   // eventStore consumes DbConnection once; dbConn is merged back in below.
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
-  // sessionService still needs DbConnection + Uuid + Logger after EventStore
-  // is provided. We pass dbConn + leafs together to satisfy that R.
+  // snapshotService depends on DbConnection + leafs.
+  const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
+  // sessionService needs EventStore + SnapshotService + leafs + DbConnection.
   const sessionService = Layer.provide(
     Layer.provide(SessionServiceLive, leafs),
-    Layer.merge(eventStore, dbConn),
+    Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
   );
   return Layer.merge(
-    Layer.merge(eventStore, sessionService),
+    Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
     Layer.merge(dbConn, LoggerNoop),
   ) as Layer.Layer<
-    EventStore | DbConnection | SessionService | Logger,
+    EventStore | DbConnection | SessionService | SnapshotService | Logger,
     never,
     never
   >;
@@ -627,6 +630,149 @@ describe("SessionService.show (reducer view)", () => {
         );
         expect(ver).toBeDefined();
         expect(ver?.verification_id).toBe("01vr");
+      }),
+    );
+  });
+
+  // ─── 2g: snapshot policy integration ─────────────────────────────
+
+  it("close writes a snapshot row and updates last_snapshot_event_id", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        yield* service.close(created.session.id, ACTOR);
+
+        const snap = conn.handle.get<{ event_count: number; event_id: string }>(
+          "SELECT event_count, event_id FROM snapshots WHERE session_id = ?",
+          [created.session.id],
+        );
+        expect(snap).toBeDefined();
+        // session_created + session_closed = 2 events
+        expect(snap?.event_count).toBe(2);
+
+        const row = conn.handle.get<{ last_snapshot_event_id: string | null }>(
+          "SELECT last_snapshot_event_id FROM sessions WHERE id = ?",
+          [created.session.id],
+        );
+        expect(row?.last_snapshot_event_id).toBe(snap?.event_id);
+      }),
+    );
+  });
+
+  it("close on an already-closed session does not write a second snapshot", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        yield* service.close(created.session.id, ACTOR);
+        // Second close: should be a no-op for snapshots
+        yield* service.close(created.session.id, ACTOR);
+        const count = conn.handle.get<{ n: number }>(
+          "SELECT COUNT(*) as n FROM snapshots WHERE session_id = ?",
+          [created.session.id],
+        );
+        expect(count?.n).toBe(1);
+      }),
+    );
+  });
+
+  it("takeSnapshot writes a new snapshot when called explicitly", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        const r = yield* service.takeSnapshot(created.session.id);
+        expect(r.taken).toBe(true);
+        expect(r.snapshot.event_count).toBe(1); // session_created only
+      }),
+    );
+  });
+
+  it("takeSnapshot is idempotent: second call returns existing row (taken=false)", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const service = yield* SessionService;
+        const conn = yield* DbConnection;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        const first = yield* service.takeSnapshot(created.session.id);
+        expect(first.taken).toBe(true);
+        const second = yield* service.takeSnapshot(created.session.id);
+        expect(second.taken).toBe(false);
+        expect(second.snapshot.id).toBe(first.snapshot.id);
+      }),
+    );
+  });
+
+  it("takeSnapshot writes a new row after more events arrive", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const store = yield* EventStore;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "p",
+          actor: ACTOR,
+        });
+        const first = yield* service.takeSnapshot(created.session.id);
+        expect(first.snapshot.event_count).toBe(1);
+        // Append more events
+        yield* store.append({
+          type: "observation_recorded",
+          payload: { text: "a" },
+          sessionId: created.session.id,
+          actor: ACTOR,
+        });
+        yield* store.append({
+          type: "observation_recorded",
+          payload: { text: "b" },
+          sessionId: created.session.id,
+          actor: ACTOR,
+        });
+        const second = yield* service.takeSnapshot(created.session.id);
+        expect(second.taken).toBe(true);
+        expect(second.snapshot.event_count).toBe(3);
+        expect(second.snapshot.id).not.toBe(first.snapshot.id);
+      }),
+    );
+  });
+
+  it("takeSnapshot on unknown session returns UnknownSession", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const service = yield* SessionService;
+        const r = yield* service
+          .takeSnapshot("01nosuchsessionhere00000")
+          .pipe(Effect.either);
+        expect(r._tag).toBe("Left");
+        if (r._tag === "Left") {
+          expect(r.left._tag).toBe("UnknownSession");
+        }
       }),
     );
   });

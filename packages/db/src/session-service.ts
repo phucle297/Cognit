@@ -29,11 +29,13 @@ import type { EventRow, SessionRow, SnapshotRow } from "./schema/rows";
 import { Uuid } from "./ulid";
 import { reduce } from "@cognit/core/reducer";
 import { emptySessionState, type SessionState } from "@cognit/core/state";
+import { SnapshotService } from "./snapshot-service";
 
 export type SessionError = DbError | UnknownEventType | ValidationFailure | UnknownSession;
 
 type DbConnService = Context.Tag.Service<typeof DbConnection>;
 type EventStoreService = Context.Tag.Service<typeof EventStore>;
+type SnapshotServiceT = Context.Tag.Service<typeof SnapshotService>;
 type UuidService = Context.Tag.Service<typeof Uuid>;
 type LoggerService = Context.Tag.Service<typeof Logger>;
 
@@ -124,6 +126,14 @@ export interface SessionServiceShape {
   readonly show: (
     sessionId: string,
   ) => Effect.Effect<SessionShowResult, SessionError | UnknownSession>;
+  /**
+   * Explicit snapshot trigger. Folds all events for the session and
+   * writes a fresh snapshot row. Idempotent: if the latest snapshot
+   * already covers every event, returns the existing row.
+   */
+  readonly takeSnapshot: (
+    sessionId: string,
+  ) => Effect.Effect<{ snapshot: SnapshotRow; taken: boolean }, SessionError | UnknownSession>;
 }
 
 export class SessionService extends Context.Tag("@cognit/db/SessionService")<
@@ -190,15 +200,46 @@ const updateSessionStatus = (
 const fetchSession = (conn: DbConnService, id: string): SessionRow | undefined =>
   conn.handle.get<SessionRow>("SELECT * FROM sessions WHERE id = ?", [id]);
 
+/**
+ * Build the SessionState for a session by reading all events and
+ * folding them through the reducer. Returns `null` when the session
+ * has no events yet.
+ */
+const foldSession = (
+  conn: DbConnService,
+  row: SessionRow,
+): Effect.Effect<{ state: SessionState; events: ReadonlyArray<EventRow> }, DbError> =>
+  Effect.gen(function* () {
+    const events = yield* trySync(
+      () =>
+        conn.handle.all<EventRow>(
+          "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+          [row.id],
+        ),
+      (e) => new DbError({ message: "foldSession: list events", cause: e }),
+    );
+    const state = reduce(
+      events,
+      emptySessionState({
+        session_id: row.id,
+        project_id: row.project_id,
+        goal: row.goal,
+        parent_session_id: row.parent_session_id,
+      }),
+    );
+    return { state, events };
+  });
+
 export const SessionServiceLive: Layer.Layer<
   SessionService,
   never,
-  DbConnection | EventStore | Uuid | Logger
+  DbConnection | EventStore | SnapshotService | Uuid | Logger
 > = Layer.effect(
   SessionService,
   Effect.gen(function* () {
     const conn: DbConnService = yield* DbConnection;
     const store: EventStoreService = yield* EventStore;
+    const snapshots: SnapshotServiceT = yield* SnapshotService;
     const uuid: UuidService = yield* Uuid;
     const logger: LoggerService = yield* Logger;
 
@@ -378,6 +419,31 @@ export const SessionServiceLive: Layer.Layer<
             sessionId,
             actor,
           });
+          // On-close snapshot. Fold all events, write a snapshot at the
+          // last event. Failure here is logged but does not roll back
+          // the close — the event log is the source of truth, the
+          // snapshot is a rebuild optimisation.
+          const folded = yield* foldSession(conn, { ...row, status: "closed", closed_at: closedAt });
+          if (folded.events.length > 0) {
+            const lastEvent = folded.events[folded.events.length - 1] as EventRow;
+            yield* Effect.gen(function* () {
+              const result = yield* snapshots
+                .write({
+                  sessionId,
+                  state: folded.state,
+                  eventId: lastEvent.id,
+                  eventCount: folded.events.length,
+                })
+                .pipe(Effect.either);
+              if (result._tag === "Left") {
+                yield* logger.log(
+                  "warning",
+                  { sessionId, error: String(result.left) },
+                  "session close: snapshot write failed (continuing)",
+                );
+              }
+            });
+          }
           yield* logger.log("info", { sessionId }, "session: closed");
           const updated = fetchSession(conn, sessionId);
           if (!updated) {
@@ -545,6 +611,59 @@ export const SessionServiceLive: Layer.Layer<
             snapshot: snapshot ?? null,
             tail_event_count: tail.length,
           };
+        }),
+
+      takeSnapshot: (sessionId) =>
+        Effect.gen(function* () {
+          const row = yield* trySync(
+            () => fetchSession(conn, sessionId),
+            (e) => new DbError({ message: "session takeSnapshot: fetch", cause: e }),
+          );
+          if (!row) {
+            return yield* Effect.fail(new UnknownSession({ sessionId }));
+          }
+          const events = yield* trySync(
+            () =>
+              conn.handle.all<EventRow>(
+                "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+                [sessionId],
+              ),
+            (e) => new DbError({ message: "session takeSnapshot: list events", cause: e }),
+          );
+          if (events.length === 0) {
+            return yield* Effect.fail(
+              new DbError({
+                message: "session takeSnapshot: no events to snapshot",
+                cause: undefined,
+              }),
+            );
+          }
+          const existing = yield* snapshots.latestForSession(sessionId);
+          if (existing && existing.event_count >= events.length) {
+            return { snapshot: existing, taken: false };
+          }
+          const state = reduce(
+            events,
+            emptySessionState({
+              session_id: row.id,
+              project_id: row.project_id,
+              goal: row.goal,
+              parent_session_id: row.parent_session_id,
+            }),
+          );
+          const lastEvent = events[events.length - 1] as EventRow;
+          const written = yield* snapshots.write({
+            sessionId,
+            state,
+            eventId: lastEvent.id,
+            eventCount: events.length,
+          });
+          yield* logger.log(
+            "info",
+            { sessionId, eventCount: events.length, snapshotId: written.id },
+            "session: snapshot taken",
+          );
+          return { snapshot: written, taken: true };
         }),
     };
   }),

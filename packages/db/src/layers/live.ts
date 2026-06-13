@@ -36,13 +36,6 @@ const leafs = Layer.mergeAll(
 const baseLayer = (dbPath: string) =>
   Layer.provide(Layer.provide(EventStoreLive, leafs), DbConnectionLive(dbPath));
 
-/** SessionServiceLive depends on EventStore + DbConnection + leafs. */
-const sessionServiceLayer = (dbPath: string) =>
-  Layer.provide(
-    Layer.provide(SessionServiceLive, leafs),
-    baseLayer(dbPath),
-  );
-
 /** SnapshotServiceLive depends on DbConnection + leafs (Uuid + Logger). */
 const snapshotServiceLayer = (dbPath: string) =>
   Layer.provide(
@@ -54,6 +47,10 @@ const snapshotServiceLayer = (dbPath: string) =>
  * Full live layer for the local `.cognit/cognit.db`. Provides EventStore,
  * SessionService, and SnapshotService. The Layer's R channel is `never`
  * — all deps are satisfied internally.
+ *
+ * SessionServiceLive now also depends on SnapshotService (for on-close
+ * snapshots). We pre-build the snapshot layer and feed it to the session
+ * layer's R channel, then merge all three into one.
  */
 export const DbLive = (
   dbPath: string,
@@ -63,8 +60,12 @@ export const DbLive = (
   never
 > => {
   const base = baseLayer(dbPath);
-  const sessions = sessionServiceLayer(dbPath);
   const snapshots = snapshotServiceLayer(dbPath);
+  // SessionService needs EventStore + SnapshotService + leafs.
+  const sessions = Layer.provide(
+    Layer.provide(SessionServiceLive, leafs),
+    Layer.merge(base, snapshots),
+  );
   return Layer.merge(Layer.merge(base, sessions), snapshots) as Layer.Layer<
     EventStore | SessionService | SnapshotService,
     DbError | DbCorrupted,
