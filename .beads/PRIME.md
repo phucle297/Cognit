@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 1i. Wire CLI: cognit append (manual event write) + cognit inbox watch (daemon)
+search: 2j. End-to-end: snapshot+tail replay + resume-as-fork
 queue: 
-next: Cognit-x3n
+next: Cognit-3wv

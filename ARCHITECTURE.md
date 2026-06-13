@@ -67,7 +67,7 @@ sdk           ┤         ◄── verification
        │  cli (direct)         │    │  cli `events` tail   │
        │  sdk (programmatic)   │    │  Hono API            │
        │  inbox watcher        │    │  reducer (replay)    │
-       │  HTTP POST /events    │    │  snapshots + tail    │
+       │  HTTP POST /events    │    │  snapshot + tail     │
        └───────────────────────┘    └──────────────────────┘
 ```
 
