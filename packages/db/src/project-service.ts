@@ -34,6 +34,8 @@ export interface ProjectServiceShape {
   readonly ensure: (input: ProjectEnsureInput) => Effect.Effect<ProjectRow, DbError>;
   readonly get: (id: string) => Effect.Effect<ProjectRow | null, DbError>;
   readonly byName: (name: string) => Effect.Effect<ProjectRow | null, DbError>;
+  /** List every project. v1 has at most one row per `.cognit/cognit.db`. */
+  readonly list: () => Effect.Effect<ReadonlyArray<ProjectRow>, DbError>;
 }
 
 export class ProjectService extends Context.Tag("@cognit/db/ProjectService")<
@@ -108,6 +110,13 @@ export const ProjectServiceLive: Layer.Layer<ProjectService, never, DbConnection
           Effect.sync((): ProjectRow | null => fetchByName(conn, name) ?? null).pipe(
             Effect.mapError((e) => new DbError({ message: "project byName", cause: e })),
           ),
+
+        list: () =>
+          Effect.sync((): ReadonlyArray<ProjectRow> =>
+            conn.handle.all<ProjectRow>(
+              `SELECT * FROM projects ORDER BY created_at ASC, id ASC`,
+            ),
+          ).pipe(Effect.mapError((e) => new DbError({ message: "project list", cause: e }))),
       };
     }),
   );

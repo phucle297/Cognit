@@ -93,20 +93,60 @@ export const DbLive = (
   // in the public Layer's output set.
   const cognition = Layer.provide(CognitionServiceLive, sessions);
   // Build a public layer providing DbConnection + the five services.
-  // Using Layer.provide on a Layer.merge merges the outputs and
-  // satisfies the R channel.
-  const inner = Layer.merge(
+  // We MUST include `dbConn` in the merged output set, not just provide
+  // it as an input: `Layer.provide(inner, dbConn)` satisfies `inner`'s
+  // R channel with `dbConn` but does NOT add `dbConn`'s outputs (i.e.
+  // `DbConnection`) to the resulting layer's public outputs. The
+  // `Layer.merge` below puts `dbConn` alongside the services so
+  // `DbConnection` is actually exposed to callers. Without this,
+  // `yield* DbConnection` after `Effect.provide(DbLive(...))` dies
+  // with "Service not found" at runtime (the type cast lies — runtime
+  // uses the actual layer graph, not the declared output type).
+  // Build a public layer. Note: dbConn MUST be in the final merge
+  // (not just as a `Layer.provide` input) so it appears in the
+  // layer's public outputs. The chained `Layer.provide(inner, policy)`
+  // provides dbConn to `inner`'s R channel but does not re-expose
+  // DbConnection in the public output set. So we put dbConn in the
+  // top-level merge below.
+  const services = Layer.merge(
     Layer.merge(
-      Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects),
+      Layer.merge(
+        Layer.merge(Layer.merge(eventStore, sessions), snapshots),
+        projects,
+      ),
       cognition,
     ),
     constraintPolicy,
   );
-  // Provide the SessionPolicy internally so the R channel stays
-  // `never`. Phase 2.5b widens SessionService's R to include
-  // SessionPolicy; the provide chain below satisfies that without
-  // exposing the policy to callers.
-  return Layer.provide(Layer.provide(inner, dbConn), policy) as Layer.Layer<
+  // Close the R channel: services still requires `DbConnection` (from
+  // `sessions` etc.) and `SessionPolicy` (from `sessions`). Use
+  // `Layer.provide` (not `Layer.merge`) to satisfy those R deps —
+  // `Layer.merge` only unions R channels, it does NOT propagate one
+  // side's outputs to satisfy the other's R. Providing `dbConn` to
+  // `services` closes `DbConnection`; then providing `policy` closes
+  // `SessionPolicy`. After both provides, the layer's R is `never`.
+  //
+  // NOTE on the public output: `Layer.provide` CONSUMES its input
+  // layer's outputs to satisfy the inner R — those outputs do NOT
+  // reappear in the resulting layer's public A channel. So
+  // `Layer.provide(services, dbConn)` does NOT expose `DbConnection`
+  // in the public output. To re-expose it (so callers can do
+  // `yield* DbConnection`), we add `dbConn` to a final `Layer.merge`
+  // BELOW. The merge sees `dbConn` as a self-contained piece (R=never,
+  // A=DbConnection) and unions it with the closed services layer.
+  const provided = Layer.provide(
+    Layer.provide(services, dbConn),
+    policy,
+  );
+  // Final public layer: closed services + dbConn (re-exposed for
+  // callers) + LoggerNoop. Order in Layer.merge is irrelevant for
+  // the output union but we list dbConn first to keep it adjacent
+  // to `provided` in the source.
+  const finalLayer = Layer.merge(
+    Layer.merge(provided, dbConn),
+    LoggerNoop,
+  );
+  return finalLayer as Layer.Layer<
     | DbConnection
     | EventStore
     | SessionService

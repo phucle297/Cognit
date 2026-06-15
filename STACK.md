@@ -66,6 +66,7 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 **Why:**
 
 - **Hono** — small, fast, edge-ready, Effect-compatible middleware.
+- **@hono/node-server** — Node adapter for Hono. `serve({fetch, hostname, port})` boots the same `Hono` app we test in-process.
 - **Drizzle** — SQL-first. Queries stay readable, types are real, no codegen step.
 - **Effect Schema** at the boundary — every event payload parsed before it lands in the store. Same `effect` package as the runtime; one ecosystem, no second dependency to drift.
 - **Effect** — typed async, typed errors, dependency injection, resource management. Keeps the event store, reducer, and SDK honest about side effects.
@@ -77,6 +78,34 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 - **Effect Layer composition** — every service is a `Context.Tag` with a `*Live` Layer. Live layer = `Layer.effect(Tag, Effect.gen(function*() { ... deps ... return { methods } }))`. Composed via `Layer.provide(Layer.provide(EventStoreLive, leafs), DbConnectionLive(dbPath))` so each consumer's R channel is satisfied. `Layer.mergeAll` only ZIPS outputs; it does NOT satisfy R channels — use `Layer.provide` for that.
 - **Migration runner** — `packages/db/src/schema/migrations.ts` exports `applyMigrations(db: SqliteHandle): Effect<{ applied }, DbError>`. Bootstraps `schema_version` (idempotent), reads current version, walks the ordered `MIGRATIONS` list, runs each in its own tx with `BEGIN`/`COMMIT`/`ROLLBACK`, upserts the version row. First migration is `1.0.0` and applies the current `TABLES_DDL`. Future versions prepend/append to the array.
 - **Redaction path envelope** — `redactEvent` wraps payload/source in `{value: ...}` before calling `scanValue` so every hit has a non-empty `fieldPath` (e.g. `payload.value.text`). `redactValue` operates on the raw value to keep `payload_json` shape unchanged. Defensive filter on `fieldPath === ""` in event-store.ts remains as a guard.
+
+---
+
+## Server (`apps/server`)
+
+| Layer           | Choice                  | Notes                                              |
+| --------------- | ----------------------- | -------------------------------------------------- |
+| HTTP framework  | Hono                    | routes + middleware                                |
+| Node adapter    | @hono/node-server       | `serve({fetch, hostname, port})`                   |
+| Runtime         | ManagedRuntime (Effect) | one runtime per server process, shared by handlers |
+| Bus             | in-process Ref fan-out  | `EventBusLive` (typed `EventBus` from `@cognit/db`) |
+| CLI flag parser | Commander               | `--host`, `--port`, `--root`                       |
+| Config          | `cognit.yaml`           | `readConfig` (reused from `@cognit/cli`)           |
+
+**Ports (phase 3d, may change):**
+
+- **API**: `127.0.0.1:6971` (default; `--host 0.0.0.0` opens LAN bind)
+- **UI (deferred, phase 4)**: `:6970`
+
+**Auth model (phase 3d):**
+
+- **Opt-in bearer only.** Default loopback bind is fully open — no token check. The `127.0.0.1` bind is the security boundary for local-first use.
+- Auth activates ONLY when BOTH `server.api_token` is set in `cognit.yaml` AND the bind is non-loopback (`--host 0.0.0.0` or `server.host: 0.0.0.0`). Without the header → 401; with the correct `Authorization: Bearer <token>` → 200.
+- This covers the future "MCP server bound to LAN" case without burdening local dev. Documented in `plans/phase-3.md` 3d section + `apps/server/test/auth-bearer.test.ts`.
+
+**Runtime gotcha (must-read for contributors):**
+
+- The `appLayer` MUST be wrapped in `ManagedRuntime.make(appLayer)` (not `Effect.provide(appLayer)` per-handler). With `Effect.provide`, the `EventBusLive` `Ref<subscribers>` is reconstructed on every request → SSE live-delivery is silently broken (subscriber queue is fresh + empty on every publish). `ManagedRuntime` builds the runtime ONCE and reuses it across requests. This is the difference between "SSE works in tests but not in production" and "SSE works everywhere".
 
 ---
 
