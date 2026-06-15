@@ -99,7 +99,10 @@ export function registerEvents(program: Command): void {
           root,
           Effect.gen(function* () {
             const store = yield* EventStore;
-            const result = yield* store.list({ sessionId, type });
+            const result = yield* store.list({
+              sessionId,
+              ...(type !== undefined ? { type } : {}),
+            });
             return result.events;
           }),
         );
@@ -121,7 +124,7 @@ export function registerEvents(program: Command): void {
           const store = yield* EventStore;
           const result = yield* store.list({
             sessionId,
-            type,
+            ...(type !== undefined ? { type } : {}),
             ...(lastSeenId !== undefined ? { afterEventId: lastSeenId } : {}),
           });
           return result.events;
@@ -145,7 +148,7 @@ export function registerEvents(program: Command): void {
             const store = yield* EventStore;
             const result = yield* store.list({
               sessionId,
-              type,
+              ...(type !== undefined ? { type } : {}),
               ...(lastSeenId !== undefined ? { afterEventId: lastSeenId } : {}),
             });
             return result.events;

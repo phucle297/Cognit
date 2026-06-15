@@ -148,10 +148,9 @@ describe("cognit events", () => {
     // Run --follow with --json. The initial flush is one batch of N
     // events under kind `events.follow`. We kill the process once the
     // envelope is observed so the test doesn't hang on the polling loop.
-    const child = spawn(TSX, [CLI_ENTRY, "--json", "events", "--follow", "--session", sessionId], {
+    const child: import("node:child_process").ChildProcessWithoutNullStreams = spawn(TSX, [CLI_ENTRY, "--json", "events", "--follow", "--session", sessionId], {
       cwd: tmp,
-      encoding: "utf8",
-    });
+    }) as import("node:child_process").ChildProcessWithoutNullStreams;
     let stdout = "";
     let killed = false;
     child.stdout.on("data", (chunk: Buffer) => {

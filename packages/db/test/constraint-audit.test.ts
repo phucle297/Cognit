@@ -141,11 +141,11 @@ const makeAuditLayer = (
   >;
 };
 
-const runWithLayer = <A, E, R>(
-  layer: Layer.Layer<A, never, never>,
-  eff: Effect.Effect<A, E, R>,
-): Promise<A> =>
-  Effect.runPromise(eff.pipe(Effect.provide(layer)) as Effect.Effect<A, E, never>);
+const runWithLayer = <E, R>(
+  layer: Layer.Layer<any, never, never>,
+  eff: Effect.Effect<any, E, R>,
+): Promise<any> =>
+  Effect.runPromise(eff.pipe(Effect.provide(layer)) as Effect.Effect<any, E, never>);
 
 describe("Constraint chokepoint — audit emission (phase 3c, Cognit-5vl.9)", () => {
   let dbPath = "";
