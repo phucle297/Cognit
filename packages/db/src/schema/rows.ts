@@ -102,3 +102,12 @@ export interface InboxProcessedRow {
   file: string;
   processed_at: string;
 }
+
+export interface HypothesisRow {
+  id: string;
+  session_id: string;
+  title: string;
+  text: string;
+  status: "active" | "weakened" | "rejected" | "promoted";
+  created_at: string;
+}

@@ -139,8 +139,5 @@ export const DbLive = (
   >;
 };
 
-/** Same as `DbLive` minus the DbConnection (useful when caller provides it). */
-export const DbLiveWithoutConnection = Layer.provide(EventStoreLive, leafs);
-
 /** Test layer base: leaf deps without EventStore or SessionService. */
 export const DbTestBase = leafs;
