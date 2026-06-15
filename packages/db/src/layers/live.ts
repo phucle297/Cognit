@@ -97,10 +97,17 @@ export const DbLive = (
   // in the public Layer's output set.
   const cognition = Layer.provide(CognitionServiceLive, sessions);
   // Build a public layer providing DbConnection + the five services.
-  // Using Layer.provide on a Layer.merge merges the outputs and
-  // satisfies the R channel. `EventBusNoop` is the default bus for
-  // db-direct consumers (CLI, tests); production callers (apps/server)
-  // override it with `EventBusLive` via `Layer.merge`.
+  // Using Layer.provideMerge on a Layer.merge merges the outputs and
+  // satisfies the R channel — and crucially KEEPS the provided layer's
+  // output in the result. `Layer.provide` alone OMITS the provided
+  // layer's output (only `Layer.provideMerge` includes it), which is
+  // why this used to break callers that consumed DbConnection through
+  // the public layer (server tests crashed with "Service not found:
+  // @cognit/db/DbConnection" even though the type signature said the
+  // layer provided it — the runtime didn't). `EventBusNoop` is the
+  // default bus for db-direct consumers (CLI, tests); production
+  // callers (apps/server) override it with `EventBusLive` via
+  // `Layer.merge`.
   const inner = Layer.merge(
     Layer.merge(
       Layer.merge(
@@ -111,14 +118,17 @@ export const DbLive = (
     ),
     EventBusNoop,
   );
-  // Provide the SessionPolicy internally so the R channel stays
-  // `never`. Phase 2.5b widens SessionService's R to include
+  // Provide the SessionPolicy + dbConn internally so the R channel
+  // stays `never`, AND keep their outputs in the result so callers
+  // can consume DbConnection and SessionPolicy through the public
+  // layer. Phase 2.5b widens SessionService's R to include
   // SessionPolicy; the provide chain below satisfies that without
-  // exposing the policy to callers.
-  return Layer.provide(Layer.provide(inner, dbConn), policy) as Layer.Layer<
+  // exposing the policy as a required caller dep.
+  return Layer.provideMerge(Layer.provideMerge(inner, dbConn), policy) as Layer.Layer<
     | DbConnection
     | EventStore
     | SessionService
+    | SessionPolicy
     | SnapshotService
     | ProjectService
     | CognitionService
