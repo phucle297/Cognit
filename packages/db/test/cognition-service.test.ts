@@ -26,7 +26,7 @@ describe("CognitionService", () => {
   const EVENT_ID = "01EVT0000000000000000000000";
 
   const makeMockSessionsLayer = (captured: {
-    input?: AppendEventInput;
+    inputs: AppendEventInput[];
     count: number;
   }): Layer.Layer<SessionService> => {
     const layer = Layer.succeed(SessionService)({
@@ -39,7 +39,7 @@ describe("CognitionService", () => {
       show: () => Effect.die("not used in this test") as never,
       takeSnapshot: () => Effect.die("not used in this test") as never,
       appendEvent: (input) => {
-        captured.input = input;
+        captured.inputs.push(input);
         captured.count += 1;
         return Effect.succeed({
           event: {
@@ -67,7 +67,10 @@ describe("CognitionService", () => {
   };
 
   it("recordObservation calls SessionService.appendEvent with the typed observation payload", async () => {
-    const captured: { input?: AppendEventInput; count: number } = { count: 0 };
+    const captured: { inputs: AppendEventInput[]; count: number } = {
+      inputs: [],
+      count: 0,
+    };
     const mockSessions = makeMockSessionsLayer(captured);
     const layer = Layer.provide(CognitionServiceLive, mockSessions);
 
@@ -87,15 +90,90 @@ describe("CognitionService", () => {
     );
 
     expect(captured.count).toBe(1);
-    expect(captured.input).toBeDefined();
-    expect(captured.input?.type).toBe("observation_recorded");
-    expect(captured.input?.sessionId).toBe(SESSION_ID);
-    expect(captured.input?.payload).toEqual({ text: "got NPE in UserService" });
-    expect(captured.input?.actor).toEqual({ name: "alice", type: "human" });
+    const input = captured.inputs[0];
+    expect(input).toBeDefined();
+    expect(input?.type).toBe("observation_recorded");
+    expect(input?.sessionId).toBe(SESSION_ID);
+    expect(input?.payload).toEqual({ text: "got NPE in UserService" });
+    expect(input?.actor).toEqual({ name: "alice", type: "human" });
     // Optional fields are absent (not undefined) when not supplied.
-    expect(captured.input?.confidence).toBeUndefined();
-    expect(captured.input?.linkedHypothesisId).toBeUndefined();
+    expect(input?.confidence).toBeUndefined();
+    expect(input?.linkedHypothesisId).toBeUndefined();
     expect(result.id).toBe(EVENT_ID);
     expect(result.type).toBe("observation_recorded");
+  });
+
+  it("recordFinding calls SessionService.appendEvent with the typed finding payload and related_observation_ids", async () => {
+    const captured: { inputs: AppendEventInput[]; count: number } = {
+      inputs: [],
+      count: 0,
+    };
+    const mockSessions = makeMockSessionsLayer(captured);
+    const layer = Layer.provide(CognitionServiceLive, mockSessions);
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* CognitionService;
+        return yield* svc.recordFinding({
+          sessionId: SESSION_ID,
+          text: "NPE is caused by uninitialised session token",
+          relatedObservationIds: ["OBS001", "OBS002"],
+          actor: { name: "alice", type: "human" },
+          confidence: 0.8,
+        });
+      }).pipe(Effect.provide(layer)) as unknown as Effect.Effect<
+        { id: string; type: string; session_id: string; created_at: string },
+        unknown,
+        never
+      >,
+    );
+
+    expect(captured.count).toBe(1);
+    const input = captured.inputs[0];
+    expect(input).toBeDefined();
+    expect(input?.type).toBe("finding_created");
+    expect(input?.sessionId).toBe(SESSION_ID);
+    expect(input?.payload).toEqual({
+      text: "NPE is caused by uninitialised session token",
+      related_observation_ids: ["OBS001", "OBS002"],
+    });
+    expect(input?.actor).toEqual({ name: "alice", type: "human" });
+    expect(input?.confidence).toBe(0.8);
+    expect(input?.linkedHypothesisId).toBeUndefined();
+    expect(result.id).toBe(EVENT_ID);
+    expect(result.type).toBe("finding_created");
+  });
+
+  it("recordFinding defaults related_observation_ids to an empty array when omitted", async () => {
+    const captured: { inputs: AppendEventInput[]; count: number } = {
+      inputs: [],
+      count: 0,
+    };
+    const mockSessions = makeMockSessionsLayer(captured);
+    const layer = Layer.provide(CognitionServiceLive, mockSessions);
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const svc = yield* CognitionService;
+        return yield* svc.recordFinding({
+          sessionId: SESSION_ID,
+          text: "naked finding, no related observations",
+          actor: { name: "bot", type: "worker" },
+        });
+      }).pipe(Effect.provide(layer)) as unknown as Effect.Effect<
+        { id: string; type: string; session_id: string; created_at: string },
+        unknown,
+        never
+      >,
+    );
+
+    expect(captured.count).toBe(1);
+    const input = captured.inputs[0];
+    expect(input?.type).toBe("finding_created");
+    expect(input?.payload).toEqual({
+      text: "naked finding, no related observations",
+      related_observation_ids: [],
+    });
+    expect(input?.confidence).toBeUndefined();
   });
 });

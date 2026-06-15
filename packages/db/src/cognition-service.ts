@@ -5,8 +5,9 @@
  * through `SessionService.appendEvent` — the single chokepoint that
  * the constraint engine (phase 3c) will hook into.
  *
- * Bead 3a-1 ships the shell with ONE method, `recordObservation`.
- * Per-entity follow-up beads (3a-2 .. 3a-7) add the rest. The shape
+ * Bead 3a-1 ships the shell with `recordObservation`.
+ * Bead 3a-2 adds `recordFinding`.
+ * Per-entity follow-up beads (3a-3 .. 3a-7) add the rest. The shape
  * exists now so the constraint engine has a stable caller signature
  * to evaluate against.
  *
@@ -31,6 +32,14 @@ export interface RecordObservationInput {
   readonly linkedHypothesisId?: string;
 }
 
+export interface RecordFindingInput {
+  readonly sessionId: string;
+  readonly text: string;
+  readonly relatedObservationIds?: ReadonlyArray<string>;
+  readonly actor: { readonly name: string; readonly type: ActorType };
+  readonly confidence?: number;
+}
+
 export interface CognitionServiceShape {
   /**
    * Record a free-form observation. Builds the
@@ -40,6 +49,18 @@ export interface CognitionServiceShape {
    */
   readonly recordObservation: (
     input: RecordObservationInput,
+  ) => Effect.Effect<EventRow, SessionError, SessionService>;
+  /**
+   * Record a finding — a synthesized conclusion drawn from one or
+   * more observations. Builds the `finding_created` event payload
+   * (`text` + optional `related_observation_ids` per
+   * `FindingCreatedPayload`) and forwards through
+   * `SessionService.appendEvent`. The list of related observation ids
+   * is forwarded as-is; the reducer/constraint engine may resolve
+   * them in a later phase.
+   */
+  readonly recordFinding: (
+    input: RecordFindingInput,
   ) => Effect.Effect<EventRow, SessionError, SessionService>;
 }
 
@@ -69,6 +90,20 @@ export const CognitionServiceLive: Layer.Layer<CognitionService, never, SessionS
             ...(input.linkedHypothesisId !== undefined
               ? { linkedHypothesisId: input.linkedHypothesisId }
               : {}),
+          });
+          return event;
+        }),
+      recordFinding: (input) =>
+        Effect.gen(function* () {
+          const { event } = yield* sessions.appendEvent({
+            sessionId: input.sessionId,
+            type: "finding_created",
+            payload: {
+              text: input.text,
+              related_observation_ids: input.relatedObservationIds ?? [],
+            },
+            actor: input.actor,
+            ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
           });
           return event;
         }),

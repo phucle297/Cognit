@@ -7,6 +7,7 @@ import { registerSnapshot } from "./commands/snapshot.js";
 import { registerAppend } from "./commands/append.js";
 import { registerInbox } from "./commands/inbox.js";
 import { registerObservation } from "./commands/observation.js";
+import { registerFinding } from "./commands/finding.js";
 
 const program = new Command();
 
@@ -22,6 +23,7 @@ registerSnapshot(program);
 registerAppend(program);
 registerInbox(program);
 registerObservation(program);
+registerFinding(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`cognit: ${(err as Error).message}\n`);
