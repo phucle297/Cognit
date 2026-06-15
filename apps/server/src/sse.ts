@@ -71,7 +71,7 @@ export const sseHandler = (runtime: ServerRuntime, opts: SseOptions) => {
               send(row);
             }
           });
-          const fiber = yield* Effect.fork(drain);
+          const fiber = yield* Effect.forkDaemon(drain);
           cleanup = () => {
             void runtime.runFork(unsub.pipe(Effect.zipRight(Fiber.interrupt(fiber))));
             try {
