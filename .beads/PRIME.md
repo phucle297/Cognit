@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 3a-1: CognitionService shell + observation CLI
+search: 3d: Hono server in apps/server (state/events/SSE, opt-in auth, bus)
 queue: 
-next: Cognit-5vl.9
+next: Cognit-5vl.11
