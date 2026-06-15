@@ -52,7 +52,7 @@ export const DbLive = (
   dbPath: string,
   policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
 ): Layer.Layer<
-  DbConnection | EventStore | SessionService | SnapshotService | ProjectService,
+  DbConnection | EventStore | SessionService | SnapshotService | ProjectService | CognitionService,
   DbError | DbCorrupted,
   never
 > => {
@@ -92,12 +92,7 @@ export const DbLive = (
   // SessionPolicy; the provide chain below satisfies that without
   // exposing the policy to callers.
   return Layer.provide(Layer.provide(inner, dbConn), policy) as Layer.Layer<
-    | DbConnection
-    | EventStore
-    | SessionService
-    | SnapshotService
-    | ProjectService
-    | CognitionService,
+    DbConnection | EventStore | SessionService | SnapshotService | ProjectService | CognitionService,
     DbError | DbCorrupted,
     never
   >;
