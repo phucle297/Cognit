@@ -11,6 +11,8 @@ import { SessionPolicy, SessionPolicyDefault } from "../session-policy";
 import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
 import { CognitionService, CognitionServiceLive } from "../cognition-service";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../constraint-policy";
+import { EventBus } from "../bus";
+import { EventBusNoop } from "../bus-noop";
 import type { DbError, DbCorrupted } from "../errors";
 
 /**
@@ -27,6 +29,7 @@ import type { DbError, DbCorrupted } from "../errors";
  *   - MigrationRegistry (pure transforms)
  *   - Uuid             (monotonic ulid)
  *   - Logger           (no-op; replace with a structured one in prod)
+ *   - EventBus         (no-op default; production swaps in EventBusLive)
  *
  * Layer composition: ONE DbConnection is built per DbLive call and
  * shared by all services. If you build `DbConnectionLive(dbPath)` more
@@ -59,7 +62,8 @@ export const DbLive = (
   | SnapshotService
   | ProjectService
   | CognitionService
-  | ConstraintPolicy,
+  | ConstraintPolicy
+  | EventBus,
   DbError | DbCorrupted,
   never
 > => {
@@ -94,13 +98,18 @@ export const DbLive = (
   const cognition = Layer.provide(CognitionServiceLive, sessions);
   // Build a public layer providing DbConnection + the five services.
   // Using Layer.provide on a Layer.merge merges the outputs and
-  // satisfies the R channel.
+  // satisfies the R channel. `EventBusNoop` is the default bus for
+  // db-direct consumers (CLI, tests); production callers (apps/server)
+  // override it with `EventBusLive` via `Layer.merge`.
   const inner = Layer.merge(
     Layer.merge(
-      Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects),
-      cognition,
+      Layer.merge(
+        Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects),
+        cognition,
+      ),
+      constraintPolicy,
     ),
-    constraintPolicy,
+    EventBusNoop,
   );
   // Provide the SessionPolicy internally so the R channel stays
   // `never`. Phase 2.5b widens SessionService's R to include
@@ -113,7 +122,8 @@ export const DbLive = (
     | SnapshotService
     | ProjectService
     | CognitionService
-    | ConstraintPolicy,
+    | ConstraintPolicy
+    | EventBus,
     DbError | DbCorrupted,
     never
   >;

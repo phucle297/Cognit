@@ -42,6 +42,12 @@ importers:
       '@cognit/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@cognit/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      effect:
+        specifier: 3.21.3
+        version: 3.21.3
     devDependencies:
       typescript:
         specifier: 5.7.2

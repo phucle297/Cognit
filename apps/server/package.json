@@ -11,7 +11,9 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@cognit/core": "workspace:*"
+    "@cognit/core": "workspace:*",
+    "@cognit/db": "workspace:*",
+    "effect": "3.21.3"
   },
   "devDependencies": {
     "typescript": "5.7.2",
