@@ -16,6 +16,8 @@ import { registerConclusion } from "./commands/conclusion.js";
 import { registerVerification } from "./commands/verification.js";
 import { registerArtifact } from "./commands/artifact.js";
 import { registerEdge } from "./commands/edge.js";
+import { registerSchemaDump } from "./commands/schema-dump.js";
+import { setOutputMode, type OutputMode } from "./output.js";
 
 const program = new Command();
 
@@ -23,6 +25,17 @@ program
   .name("cognit")
   .description("Git for AI cognition. Local-first persistent decision and knowledge layer.")
   .version("0.0.0");
+
+// Global --json flag (3b). When set, every command's stdout switches
+// to the stable JSON envelope `{ version: 1, kind, data }`. Stored
+// in a module-level so commands can read it from their `action`.
+// We register BEFORE `register*()` so the option is attached to the
+// program root (visible to all subcommands via `program.opts()`).
+program.option("--json", "emit a stable JSON envelope on stdout").hook("preAction", (thisCommand) => {
+  const opts = thisCommand.opts<{ json?: boolean }>();
+  const mode: OutputMode = opts.json ? "json" : "text";
+  setOutputMode(mode);
+});
 
 registerInit(program);
 registerConfig(program);
@@ -40,6 +53,7 @@ registerConclusion(program);
 registerVerification(program);
 registerArtifact(program);
 registerEdge(program);
+registerSchemaDump(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`cognit: ${(err as Error).message}\n`);

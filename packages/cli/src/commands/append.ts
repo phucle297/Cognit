@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { SessionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
+import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayerAndConfig } from "../layer-build.js";
 
 interface AppendOptions {
@@ -158,14 +159,23 @@ export function registerAppend(program: Command): void {
     .description("append a single event to a session")
     .requiredOption("--type <type>", "event type (e.g. observation_recorded)")
     .option("--payload <json|file>", 'event payload (inline JSON or .json file). Default: "{}"')
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .action(async (opts: AppendOptions) => {
       const root = requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const payload = resolvePayload(opts.payload);
       const eventType = opts.type!;
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const sessions = yield* SessionService;

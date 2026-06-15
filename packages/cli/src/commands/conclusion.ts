@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
+import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 
 interface ConcludeOptions {
@@ -162,7 +163,7 @@ export function registerConclusion(program: Command): void {
     .command("propose")
     .description("propose a conclusion (conclusion_proposed event)")
     .argument("<text>", "the conclusion text")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--confidence <0..1>", "confidence score in [0, 1]")
@@ -170,7 +171,16 @@ export function registerConclusion(program: Command): void {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const confidence = parseConfidence(opts.confidence);
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -192,7 +202,7 @@ export function registerConclusion(program: Command): void {
     .requiredOption("--id <conclusionId>", "conclusion id (ULID)")
     .requiredOption("--verification <vid>", "verification id (ULID) backing this verification")
     .requiredOption("--evidence <id,id,...>", "comma-separated supporting evidence ids")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--confidence <0..1>", "confidence score in [0, 1]")
@@ -206,7 +216,16 @@ export function registerConclusion(program: Command): void {
         process.exitCode = 2;
         throw new Error("--evidence: empty");
       }
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
       const conclusionId = opts.id!;
       const verificationId = opts.verification!;
 
@@ -231,13 +250,22 @@ export function registerConclusion(program: Command): void {
     .description("reject a conclusion (conclusion_rejected event)")
     .requiredOption("--id <conclusionId>", "conclusion id (ULID)")
     .requiredOption("--reason <text>", "rejection reason")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: RejectConclusionOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
       const conclusionId = opts.id!;
       const reason = opts.reason!;
 

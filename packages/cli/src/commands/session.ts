@@ -11,6 +11,8 @@ import {
 import { findProjectRoot, projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
+import { writeCurrentSession, clearCurrentSession } from "../current-session.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface SessionCreateOptions {
   parent?: string;
@@ -266,6 +268,17 @@ export function registerSession(program: Command): void {
           process.stdout.write(`session: ${r.session.id}\n`);
           process.stdout.write(`goal:    ${r.session.goal}\n`);
           process.stdout.write(`status:  ${r.session.status}\n`);
+          // Phase 3b: sticky session pointer. Atomic rename inside
+          // the helper; the create succeeded even if this write fails,
+          // so we don't fail the command — the pointer is a
+          // convenience, not a contract.
+          try {
+            writeCurrentSession(root, r.session.id);
+          } catch (e) {
+            process.stderr.write(
+              `cognit: warning — failed to write sticky session pointer: ${(e as Error).message}\n`,
+            );
+          }
         }),
       );
     });
@@ -293,7 +306,11 @@ export function registerSession(program: Command): void {
           };
           if (status) q.status = status;
           const rows = yield* service.list(q);
-          printSessionTable(rows);
+          if (getOutputMode() === "json") {
+            emit("json", "session.list", rows);
+          } else {
+            printSessionTable(rows);
+          }
         }),
       );
     });
@@ -308,7 +325,11 @@ export function registerSession(program: Command): void {
       const program = Effect.gen(function* () {
         const service = yield* SessionService;
         const r = yield* service.show(sessionRow.id);
-        printSessionShow(r);
+        if (getOutputMode() === "json") {
+          emit("json", "session.show", r);
+        } else {
+          printSessionShow(r);
+        }
       });
       await runCommand(root, program);
     });
@@ -345,6 +366,16 @@ export function registerSession(program: Command): void {
           process.stdout.write(`forked:     ${r.forked ? "yes (new session)" : "no (reopened)"}\n`);
           process.stdout.write(`status:     ${r.session.status}\n`);
           process.stdout.write(`goal:       ${r.session.goal}\n`);
+          // Phase 3b: resume updates the sticky pointer to the new
+          // (possibly forked) session id. Same try/catch semantics as
+          // create: pointer is convenience, not contract.
+          try {
+            writeCurrentSession(root, r.session.id);
+          } catch (e) {
+            process.stderr.write(
+              `cognit: warning — failed to write sticky session pointer: ${(e as Error).message}\n`,
+            );
+          }
         }),
       );
     });
@@ -391,6 +422,16 @@ export function registerSession(program: Command): void {
           // sessions row's last_snapshot_event_id is the pointer.
           const snapId = r.session.last_snapshot_event_id ?? "-";
           process.stdout.write(`snapshot:   ${snapId}\n`);
+          // Phase 3b: close clears the sticky pointer so a subsequent
+          // `cognit append` (no --session) does not silently land in
+          // a closed session. Idempotent on a missing file.
+          try {
+            clearCurrentSession(root);
+          } catch (e) {
+            process.stderr.write(
+              `cognit: warning — failed to clear sticky session pointer: ${(e as Error).message}\n`,
+            );
+          }
         }),
       );
     });

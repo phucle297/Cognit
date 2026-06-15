@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
+import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 
 interface AddEdgeOptions {
@@ -200,13 +201,22 @@ export function registerEdge(program: Command): void {
     .requiredOption("--to-type <type>", 'target entity type (e.g. "decision")')
     .requiredOption("--to-id <id>", "target entity id (ULID)")
     .requiredOption("--kind <edge_type>", 'edge kind (e.g. "supports", "contradicts", "belongs_to")')
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: AddEdgeOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -234,11 +244,20 @@ export function registerEdge(program: Command): void {
   cmd
     .command("list")
     .description("list edges currently in a session's reduced state")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: ListEdgeOptions) => {
       const root = resolveProjectRoot(opts.root);
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;

@@ -59,6 +59,8 @@ export interface ProjectPaths {
   artifactsCurated: string;
   snapshots: string;
   archive: string;
+  currentSession: string;
+  currentSessionTmp: string;
 }
 
 export function projectPaths(projectRoot: string): ProjectPaths {
@@ -75,6 +77,8 @@ export function projectPaths(projectRoot: string): ProjectPaths {
     artifactsCurated: path.join(dir, "artifacts", "curated"),
     snapshots: path.join(dir, "snapshots"),
     archive: path.join(dir, "archive"),
+    currentSession: path.join(dir, "current-session"),
+    currentSessionTmp: path.join(dir, "current-session.tmp"),
   };
 }
 

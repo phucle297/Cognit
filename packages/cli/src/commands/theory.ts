@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
+import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 
 interface TheoryOptions {
@@ -122,13 +123,22 @@ export function registerTheory(program: Command): void {
     .description("add a new theory (theory_created event)")
     .argument("<title>", "theory title")
     .requiredOption("--text <text>", "theory body text")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (title: string, opts: TheoryOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
       const text = opts.text!;
 
       const program = Effect.gen(function* () {
@@ -153,13 +163,22 @@ export function registerTheory(program: Command): void {
     .description("update an existing theory's body (theory_updated event)")
     .requiredOption("--id <id>", "theory id (ULID)")
     .requiredOption("--text <text>", "new theory body text")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: TheoryOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
       const theoryId = opts.id!;
       const text = opts.text!;
 
@@ -185,13 +204,22 @@ export function registerTheory(program: Command): void {
     .description("merge a theory into another (theory_merged event)")
     .requiredOption("--id <id>", "theory id (ULID) to merge from")
     .requiredOption("--into <id>", "target theory id (ULID) to merge into")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: TheoryOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
       const theoryId = opts.id!;
       const mergedIntoTheoryId = opts.into!;
 
@@ -216,13 +244,22 @@ export function registerTheory(program: Command): void {
     .command("archive")
     .description("archive a theory (theory_archived event)")
     .requiredOption("--id <id>", "theory id (ULID) to archive")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: TheoryOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
       const theoryId = opts.id!;
 
       const program = Effect.gen(function* () {

@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
+import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 
 interface CommonOptions {
@@ -155,7 +156,7 @@ export function registerHypothesis(program: Command): void {
     .description("propose a hypothesis (hypothesis_created event)")
     .argument("<title>", "the hypothesis title")
     .requiredOption("--text <text>", "the hypothesis text")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--confidence <0..1>", "confidence score in [0, 1]")
@@ -163,7 +164,16 @@ export function registerHypothesis(program: Command): void {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const confidence = parseConfidence(opts.confidence);
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -188,13 +198,22 @@ export function registerHypothesis(program: Command): void {
     .description("weaken a hypothesis (hypothesis_weakened event)")
     .requiredOption("--id <id>", "hypothesis id (ULID)")
     .requiredOption("--reason <text>", "reason for weakening")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: WeakenOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -219,7 +238,7 @@ export function registerHypothesis(program: Command): void {
     .requiredOption("--id <id>", "hypothesis id (ULID)")
     .requiredOption("--reason-type <type>", "evidence | superseded | constraint")
     .option("--superseded-by <id>", "the new hypothesis id (only when --reason-type=superseded)")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: RejectOptions) => {
@@ -233,7 +252,16 @@ export function registerHypothesis(program: Command): void {
       }
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -258,13 +286,22 @@ export function registerHypothesis(program: Command): void {
     .description("promote a hypothesis to a theory (hypothesis_promoted event)")
     .requiredOption("--id <id>", "hypothesis id (ULID)")
     .requiredOption("--to-theory <id>", "the new theory id (ULID)")
-    .requiredOption("--session <id>", "session id (ULID)")
+    .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: PromoteOptions) => {
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = opts.session!;
+      const resolved = resolveSessionId(root, opts.session);
+      if (!resolved) {
+        process.stderr.write(
+          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
+      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
