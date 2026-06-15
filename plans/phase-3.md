@@ -48,7 +48,8 @@ overdue v0.1 bootstrap surface on top of the phase 2.5 trigger.
 1. Make `cognit observe "..."` and `cognit propose "..."` first-class
    — every cognition entity in `plan.xml <bootstrap_phases>` 3-4 has
    a dedicated subcommand; no `--type ... --payload '{...}'` for the
-   common path.
+   common path. Includes the bootstrap success criterion
+   `cognit events [--follow]` (plan.xml:841).
 2. Sticky current-session: `cognit session create "goal"` writes
    `.cognit/current-session`; subsequent `cognit append` (no
    `--session`) succeeds against that session. Pair with a
@@ -84,12 +85,20 @@ overdue v0.1 bootstrap surface on top of the phase 2.5 trigger.
 - **Files to touch**:
   - NEW `packages/db/src/cognition-service.ts`
   - NEW `packages/db/test/cognition-service.test.ts`
-  - NEW `packages/cli/src/commands/{observation,finding,hypothesis,theory,experiment,decision,conclusion,edge,verify}.ts`
-  - EDIT `packages/db/src/layers/live.ts` (add to leafs)
+  - NEW `packages/cli/src/commands/{observation,finding,hypothesis,theory,experiment,decision,conclusion,verification,edge,events}.ts`
+    - `events.ts` is `cognit events [--follow] [--session <id>]
+       [--limit <n>]` — terminal event tail with `--follow` polling
+       SQLite directly (bootstrap success criterion `plan.xml:841`).
+       This is a phase-3 acceptance criterion and ships in 3a (or
+       3b; 3b is the cleaner home since it also lands the JSON
+       envelope). Placeholder: 3a-1 provides the service, 3b owns
+       the `events` command registration. If 3b ships last, the
+       command can ship in 3a-1 with the non-JSON output first.
+  - EDIT `packages/db/src/layers/live.ts` (add `CognitionService` to leafs)
   - EDIT `packages/db/src/index.ts` (re-export)
   - EDIT `packages/cli/src/index.ts` (register new commands)
   - EDIT `packages/cli/src/layer-build.ts` (wire service)
-  - NEW `packages/cli/test/{observation,finding,hypothesis,decision,conclusion,edge,verify}.test.ts`
+  - NEW `packages/cli/test/{observation,finding,hypothesis,decision,conclusion,verification,edge,events}.test.ts`
 - **done_when**: `cognit observe "got NPE in UserService" --session <id>`
   appends a valid `observation_recorded` event in <500ms; the same
   flow works for `cognit finding`, `cognit propose "h"`,
@@ -100,8 +109,9 @@ overdue v0.1 bootstrap surface on top of the phase 2.5 trigger.
   `redaction test` (deferred). `cognit session show <id>` reflects
   every new entity.
 - **Deps**: phase 2.5 closed (`Cognit-04i`); `SessionService.appendEvent`
-  is the single redaction boundary; `EventStore.append` already
-  accepts the typed payload schemas.
+  is the single redaction boundary (constraint engine hooks here in
+  3c, not in `EventStore.append`); `EventStore.append` already accepts
+  the typed payload schemas.
 
 ### 3b — Sticky current-session pointer + global `--json` output mode
 
@@ -162,33 +172,65 @@ overdue v0.1 bootstrap surface on top of the phase 2.5 trigger.
 - **Scope (in)**: `packages/core/src/constraint-dsl.ts` defines the
   rule shape (`{ when: <predicate>, then: <action>, reason: string }`)
   with a **closed v1 predicate vocabulary** typed via Effect-Schema.
-  The v1 set (10 predicates): `event.type ==`, `event.payload.<field>
-  ==`, `actor.trust_score >=`, `actor.trust_score <`,
-  `state.open_hypotheses.length >`, `state.open_verifications.length
-  ==`, `state.last_verification.status ==`,
-  `state.accepted_decisions.count >=`, `session.event_count >`,
-  `time.since_last_verification >`. **Decision: closed vocabulary
-  in v1**, not extensible DSL. New predicates ship as a core
-  schema version bump (the existing `PAYLOAD_SCHEMAS_V1` /
-  `CURRENT_VERSION` pattern handles this cleanly). The alternative
-  — a fully user-extensible predicate language — is a footgun
-  (untyped eval, surprise perf) and the project already has the
-  "extend via schema version" convention. `packages/db/src/constraint-
-  engine.ts` is a pure `evalRules(rules, state, candidateEvent) ->
-  { allow: boolean, appliedRuleIds: string[] }`. `EventStore.append`
-  runs the engine after the reducer applies the event but before
-  the tx commits; on `allow = false`, the tx rolls back and a
-  `ConstraintViolation { rule_id, reason }` error is returned. On
-  `allow = true` with non-empty `appliedRuleIds`, the same tx also
-  inserts a `constraint_rule_applied` event per rule id.
-  `cognit constraint add --json '{...}'`, `cognit constraint list`,
-  `cognit constraint test <event-type>` CLI subcommands.
+  The v1 set (**13 predicates**, extended from the original 10 after
+  adversarial review of phase 3.0 found 3 lifecycle rules unexpressible
+  in v1):
+  - `event.type ==`
+  - `event.payload.<field> ==`
+  - `actor.trust_score >=`
+  - `actor.trust_score <`
+  - `state.open_hypotheses.length >`
+  - `state.open_verifications.length ==`
+  - `state.last_verification.status ==`
+  - `state.accepted_decisions.count >=`
+  - `session.event_count >`
+  - `time.since_last_verification >`
+  - `state.<entity_map>[id].<field> ==` — entity-state lookup
+    (ex: `state.hypotheses["h_01"].current_state == "active"` for
+    "hypothesis can only be promoted if currently active")
+  - `state.edges.exists(from_id, to_id, type)` — typed edge existence
+    (ex: "decision_accepted blocked if no supports edge from a
+    verified conclusion")
+  - `state.recent_event_types.contains(type)` — multi-event condition
+    (ex: "experiment_completed blocked unless a verification_passed
+    for the linked hypothesis is among the last 50 events")
+  **Decision: closed vocabulary in v1** (13 predicates), not extensible
+  DSL. New predicates ship as a core schema version bump (the existing
+  `PAYLOAD_SCHEMAS_V1` / `CURRENT_VERSION` pattern handles this
+  cleanly). The alternative — a fully user-extensible predicate language
+  — is a footgun (untyped eval, surprise perf) and the project already
+  has the "extend via schema version" convention. **Chokepoint**:
+  `packages/db/src/constraint-engine.ts` is a pure
+  `evalRules(rules, state, candidateEvent) -> { allow: boolean,
+  appliedRuleIds: string[] }`. The engine is invoked from
+  **`SessionService.appendEvent` (the public chokepoint, called by
+  CLI `append`, inbox watcher, 3a CognitionService methods, and 3d
+  `POST /events` route)** — NOT directly from `EventStore.append`.
+  Rationale: `SessionService.appendEvent` already runs the
+  `SessionClosed` pre-check and the auto-snapshot post-step; the
+  constraint check sits between them, inside the same Effect
+  pipeline. `EventStore.append` remains the redaction boundary
+  (low-level), `SessionService.appendEvent` is the constraint
+  boundary (public). On `allow = false`, `appendEvent` returns a
+  `ConstraintViolation { rule_id, reason }` error and the tx is
+  rolled back via `EventStore.append`'s `conn.handle.tx` wrapper.
+  On `allow = true` with non-empty `appliedRuleIds`, `appendEvent`
+  appends a `constraint_rule_applied` event per rule id through
+  the same `EventStore.append` path (in a follow-up call within
+  the same Effect flow, with the constraint policy re-evaluated
+  to avoid recursion). `cognit constraint add --json '{...}'`,
+  `cognit constraint list`, `cognit constraint test <event-type>`
+  CLI subcommands.
 - **Files to touch**:
   - NEW `packages/core/src/constraint-dsl.ts`
   - NEW `packages/core/test/constraint-dsl.test.ts`
   - NEW `packages/db/src/constraint-engine.ts`
-  - EDIT `packages/db/src/event-store.ts` (`append` runs the engine
-    inside the same tx, after reducer apply, before commit)
+  - EDIT `packages/db/src/session-service.ts` (call engine from
+    `appendEvent` between `SessionClosed` check and snapshot step;
+    also update `rehydrateSessionState` `MAP_FIELDS` set to include
+    `applied_rule_ids`)
+  - EDIT `packages/db/src/event-store.ts` (unchanged signature;
+    the engine is a sibling call, not inside the event-store tx)
   - EDIT `packages/core/src/reducer.ts` (extend `SessionState` with
     `applied_rule_ids: Set<string>`; populate on
     `constraint_rule_applied`)
@@ -211,8 +253,10 @@ overdue v0.1 bootstrap surface on top of the phase 2.5 trigger.
   `cognit constraint test` dry-runs the engine against the existing
   session state and prints which prior events would have been
   blocked.
-- **Deps**: 3a (`CognitionService.proposeHypothesis` etc. exist so the
-  rule predicates have a real call site); 3b (CLI shell is unified).
+- **Deps**: 3a-1 (`CognitionService` Context.Tag shape establishes
+  the `appendEvent` call signature the engine evaluates against);
+  3b is independent (the CLI shell is unified but the engine does
+  not need `--json` output to function).
 
 ### 3d — Agent read API in `apps/server`: Hono routes, in-process event bus, opt-in auth
 
@@ -290,9 +334,16 @@ overdue v0.1 bootstrap surface on top of the phase 2.5 trigger.
   it returns `200`. With the token set but bind still `127.0.0.1`,
   auth remains off (loopback is the security boundary; document
   this in STACK.md).
-- **Deps**: 3a (the read path uses `CognitionService` for projected
-  views); 3c (the `POST /events` route respects the
-  `ConstraintViolation` path).
+- **Deps**: 3a-1 (`CognitionService` Context.Tag provides the read
+  view used by `GET /sessions/:id/state`); 3c (the `DbLive` layer
+  in `packages/db/src/layers/live.ts` now provides the
+  `ConstraintPolicy` Context.Tag, which `apps/server/src/layer-
+  build.ts` must compose — the server's bus + `POST /events` route
+  inherit constraint enforcement automatically because the route
+  funnels through `SessionService.appendEvent`).
+  Note: 3d does NOT need 3a-3/3a-5/3a-6/3a-7 — its read path uses
+  `SessionService.show` + `project(state) -> SessionStateView`,
+  not the per-entity CognitionService methods.
 
 ## Out of scope (explicit deferrals)
 
@@ -359,6 +410,10 @@ and tested in the E2E suite:
    (except `gc`/`export`/`import`/`wrap`/`redaction test`) appends
    a valid event in <500ms; `cognit session show <id>` reflects
    the new entity. `cognit --help` lists every shipped command.
+   `cognit events [--follow] --session <id>` tails the event
+   stream from SQLite (bootstrap success criterion `plan.xml:841`).
+   `cognit verify cancel --id <id>` and `cognit edge list` and
+   `cognit artifact add` ship in their respective sub-beads.
 2. `cognit session create "goal"` writes `.cognit/current-session`
    (atomically: tmp → fsync → rename); the next `cognit append`
    with no `--session` appends to that session. `cognit --json
