@@ -24,6 +24,7 @@ export * from "./connection";
 export * from "./project-service";
 export * from "./session-service";
 export * from "./session-policy";
+export * from "./cognition-service";
 export * from "./snapshot-service";
 export * from "./layers/live";
 export * from "./schema/rows";

@@ -9,6 +9,7 @@ import { ProjectService, ProjectServiceLive } from "../project-service";
 import { SessionService, SessionServiceLive } from "../session-service";
 import { SessionPolicy, SessionPolicyDefault } from "../session-policy";
 import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
+import { CognitionService, CognitionServiceLive } from "../cognition-service";
 import type { DbError, DbCorrupted } from "../errors";
 
 /**
@@ -75,16 +76,28 @@ export const DbLive = (
     Layer.provide(Layer.provide(SessionServiceLive, leafs), Layer.merge(eventStore, snapshots)),
     leafs,
   );
-  // Build a public layer providing DbConnection + the four services.
+  // CognitionService sits ON TOP of SessionService (the constraint
+  // chokepoint). Provide it with the SessionService layer so it lands
+  // in the public Layer's output set.
+  const cognition = Layer.provide(CognitionServiceLive, sessions);
+  // Build a public layer providing DbConnection + the five services.
   // Using Layer.provide on a Layer.merge merges the outputs and
   // satisfies the R channel.
-  const inner = Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects);
+  const inner = Layer.merge(
+    Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects),
+    cognition,
+  );
   // Provide the SessionPolicy internally so the R channel stays
   // `never`. Phase 2.5b widens SessionService's R to include
   // SessionPolicy; the provide chain below satisfies that without
   // exposing the policy to callers.
   return Layer.provide(Layer.provide(inner, dbConn), policy) as Layer.Layer<
-    DbConnection | EventStore | SessionService | SnapshotService | ProjectService,
+    | DbConnection
+    | EventStore
+    | SessionService
+    | SnapshotService
+    | ProjectService
+    | CognitionService,
     DbError | DbCorrupted,
     never
   >;

@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 2.5d. Auto-snapshot tests (unit + e2e)
+search: 3a-1: CognitionService shell + observation CLI
 queue: 
-next: 
+next: Cognit-5vl.9

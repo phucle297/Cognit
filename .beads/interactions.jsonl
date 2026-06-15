@@ -15,3 +15,4 @@
 {"id":"int-2d3094ff","kind":"field_change","created_at":"2026-06-13T17:19:59.383893702Z","actor":"PerMees","issue_id":"Cognit-04i.4","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-3cdfa144","kind":"field_change","created_at":"2026-06-13T17:25:30.265406763Z","actor":"PerMees","issue_id":"Cognit-04i.5","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-42ccc046","kind":"field_change","created_at":"2026-06-13T17:25:34.617009626Z","actor":"PerMees","issue_id":"Cognit-04i","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-2c7871f4","kind":"field_change","created_at":"2026-06-15T05:08:15.466950866Z","actor":"PerMees","issue_id":"Cognit-5vl.1","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

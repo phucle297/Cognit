@@ -15,6 +15,7 @@ import {
   Redactor,
   MigrationRegistry,
   Uuid,
+  CognitionService,
 } from "@cognit/db";
 import { readConfig } from "./yaml-io.js";
 import { projectPaths } from "./paths.js";
@@ -37,6 +38,7 @@ export type AppServices =
   | SessionPolicy
   | SnapshotService
   | ProjectService
+  | CognitionService
   | Logger
   | Redactor
   | MigrationRegistry
