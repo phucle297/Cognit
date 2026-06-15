@@ -4,6 +4,7 @@ import { CognitionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface CommonOptions {
   session?: string;
@@ -187,6 +188,10 @@ export function registerHypothesis(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runHypothesis(provided);
+      if (getOutputMode() === "json") {
+        emit("json", "hypothesis.propose", { event });
+        return;
+      }
       process.stdout.write(`event:    ${event.id}\n`);
       process.stdout.write(`type:     ${event.type}\n`);
       process.stdout.write(`session:  ${event.session_id}\n`);
@@ -226,6 +231,10 @@ export function registerHypothesis(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runHypothesis(provided);
+      if (getOutputMode() === "json") {
+        emit("json", "hypothesis.weaken", { event });
+        return;
+      }
       process.stdout.write(`event:    ${event.id}\n`);
       process.stdout.write(`type:     ${event.type}\n`);
       process.stdout.write(`session:  ${event.session_id}\n`);
@@ -275,6 +284,10 @@ export function registerHypothesis(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runHypothesis(provided);
+      if (getOutputMode() === "json") {
+        emit("json", "hypothesis.reject", { event });
+        return;
+      }
       process.stdout.write(`event:    ${event.id}\n`);
       process.stdout.write(`type:     ${event.type}\n`);
       process.stdout.write(`session:  ${event.session_id}\n`);
@@ -314,6 +327,10 @@ export function registerHypothesis(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runHypothesis(provided);
+      if (getOutputMode() === "json") {
+        emit("json", "hypothesis.promote", { event });
+        return;
+      }
       process.stdout.write(`event:    ${event.id}\n`);
       process.stdout.write(`type:     ${event.type}\n`);
       process.stdout.write(`session:  ${event.session_id}\n`);

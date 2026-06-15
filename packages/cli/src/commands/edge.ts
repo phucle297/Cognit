@@ -4,6 +4,7 @@ import { CognitionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface AddEdgeOptions {
   session?: string;
@@ -232,6 +233,17 @@ export function registerEdge(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runEdge(provided);
+      if (getOutputMode() === "json") {
+        emit("json", "edge.add", {
+          event,
+          edge: {
+            from: `${opts.fromType}:${opts.fromId}`,
+            to: `${opts.toType}:${opts.toId}`,
+            kind: opts.kind,
+          },
+        });
+        return;
+      }
       process.stdout.write(`event:    ${event.id}\n`);
       process.stdout.write(`type:     ${event.type}\n`);
       process.stdout.write(`session:  ${event.session_id}\n`);
@@ -265,6 +277,10 @@ export function registerEdge(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const rows = await runList<ReadonlyArray<EdgeRow>>(provided);
+      if (getOutputMode() === "json") {
+        emit("json", "edge.list", { edges: rows });
+        return;
+      }
       printEdges(rows);
     });
 }
