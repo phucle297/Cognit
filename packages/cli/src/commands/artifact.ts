@@ -4,6 +4,7 @@ import { CognitionService, type ActorType, type ArtifactRole } from "@cognit/db"
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface ArtifactAddOptions {
   session?: string;
@@ -178,6 +179,10 @@ export function registerArtifact(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runEffect(provided, "artifact add");
+      if (getOutputMode() === "json") {
+        emit("json", "artifact.add", { event });
+        return;
+      }
       printEvent(event);
     });
 }

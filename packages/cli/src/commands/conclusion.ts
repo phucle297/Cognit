@@ -4,6 +4,7 @@ import { CognitionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface ConcludeOptions {
   session?: string;
@@ -193,6 +194,10 @@ export function registerConclusion(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runEffect(provided, "conclusion propose");
+      if (getOutputMode() === "json") {
+        emit("json", "conclusion.propose", { event });
+        return;
+      }
       printEvent(event);
     });
 
@@ -242,6 +247,10 @@ export function registerConclusion(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runEffect(provided, "conclusion verify");
+      if (getOutputMode() === "json") {
+        emit("json", "conclusion.verify", { event });
+        return;
+      }
       printEvent(event);
     });
 
@@ -280,6 +289,10 @@ export function registerConclusion(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runEffect(provided, "conclusion reject");
+      if (getOutputMode() === "json") {
+        emit("json", "conclusion.reject", { event });
+        return;
+      }
       printEvent(event);
     });
 }

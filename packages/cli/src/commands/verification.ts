@@ -4,6 +4,7 @@ import { CognitionService, type ActorType, type VerificationType } from "@cognit
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface VerifyStartOptions {
   session?: string;
@@ -204,6 +205,10 @@ export function registerVerification(program: Command): void {
         });
         const provided = await withAppLayer(root, program);
         const event = await runEffect(provided, "verify cancel");
+        if (getOutputMode() === "json") {
+          emit("json", "verification.cancel", { event });
+          return;
+        }
         printEvent(event);
         return;
       }
@@ -251,6 +256,10 @@ export function registerVerification(program: Command): void {
       });
       const provided = await withAppLayer(root, program);
       const event = await runEffect(provided, "verify");
+      if (getOutputMode() === "json") {
+        emit("json", "verification.start", { event });
+        return;
+      }
       printEvent(event);
     });
 }

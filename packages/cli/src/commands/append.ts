@@ -5,6 +5,7 @@ import { SessionService, type ActorType } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayerAndConfig } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface AppendOptions {
   type?: string;
@@ -192,6 +193,13 @@ export function registerAppend(program: Command): void {
       // that triggers auto-snapshot when everyN events accumulate.
       const provided = await withAppLayerAndConfig(root, program);
       const result = await runAppend(provided);
+      if (getOutputMode() === "json") {
+        emit("json", "append", {
+          event: result.event,
+          snapshotTaken: result.snapshotTaken,
+        });
+        return;
+      }
       process.stdout.write(`event:    ${result.event.id}\n`);
       process.stdout.write(`type:     ${result.event.type}\n`);
       process.stdout.write(`session:  ${result.event.session_id}\n`);

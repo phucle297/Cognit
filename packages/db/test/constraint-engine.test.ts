@@ -109,7 +109,7 @@ describe("constraint engine", () => {
       [rule],
       {
         ...baseState,
-        hypotheses: new Map([
+        hypotheses: new Map<string, import("@cognit/core/state").HypothesisState>([
           [
             "h1",
             {
@@ -117,10 +117,15 @@ describe("constraint engine", () => {
               title: "t",
               text: "b",
               current_state: "active",
-              confidence: null,
+              current_confidence: null,
+              current_reason: null,
+              reason_type: null,
+              superseded_by_id: null,
               promoted_to_theory_id: null,
+              belongs_to_theory_id: null,
               created_at: "2026-06-15T00:00:00.000Z",
               last_event_id: "e1",
+              last_event_at: "2026-06-15T00:00:00.000Z",
             },
           ],
           [
@@ -130,10 +135,15 @@ describe("constraint engine", () => {
               title: "t",
               text: "b",
               current_state: "active",
-              confidence: null,
+              current_confidence: null,
+              current_reason: null,
+              reason_type: null,
+              superseded_by_id: null,
               promoted_to_theory_id: null,
+              belongs_to_theory_id: null,
               created_at: "2026-06-15T00:00:00.000Z",
               last_event_id: "e2",
+              last_event_at: "2026-06-15T00:00:00.000Z",
             },
           ],
         ]),

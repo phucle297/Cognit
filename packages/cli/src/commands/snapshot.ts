@@ -4,6 +4,7 @@ import { ProjectService, SessionService } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface SnapshotOptions {
   session?: string;
@@ -117,6 +118,13 @@ export function registerSnapshot(program: Command): void {
         Effect.gen(function* () {
           const service = yield* SessionService;
           const r = yield* service.takeSnapshot(sessionRef);
+          if (getOutputMode() === "json") {
+            emit("json", "snapshot.create", {
+              snapshot: r.snapshot,
+              taken: r.taken,
+            });
+            return;
+          }
           process.stdout.write(`snapshot:    ${r.snapshot.id}\n`);
           process.stdout.write(`session:     ${r.snapshot.session_id}\n`);
           process.stdout.write(`event_count: ${r.snapshot.event_count}\n`);

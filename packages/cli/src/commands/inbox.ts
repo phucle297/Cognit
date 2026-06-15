@@ -4,6 +4,7 @@ import { drainInbox, runInboxWatcher, SessionPolicy, sessionPolicyFromConfig } f
 import { findProjectRoot, projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { buildAppLayer } from "../layer-build.js";
+import { getOutputMode, emit } from "../output.js";
 
 interface InboxOptions {
   watch?: boolean;
@@ -88,6 +89,13 @@ export function registerInbox(program: Command): void {
             return yield* drainInbox(config);
           }),
         );
+        if (getOutputMode() === "json") {
+          emit("json", "inbox", {
+            processed: result.processed,
+            errored: result.errored,
+          });
+          return;
+        }
         process.stdout.write(`processed: ${result.processed}\n`);
         process.stdout.write(`errored:   ${result.errored}\n`);
         return;
