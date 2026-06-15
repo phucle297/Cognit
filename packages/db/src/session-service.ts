@@ -837,6 +837,12 @@ export const SessionServiceLive: Layer.Layer<
           // through here. Skip the check for `constraint_rule_added`
           // itself — adding a rule must not require permission from
           // the same rule set.
+          // `matchedNonBlock` is the audit hook for v2 non-block
+          // actions: when the engine matched rules but did not block,
+          // we hand the ids to the append so it writes a
+          // `constraint_rule_applied` event in the same tx. v1 rules
+          // are block-only, so this list is always empty today.
+          let matchedNonBlock: ReadonlyArray<string> | undefined;
           if (input.type !== "constraint_rule_added" && input.type !== "constraint_rule_applied") {
             const rules = yield* constraintPolicy.loadRules(input.sessionId);
             if (rules.length > 0) {
@@ -867,6 +873,9 @@ export const SessionServiceLive: Layer.Layer<
                   }),
                 );
               }
+              if (result.allow && result.matchedRuleIds.length > 0) {
+                matchedNonBlock = result.matchedRuleIds;
+              }
             }
           }
 
@@ -886,6 +895,9 @@ export const SessionServiceLive: Layer.Layer<
               : {}),
             ...(input.linkedHypothesisId !== undefined
               ? { linkedHypothesisId: input.linkedHypothesisId }
+              : {}),
+            ...(matchedNonBlock !== undefined
+              ? { constraintMatchedRuleIds: matchedNonBlock }
               : {}),
           });
         }),

@@ -36,6 +36,14 @@ export interface AppendEventInput {
   readonly confidence?: number;
   readonly parentVerificationId?: string;
   readonly linkedHypothesisId?: string;
+  /**
+   * Rule ids from the constraint engine that matched a non-blocking
+   * rule during the chokepoint's evaluation. When set, the append
+   * will emit a `constraint_rule_applied` audit event for each id in
+   * the same transaction. v1 rules are block-only, so the chokepoint
+   * never sets this today; v2 (non-block actions) will populate it.
+   */
+  readonly constraintMatchedRuleIds?: ReadonlyArray<string>;
 }
 
 export interface ListEventsQuery {
@@ -339,6 +347,42 @@ export const EventStoreLive: Layer.Layer<
                       created_at: createdAt,
                     }),
                   (e) => new DbError({ message: "append: insert redaction_applied", cause: e }),
+                );
+              }
+
+              // Emit constraint_rule_applied per matched non-blocking
+              // rule. Each gets its own ULID. The audit event uses the
+              // same `createdAt`, actor, and session as the main event
+              // so the audit row sorts at the same instant and cannot
+              // leak across tx boundaries. v1 rules are block-only, so
+              // the chokepoint never populates this list; v2 (non-block
+              // actions) will. Skipping an empty list is a no-op.
+              for (const ruleId of input.constraintMatchedRuleIds ?? []) {
+                const auditId = yield* uuid.make();
+                yield* trySync(
+                  () =>
+                    insertEvent(conn, {
+                      id: auditId,
+                      project_id: session.project_id,
+                      session_id: input.sessionId,
+                      actor_id: actorId,
+                      type: "constraint_rule_applied",
+                      version: CURRENT_VERSION,
+                      payload_json: JSON.stringify({
+                        rule_id: ruleId,
+                        affected_hypothesis_ids: [],
+                      }),
+                      source_json: null,
+                      artifact_refs_json: null,
+                      causation_id: eventId,
+                      correlation_id: input.correlationId ?? null,
+                      confidence: null,
+                      parent_verification_id: null,
+                      linked_hypothesis_id: null,
+                      created_at: createdAt,
+                    }),
+                  (e) =>
+                    new DbError({ message: "append: insert constraint_rule_applied", cause: e }),
                 );
               }
 
