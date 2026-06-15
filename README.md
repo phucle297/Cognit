@@ -663,50 +663,56 @@ cognit session show <id-or-goal>
 
 cognit snapshot
 
-cognit observation add "text" [--confidence 0..1] [--artifact path]
-cognit finding add "text" [--derived-from id] [--artifact path]
+cognit append --type <event-type> --payload <json|file> [--session <id>] [--actor name:type]
 
-cognit hypothesis add "text" [--confidence 0..1] [--belongs-to theory]
-cognit hypothesis weaken "id-or-title" --reason "reason"
-cognit hypothesis reject "id-or-title" --reason "reason" --reason-type evidence|superseded|constraint [--superseded-by id]
-cognit hypothesis promote "id-or-title"
+cognit observe "text" [--session <id>] [--confidence 0..1]
+cognit finding "text" [--related <obs-id,obs-id>] [--confidence 0..1]
+cognit hypothesis propose "title" [--text "body"] [--confidence 0..1]
+cognit hypothesis weaken --id <h-id> --reason-type evidence|superseded|constraint
+cognit hypothesis reject --id <h-id> --reason "..."
+cognit hypothesis promote --id <h-id>
+cognit theory add "text" [--confidence 0..1]
+cognit theory merge --id <theory-id> --into <target-id>
+cognit theory archive --id <theory-id>
+cognit experiment add "text" --tests <h-id> [--supports id,id] [--contradicts id,id]
+cognit experiment complete --id <exp-id> --result "text"
+cognit decision propose "text" [--based-on <conclusion-id,id>]
+cognit decision accept --id <d-id> --reason "..."
+cognit decision reject --id <d-id> --reason "..."
+cognit conclusion propose "text" [--based-on <h-id,id>]
+cognit conclusion verify --id <c-id> --with <verification-id>
+cognit conclusion reject --id <c-id> --reason "..."
 
-cognit theory add "text"
-cognit theory merge "id-or-title" --into "target-id-or-title"
+cognit verify start --type build|test|lint|typecheck|benchmark|custom --command "cmd" [--tests <h-id>]
+cognit verify cancel --id <verification-id>
+cognit verify pass --id <verification-id>
+cognit verify fail --id <verification-id>
 
-cognit experiment add "text" --tests "hypothesis-id-or-title"
-cognit experiment complete --result "text" --supports h1,h2 --contradicts h3
+cognit artifact add <file> --kind <kind>
 
-cognit decision propose "text"
-cognit decision accept "id-or-title" --reason "reason" --based-on "conclusion-id,..."
-cognit decision reject "id-or-title" --reason "reason"
+cognit edge add --from <entity:id> --to <entity:id> --kind supports|contradicts|tests|based_on|derived_from
+cognit edge list [--session <id>] [--kind <kind>]
 
-cognit conclusion propose "text"
-cognit conclusion verify "id-or-title" --with "verification-id"
+cognit constraint add --json '{"when":{...},"then":{"kind":"block"},"reason":"..."}'
+cognit constraint list
+cognit constraint test --type <event-type> [--payload <json|file>]
 
-cognit verify --type build|test|lint|typecheck|benchmark|custom --command "cmd" [--tests hypothesis-id-or-title]
-cognit verify cancel --id verification-id
+cognit events [--session <id>] [--type <event-type>] [--limit <n>] [--follow]
 
-cognit artifact add ./file.log --kind terminal-log
+cognit inbox [--watch|--process]
+cognit schema-dump
 
-cognit edge add --type supports|contradicts|tests|... --from entity:id --to entity:id
-cognit edge list [--session id] [--type edge-type] [--from entity:id] [--to entity:id]
+cognit server [--host <ip>] [--port <n>] [--root <p>]
 
-cognit events [--session id] [--type event-type] [--actor name] [--since iso] [--limit n] [--follow]
-
-cognit redaction test "raw string"
-
-cognit export --output bundle.tar.gz [--include-artifacts]
-cognit import --input bundle.tar.gz [--merge-strategy skip|overwrite|fork]
-
-cognit gc [--dry-run] [--force]
-
-cognit wrap -- <command>
-
-cognit dashboard [--port 6970]
+cognit --json <command>             # emit the v1 JSON envelope
 ```
 
-All entity-referencing commands accept `--id <ulid>` or a title substring. Title match is fuzzy (fuse.js) and errors out when ambiguous.
+All commands run on the sticky `current-session` pointer when `--session` is omitted; an explicit `--session <id>` always wins.
+
+### Deferred to v0.2 / phase 4
+
+`cognit redaction test`, `cognit export`, `cognit import`, `cognit gc`, `cognit wrap`, and the
+dashboard on port 6970 are not yet shipped. Run `cognit --help` to see the live command list.
 
 ---
 
@@ -748,6 +754,12 @@ inbox:
   watch: true
   debounce_ms: 200
   atomic_write_required: true
+
+server:
+  # opt-in bearer auth. Off by default on loopback bind. Required
+  # when --host is non-loopback (e.g. 0.0.0.0) — every /sessions/*
+  # and /events/* route returns 401 without a matching token.
+  api_token: "" # set to a non-empty string to require auth
 ```
 
 Edit with `cognit config --edit`. Show with `cognit config --show`.
@@ -770,17 +782,25 @@ pnpm check
 Cognit v0.1 is complete when it can:
 
 - create and resume sessions locally (resume forks by default; pass `--fork=false` to append); the resume block returns rejected hypotheses, verified conclusions, and accepted decisions
-- record observations, findings, hypotheses, experiments, decisions, conclusions, and verifications
+- record observations, findings, hypotheses, experiments, decisions, conclusions, and verifications through first-class `cognit observe / finding / hypothesis / theory / experiment / decision / conclusion / verify / artifact / edge` subcommands
+- resolve a sticky `current-session` pointer so entity commands can run with no `--session` flag; `--session` always overrides the pointer
+- emit a stable `--json` envelope (`{ version: 1, kind, data }`) for every command, parseable by `jq`
+- enforce typed constraint rules via `cognit constraint {add,list,test}` (closed v1 predicate set of 13); non-violating events still produce a `constraint_rule_applied` audit row in the same tx
 - store events in SQLite with explicit redaction at ingest
 - rebuild session state from events (with snapshot acceleration)
 - attach artifacts as evidence
-- reject repeated failed approaches, with typed rejection reasons (`evidence` / `superseded` / `constraint`) recorded on the hypothesis state — note: this is the _data model_; the Constraint Engine that auto-prunes via rules lands in v0.2
 - show why a decision exists, with `based_on` edges to verified conclusions
-- export and import sessions losslessly
-- open a dashboard on port 6970 with Overview, Timeline, Knowledge Graph, Decision Graph, Verification, and Settings pages (Recovery Center ships in v0.2 and the v0.1 dashboard badges it accordingly)
+- serve a Hono read API on `127.0.0.1:6971` (`cognit server`) with `GET /sessions/:id/state`, `GET /events/stream` (SSE), `POST /events` (funnelled through `appendEvent` so redaction + constraint still apply), and opt-in bearer auth on non-loopback bind
 - tail the event stream from the terminal with `cognit events --follow`, without requiring the API server
 
 A smaller **Bootstrap** (no API, no dashboard) only needs to ship phases 0-4 of the implementation plan and is enough to validate the data model with real sessions.
+
+Deferred to v0.2 / phase 4: dashboard on port 6970, MCP transport, reasoning traces
+(`thought_logged`), webhooks, multi-actor RLS, incremental snapshots, fuse.js / semantic
+search, background snapshot sweeper, snapshot file mirror, per-event `from_event_id`
+fork, `cognit doctor` / `cognit gc` / `cognit project info` / `cognit wrap` /
+`cognit redaction test` / `cognit export` / `cognit import`, atomic-write enforcement
+flag, v0.1 release artifact.
 
 ---
 

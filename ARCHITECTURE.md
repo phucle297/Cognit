@@ -341,9 +341,36 @@ Edit with `cognit config --edit`. Show with `cognit config --show`. The file is 
 - **No speculative columns.** Add a column when a use case appears, not before.
 - **No multi-tenant model yet.** `workspace_id` is a planned v0.2+ schema migration.
 
+## Phase 3 — what landed in this layer
+
+Phase 3 added three things to the architecture without changing its shape:
+
+- **`CognitionService` in `@cognit/db`.** A new `Context.Tag` with one
+  method per cognition entity. Each method calls `EventStore.append`
+  with the typed payload schema. The CLI entity subcommands route
+  through it; so does any future SDK call.
+- **The constraint chokepoint.** `SessionService.appendEvent` now calls
+  `ConstraintPolicy.loadRules` + `evalRules` *before* delegating to
+  `EventStore.append`. A `block` match returns `ConstraintViolation` (a
+  new typed error); a non-block match populates
+  `constraintMatchedRuleIds` so `EventStore.append` writes a
+  `constraint_rule_applied` audit row in the same tx.
+- **Hono read API in `apps/server`.** A second consumer of the same
+  `DbLive` layer. Builds a `ManagedRuntime` so the in-process `EventBus`
+  is shared across every request (without `ManagedRuntime` each
+  Hono request would get a fresh `Ref<subscribers>` and the SSE
+  live-delivery would be silently broken). The server reuses
+  `SessionService.appendEvent` for `POST /events` so redaction +
+  constraint still apply on the HTTP write path.
+
+Phase 3 test counts (target 130+ db / 60+ cli / 50+ core / 10+ server):
+`@cognit/core` 52, `@cognit/db` 149, `@cognit/cli` 82, `@cognit/server` 15.
+Total 298. See `docs/phase-3-results.md`.
+
 ---
 
 ## Related docs
 
 - `README.md` — pitch, quickstart, core concepts, success criteria
 - `plan.xml` — full spec: schema, phases, CLI/API surface, future direction
+- `docs/phase-3-results.md` — phase 3 acceptance verification + bug fixes

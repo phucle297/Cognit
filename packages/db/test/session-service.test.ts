@@ -988,6 +988,7 @@ describe("SessionService — constraint chokepoint (phase 3c)", () => {
               equals: "observation_recorded",
             }),
             actions_json: JSON.stringify({ kind: "block" }),
+            reason: "block observations",
           },
           actor: ACTOR,
         });
@@ -1028,6 +1029,7 @@ describe("SessionService — constraint chokepoint (phase 3c)", () => {
               equals: "hypothesis_promoted",
             }),
             actions_json: JSON.stringify({ kind: "block" }),
+            reason: "block promotions",
           },
           actor: ACTOR,
         });
@@ -1062,6 +1064,7 @@ describe("SessionService — constraint chokepoint (phase 3c)", () => {
               rule_id: "r1",
               condition_json: JSON.stringify({ kind: "event.type", equals: "x" }),
               actions_json: JSON.stringify({ kind: "block" }),
+              reason: "test rule",
             },
             actor: ACTOR,
           })

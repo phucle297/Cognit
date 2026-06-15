@@ -164,7 +164,22 @@ export function registerConstraint(program: Command): void {
         process.exitCode = 2;
         return;
       }
-      const actionsJson = JSON.stringify(ruleSpec.then ?? { kind: "block" });
+      // v1 action vocabulary: only `block` is supported. Reject
+      // anything else at the CLI surface so the user gets a clean
+      // error here rather than a DbError from the policy layer.
+      const thenShape = (ruleSpec.then ?? { kind: "block" }) as { kind?: unknown };
+      if (
+        !thenShape ||
+        typeof thenShape !== "object" ||
+        (thenShape as { kind?: unknown }).kind !== "block"
+      ) {
+        process.stderr.write(
+          `cognit: invalid action in --json: v1 supports only { kind: "block" }, got ${JSON.stringify(thenShape)}\n`,
+        );
+        process.exitCode = 2;
+        return;
+      }
+      const actionsJson = JSON.stringify(thenShape);
       const reason = typeof ruleSpec.reason === "string" ? ruleSpec.reason : "(no reason)";
       const ruleId = opts.ruleId ?? `rule_${Date.now().toString(36)}`;
 
@@ -177,6 +192,7 @@ export function registerConstraint(program: Command): void {
             rule_id: ruleId,
             condition_json: conditionJson,
             actions_json: actionsJson,
+            reason,
           } as Record<string, unknown>,
           actor,
         });
@@ -191,7 +207,6 @@ export function registerConstraint(program: Command): void {
         >,
       );
       void decodedPredicate; // predicate validation is the side effect we care about
-      void reason; // echoed in the rule event payload
       process.stdout.write(`rule:     ${ruleId}\n`);
       process.stdout.write(`event:    ${event.id}\n`);
       process.stdout.write(`type:     ${event.type}\n`);

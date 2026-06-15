@@ -24,6 +24,8 @@
  * posture.
  */
 import { Command } from "commander";
+import path from "node:path";
+import fs from "node:fs/promises";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { Effect, Layer, ManagedRuntime } from "effect";
@@ -44,7 +46,6 @@ import { registerHealthz } from "./routes/healthz.js";
 import { registerSessionsRoutes } from "./routes/sessions.js";
 import { registerEventsRoutes } from "./routes/events.js";
 import { findProjectRoot } from "../../../packages/cli/src/paths.js";
-import { readConfig } from "../../../packages/cli/src/yaml-io.js";
 
 const program = new Command();
 program
@@ -103,9 +104,17 @@ const projectIdEffect = Effect.gen(function* () {
 });
 const projectId = await runtime.runPromise(projectIdEffect);
 
-// Read optional api_token from cognit.yaml
-const cfg = readConfig(root);
-const apiToken = (cfg as { server?: { api_token?: string } }).server?.api_token;
+// Read optional api_token from cognit.yaml. We do NOT use the
+// validated `readConfig` here because the `CognitConfigSchema`
+// round-trip (used by `cognit init` for the on-disk shape) does not
+// always preserve the `server` block — that block is server-only and
+// is intentionally written by hand, so the schema does not model it
+// as a first-class field. The token is read by a one-line regex
+// against the raw file; the rest of the config is not consulted by
+// the server boot path.
+const rawConfig = await fs.readFile(path.join(root, ".cognit", "cognit.yaml"), "utf8");
+const apiTokenMatch = rawConfig.match(/^[ \t]*server:[ \t]*\n[ \t]*api_token:[ \t]*['"]?([^'"\n]+)['"]?/m);
+const apiToken = apiTokenMatch ? apiTokenMatch[1]! : "";
 const isLoopback = opts.host === "127.0.0.1" || opts.host === "::1" || opts.host === "localhost";
 const enforceAuth = shouldEnforceAuth(apiToken, isLoopback);
 if (enforceAuth) {

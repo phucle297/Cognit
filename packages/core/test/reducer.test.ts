@@ -88,7 +88,7 @@ describe("reducer — non-state events are no-ops on entity state", () => {
       mkEvent({
         id: "01cra",
         type: "constraint_rule_added",
-        payload_json: '{"rule_id":"r1","condition_json":"{}","actions_json":"[]"}',
+        payload_json: '{"rule_id":"r1","condition_json":"{}","actions_json":"[]","reason":"test"}',
       }),
       mkEvent({
         id: "01cap",

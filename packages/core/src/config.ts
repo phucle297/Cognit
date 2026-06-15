@@ -81,6 +81,11 @@ const InboxConfig = Schema.Struct({
 });
 type InboxConfig = Schema.Schema.Type<typeof InboxConfig>;
 
+const ServerConfig = Schema.Struct({
+  api_token: Schema.optionalWith(Schema.String, { default: () => "" }),
+});
+type ServerConfig = Schema.Schema.Type<typeof ServerConfig>;
+
 // --- top-level -----------------------------------------------------------
 
 export const CognitConfigSchema = Schema.Struct({
@@ -108,6 +113,9 @@ export const CognitConfigSchema = Schema.Struct({
   }),
   inbox: Schema.optionalWith(InboxConfig, {
     default: () => ({ watch: true, debounce_ms: 200, atomic_write_required: true }) as const,
+  }),
+  server: Schema.optionalWith(ServerConfig, {
+    default: () => ({ api_token: "" }) as const,
   }),
 });
 

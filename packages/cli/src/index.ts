@@ -19,6 +19,7 @@ import { registerArtifact } from "./commands/artifact.js";
 import { registerEdge } from "./commands/edge.js";
 import { registerConstraint } from "./commands/constraint.js";
 import { registerSchemaDump } from "./commands/schema-dump.js";
+import { registerServer } from "./commands/server.js";
 import { setOutputMode, type OutputMode } from "./output.js";
 
 const program = new Command();
@@ -58,6 +59,7 @@ registerArtifact(program);
 registerEdge(program);
 registerConstraint(program);
 registerSchemaDump(program);
+registerServer(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`cognit: ${(err as Error).message}\n`);

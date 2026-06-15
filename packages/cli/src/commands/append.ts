@@ -111,8 +111,16 @@ const runAppend = async (
         sessionId?: string;
         issues?: string;
         message?: string;
+        ruleId?: string;
+        reason?: string;
+        eventType?: string;
       };
       switch (fail._tag) {
+        case "ConstraintViolation":
+          process.stderr.write(
+            `cognit: constraint rule ${fail.ruleId} blocked event ${fail.eventType}: ${fail.reason}\n`,
+          );
+          break;
         case "UnknownEventType":
           process.stderr.write(`cognit: --type "${fail.type}" is not a known event type\n`);
           break;

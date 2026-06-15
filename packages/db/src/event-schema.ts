@@ -129,6 +129,7 @@ const ConstraintRuleAddedPayload = Schema.Struct({
   rule_id: Schema.String,
   condition_json: Schema.String,
   actions_json: Schema.String,
+  reason: Schema.String,
 });
 const ConstraintRuleAppliedPayload = Schema.Struct({
   rule_id: Schema.String,

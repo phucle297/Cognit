@@ -85,18 +85,30 @@ export const ConstraintPolicyLive: Layer.Layer<ConstraintPolicy, never, EventSto
                 }),
               );
             }
-            // v1 only has one action shape; accept anything parseable
-            // as JSON and treat any non-block as no-op.
+            // v1 only has one action shape (`block`); reject any other
+            // kind so a future v2 (tag/redact) bumps a closed-version
+            // check here, not a silent coercion to block.
             let parsedAction: unknown;
             try {
               parsedAction = JSON.parse(action);
             } catch {
-              parsedAction = { kind: "block" };
+              return yield* Effect.fail(
+                new DbError({
+                  message: `ConstraintPolicy.loadRules: bad actions_json on event ${ev.id}`,
+                }),
+              );
             }
             const actionKind =
               parsedAction && typeof parsedAction === "object" && (parsedAction as { kind?: unknown }).kind === "block"
                 ? "block"
-                : "block"; // v1: default to block
+                : null;
+            if (actionKind !== "block") {
+              return yield* Effect.fail(
+                new DbError({
+                  message: `ConstraintPolicy.loadRules: unknown action kind on event ${ev.id} (v1 supports only 'block')`,
+                }),
+              );
+            }
             out.push({
               rule_id: ruleId,
               when: decoded,
