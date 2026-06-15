@@ -12,11 +12,8 @@
   },
   "dependencies": {
     "@cognit/core": "workspace:*",
-    "@cognit/db": "workspace:^",
-    "@hono/node-server": "^2.0.4",
-    "commander": "12.1.0",
-    "effect": "3.21.3",
-    "hono": "^4.12.25"
+    "@cognit/db": "workspace:*",
+    "effect": "3.21.3"
   },
   "devDependencies": {
     "typescript": "5.7.2",

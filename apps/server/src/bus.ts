@@ -1,10 +1,16 @@
 /**
- * apps/server/src/bus.ts — typed in-process event bus for SSE.
+ * apps/server/src/bus.ts — production `EventBus` layer.
  *
- * `EventBus` is a single publisher / multi-subscriber channel that
- * `SessionService.appendEvent` (and the inbox watcher, via the same
- * appendEvent path) push into after a successful insert. SSE
- * subscribers receive the row and forward it as a `data:` frame.
+ * Re-exports the `EventBus` Tag from `@cognit/db` for backward
+ * compatibility — server-side routes and tests import `EventBus`
+ * from here, but the interface itself lives in the db package so
+ * the db-side `EventBusNoop` default can type-check against the
+ * same contract.
+ *
+ * `EventBusLive` is the in-process Ref-based fan-out used by the
+ * server: `publish` notifies every active subscriber's queue,
+ * `subscribe` returns a new queue + an `unsub` that drops the
+ * subscriber and shuts the queue down.
  *
  * Subscribers are push-based via the `subscribe` callback. The
  * bus is in-process and per-server-instance — restarting the
@@ -14,28 +20,10 @@
  * Bus state is held inside the `EventBus` service. There is no
  * cross-process fan-out (that's a phase 4 / v0.2 item).
  */
-import { Context, Effect, Layer, Queue, Ref } from "effect";
+export { EventBus, type EventBusShape } from "@cognit/db";
+import { Effect, Layer, Queue, Ref } from "effect";
 import type { EventRow } from "@cognit/db";
-
-export interface EventBusShape {
-  /** Publish a freshly-inserted event row to all subscribers. */
-  readonly publish: (row: EventRow) => Effect.Effect<void, never, never>;
-  /**
-   * Subscribe to event rows. Returns:
-   *  - a queue that the subscriber drains, and
-   *  - an `unsub` effect to remove the subscription.
-   */
-  readonly subscribe: () => Effect.Effect<
-    { queue: Queue.Queue<EventRow>; unsub: Effect.Effect<void, never, never> },
-    never,
-    never
-  >;
-}
-
-export class EventBus extends Context.Tag("@cognit/server/EventBus")<
-  EventBus,
-  EventBusShape
->() {}
+import { EventBus } from "@cognit/db";
 
 export const EventBusLive: Layer.Layer<EventBus, never, never> = Layer.effect(
   EventBus,
@@ -61,6 +49,6 @@ export const EventBusLive: Layer.Layer<EventBus, never, never> = Layer.effect(
         return { queue: q, unsub };
       });
 
-    return { publish, subscribe } satisfies EventBusShape;
+    return { publish, subscribe };
   }),
 );

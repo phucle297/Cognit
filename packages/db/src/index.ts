@@ -4,8 +4,8 @@
  *
  * Public surface:
  *   - Tags: DbConnection, EventStore, SessionService, SessionPolicy,
- *     Redactor, MigrationRegistry, Uuid, Logger
- *   - Live layers: DbLive(dbPath, policy?), DbTestBase
+ *     Redactor, MigrationRegistry, Uuid, Logger, EventBus
+ *   - Live layers: DbLive(dbPath, policy?), DbTestBase, EventBusNoop
  *   - Errors: tagged union in `./errors`
  *   - Helpers: openDb, makeRedactor, migratePayload, redactEvent,
  *     sessionPolicyFromConfig, CURRENT_VERSION, EVENT_TYPES
@@ -19,6 +19,8 @@ export * from "./semver";
 export * from "./ulid";
 export * from "./redaction";
 export * from "./event-store";
+export * from "./bus";
+export * from "./bus-noop";
 export * from "./inbox";
 export * from "./connection";
 export * from "./project-service";

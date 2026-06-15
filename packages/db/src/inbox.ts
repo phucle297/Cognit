@@ -7,9 +7,11 @@ import { InboxError } from "./errors";
 import type { AppendEventInput } from "./event-store";
 import { ActorType } from "./actor";
 import { SessionService, type SessionAppendEventInput } from "./session-service";
+import { EventBus } from "./bus";
 
 type LoggerService = Context.Tag.Service<typeof Logger>;
 type SessionServiceT = Context.Tag.Service<typeof SessionService>;
+type EventBusT = Context.Tag.Service<typeof EventBus>;
 
 /**
  * Decode a free-form `actor_type` string from the JSON payload. Rejects
@@ -57,6 +59,7 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
   Effect.gen(function* () {
     const sessions: SessionServiceT = yield* SessionService;
     const logger: LoggerService = yield* Logger;
+    const eventBus: EventBusT = yield* EventBus;
 
     yield* Effect.tryPromise({
       try: () => fs.mkdir(config.inboxDir, { recursive: true }),
@@ -76,7 +79,9 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
      * Pure processing step: read file, parse, attempt append, move to
      * success or error dir. This is what unit tests exercise.
      */
-    const processFile = (filePath: string): Effect.Effect<void, never, SessionService | Logger> =>
+    const processFile = (
+      filePath: string,
+    ): Effect.Effect<void, never, SessionService | Logger | EventBus> =>
       Effect.gen(function* () {
         const base = path.basename(filePath);
         let text: string;
@@ -177,6 +182,11 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           { eventId: result.event.id, type: p.type, snapshotTaken: result.snapshotTaken },
           "inbox: appended",
         );
+        // Publish the inserted row to the bus so live SSE subscribers
+        // see file-based inbox writes the same way POST /events does.
+        // A bus error is observable but not fatal — the file-move path
+        // must not fail because SSE wiring is broken.
+        yield* eventBus.publish(result.event).pipe(Effect.ignoreLogged);
         yield* moveFile(
           filePath,
           path.join(config.processedDir, `${result.event.id}.json`),
@@ -216,7 +226,7 @@ export const inboxIgnored = (p: string): boolean => {
  */
 export const drainInbox = (
   config: InboxWatcherConfig,
-): Effect.Effect<{ processed: number; errored: number }, never, SessionService | Logger> =>
+): Effect.Effect<{ processed: number; errored: number }, never, SessionService | Logger | EventBus> =>
   Effect.gen(function* () {
     const { processFile } = yield* makeInboxWatcher(config);
     const listDir = (dir: string): Effect.Effect<ReadonlyArray<string>, never, never> =>
@@ -252,17 +262,17 @@ export const drainInbox = (
  * and hands each stable `.json` to `processFile`. Returns an Effect that
  * runs forever (use `Effect.scoped` or `Fiber` to cancel).
  *
- * Callers must provide `SessionService | Logger` to satisfy the R-channel.
+ * Callers must provide `SessionService | Logger | EventBus` to satisfy the R-channel.
  * The watcher materialises this R into a `Runtime` once, then forks each
  * per-file effect onto that runtime — avoiding the `MissingServiceError`
  * trap of an unsafe effect-channel-narrowing cast.
  */
 export const runInboxWatcher = (
   config: InboxWatcherConfig,
-): Effect.Effect<{ stop: () => Promise<void> }, never, SessionService | Logger> =>
+): Effect.Effect<{ stop: () => Promise<void> }, never, SessionService | Logger | EventBus> =>
   Effect.gen(function* () {
     const { processFile } = yield* makeInboxWatcher(config);
-    const runtime = yield* Effect.runtime<SessionService | Logger>();
+    const runtime = yield* Effect.runtime<SessionService | Logger | EventBus>();
     const watcher = chokidar.watch(config.inboxDir, {
       ignored: inboxIgnored,
       persistent: true,
@@ -271,7 +281,7 @@ export const runInboxWatcher = (
     watcher.on("add", (filePath) => {
       if (!filePath.endsWith(".json")) return;
       // Fire-and-forget; the store handles its own retries via idempotency.
-      // The runtime carries the SessionService | Logger R-channel into the fork.
+      // The runtime carries the SessionService | Logger | EventBus R-channel into the fork.
       Runtime.runFork(runtime, processFile(filePath));
     });
     return {

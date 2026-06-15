@@ -5,6 +5,8 @@ import os from "node:os";
 import fs from "node:fs/promises";
 import {
   DbConnection,
+  EventBus,
+  EventBusNoop,
   EventStore,
   Logger,
   LoggerNoop,
@@ -53,8 +55,14 @@ const makeTestLayer = (dbPath: string) => {
   );
   return Layer.merge(
     Layer.merge(
-      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
-      constraintPolicy,
+      Layer.merge(
+        Layer.merge(
+          Layer.merge(eventStore, sessionService),
+          snapshotService,
+        ),
+        constraintPolicy,
+      ),
+      EventBusNoop,
     ),
     Layer.merge(dbConn, LoggerNoop),
   ) as unknown as Layer.Layer<
@@ -64,7 +72,8 @@ const makeTestLayer = (dbPath: string) => {
     | SessionPolicy
     | DbConnection
     | Logger
-    | ConstraintPolicy,
+    | ConstraintPolicy
+    | EventBus,
     never,
     never
   >;
