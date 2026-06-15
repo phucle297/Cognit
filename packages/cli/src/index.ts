@@ -16,6 +16,7 @@ import { registerConclusion } from "./commands/conclusion.js";
 import { registerVerification } from "./commands/verification.js";
 import { registerArtifact } from "./commands/artifact.js";
 import { registerEdge } from "./commands/edge.js";
+import { registerConstraint } from "./commands/constraint.js";
 import { registerSchemaDump } from "./commands/schema-dump.js";
 import { setOutputMode, type OutputMode } from "./output.js";
 
@@ -53,6 +54,7 @@ registerConclusion(program);
 registerVerification(program);
 registerArtifact(program);
 registerEdge(program);
+registerConstraint(program);
 registerSchemaDump(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {

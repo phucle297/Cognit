@@ -20,6 +20,7 @@ import { DbConnection, EventStore, Logger } from "./context";
 import {
   DbError,
   SessionClosed,
+  ConstraintViolation,
   UnknownEventType,
   UnknownSession,
   ValidationFailure,
@@ -29,6 +30,8 @@ import type { ActorType } from "./actor";
 import type { EventRow, SessionRow, SnapshotRow } from "./schema/rows";
 import { Uuid } from "./ulid";
 import { reduce } from "@cognit/core/reducer";
+import { ConstraintPolicy } from "./constraint-policy";
+import { evalRules, type CandidateEvent } from "./constraint-engine";
 import { emptySessionState, type SessionState } from "@cognit/core/state";
 import { SnapshotService } from "./snapshot-service";
 import { SessionPolicy } from "./session-policy";
@@ -39,7 +42,8 @@ export type SessionError =
   | SessionClosed
   | UnknownEventType
   | ValidationFailure
-  | UnknownSession;
+  | UnknownSession
+  | ConstraintViolation;
 
 type DbConnService = Context.Tag.Service<typeof DbConnection>;
 type EventStoreService = Context.Tag.Service<typeof EventStore>;
@@ -119,6 +123,8 @@ export interface SessionShowResult {
   readonly snapshot: SnapshotRow | null;
   /** When the snapshot+tail path is taken, the events applied after the snapshot. */
   readonly tail_event_count: number;
+  /** Alias of `tail_event_count` — number of events applied after the snapshot. */
+  readonly eventsAfterSnapshot: number;
 }
 
 export interface SessionServiceShape {
@@ -309,7 +315,7 @@ const rehydrateSessionState = (parsed: Record<string, unknown>): SessionState =>
 export const SessionServiceLive: Layer.Layer<
   SessionService,
   never,
-  DbConnection | EventStore | SnapshotService | Uuid | Logger | SessionPolicy
+  DbConnection | EventStore | SnapshotService | Uuid | Logger | SessionPolicy | ConstraintPolicy
 > = Layer.effect(
   SessionService,
   Effect.gen(function* () {
@@ -319,6 +325,75 @@ export const SessionServiceLive: Layer.Layer<
     const uuid: UuidService = yield* Uuid;
     const logger: LoggerService = yield* Logger;
     const policy: Context.Tag.Service<typeof SessionPolicy> = yield* SessionPolicy;
+    const constraintPolicy = yield* ConstraintPolicy;
+
+    // Private helper: the snapshot+tail replay path. Used by both
+    // `show` (the public read API) and `appendEvent` (phase 3c
+    // constraint check, which needs the current SessionState to
+    // evaluate rules).
+    const _show = (
+      sessionId: string,
+    ): Effect.Effect<SessionShowResult, SessionError> =>
+      Effect.gen(function* () {
+        const row = yield* trySync(
+          () => fetchSession(conn, sessionId),
+          (e) => new DbError({ message: "session show: fetch", cause: e }),
+        );
+        if (!row) {
+          return yield* Effect.fail(new UnknownSession({ sessionId }));
+        }
+        const events = yield* trySync(
+          () =>
+            conn.handle.all<EventRow>(
+              "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+              [sessionId],
+            ),
+          (e) => new DbError({ message: "session show: list events", cause: e }),
+        );
+        const snapshot = yield* trySync(
+          () =>
+            conn.handle.get<SnapshotRow>(
+              "SELECT * FROM snapshots WHERE session_id = ? ORDER BY event_count DESC, created_at DESC LIMIT 1",
+              [sessionId],
+            ),
+          (e) => new DbError({ message: "session show: latest snapshot", cause: e }),
+        );
+        let base: SessionState | undefined;
+        let tail: ReadonlyArray<EventRow>;
+        if (snapshot) {
+          try {
+            const parsed = JSON.parse(snapshot.state_json) as Record<string, unknown>;
+            base = rehydrateSessionState(parsed);
+          } catch (e) {
+            yield* logger.log(
+              "warning",
+              { sessionId, snapshotId: snapshot.id, error: String(e) },
+              "session show: snapshot state_json corrupt, falling back to full replay",
+            );
+            base = undefined;
+          }
+          tail = events.filter((e) => e.id > snapshot.event_id);
+        } else {
+          base = undefined;
+          tail = events;
+        }
+        const initial: SessionState =
+          base ??
+          emptySessionState({
+            session_id: row.id,
+            project_id: row.project_id,
+            goal: row.goal,
+            parent_session_id: row.parent_session_id,
+          });
+        const state = reduce(tail, initial);
+        return {
+          session: row,
+          state,
+          snapshot: snapshot ?? null,
+          tail_event_count: tail.length,
+          eventsAfterSnapshot: tail.length,
+        };
+      });
 
     /**
      * Append an event to the store and, if the per-session event
@@ -689,66 +764,7 @@ export const SessionServiceLive: Layer.Layer<
           return { session: updated, event, parent: target, forked: false };
         }),
 
-      show: (sessionId) =>
-        Effect.gen(function* () {
-          const row = yield* trySync(
-            () => fetchSession(conn, sessionId),
-            (e) => new DbError({ message: "session show: fetch", cause: e }),
-          );
-          if (!row) {
-            return yield* Effect.fail(new UnknownSession({ sessionId }));
-          }
-          const events = yield* trySync(
-            () =>
-              conn.handle.all<EventRow>(
-                "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
-                [sessionId],
-              ),
-            (e) => new DbError({ message: "session show: list events", cause: e }),
-          );
-          const snapshot = yield* trySync(
-            () =>
-              conn.handle.get<SnapshotRow>(
-                "SELECT * FROM snapshots WHERE session_id = ? ORDER BY event_count DESC, created_at DESC LIMIT 1",
-                [sessionId],
-              ),
-            (e) => new DbError({ message: "session show: latest snapshot", cause: e }),
-          );
-          let base: SessionState | undefined;
-          let tail: ReadonlyArray<EventRow>;
-          if (snapshot) {
-            try {
-              const parsed = JSON.parse(snapshot.state_json) as Record<string, unknown>;
-              base = rehydrateSessionState(parsed);
-            } catch (e) {
-              yield* logger.log(
-                "warning",
-                { sessionId, snapshotId: snapshot.id, error: String(e) },
-                "session show: snapshot state_json corrupt, falling back to full replay",
-              );
-              base = undefined;
-            }
-            tail = events.filter((e) => e.id > snapshot.event_id);
-          } else {
-            base = undefined;
-            tail = events;
-          }
-          const initial: SessionState =
-            base ??
-            emptySessionState({
-              session_id: row.id,
-              project_id: row.project_id,
-              goal: row.goal,
-              parent_session_id: row.parent_session_id,
-            });
-          const state = reduce(tail, initial);
-          return {
-            session: row,
-            state,
-            snapshot: snapshot ?? null,
-            tail_event_count: tail.length,
-          };
-        }),
+      show: (sessionId) => _show(sessionId),
 
       takeSnapshot: (sessionId) =>
         Effect.gen(function* () {
@@ -815,6 +831,45 @@ export const SessionServiceLive: Layer.Layer<
           if (row.status === "closed") {
             return yield* Effect.fail(new SessionClosed({ sessionId: input.sessionId }));
           }
+
+          // Phase 3c: constraint engine check. The chokepoint is
+          // public, so CLI / 3a / 3d / inbox watcher all funnel
+          // through here. Skip the check for `constraint_rule_added`
+          // itself — adding a rule must not require permission from
+          // the same rule set.
+          if (input.type !== "constraint_rule_added" && input.type !== "constraint_rule_applied") {
+            const rules = yield* constraintPolicy.loadRules(input.sessionId);
+            if (rules.length > 0) {
+              // Load current state via the snapshot+tail path.
+              const show = yield* _show(input.sessionId).pipe(
+                Effect.mapError(
+                  (e) =>
+                    new DbError({
+                      message: "appendEvent: constraint state fetch",
+                      cause: e,
+                    }),
+                ),
+              );
+              const candidate: CandidateEvent = {
+                type: input.type,
+                payload: input.payload as Readonly<Record<string, unknown>>,
+                actorTrustScore: 1.0, // v1: no actor trust score column yet
+                sessionEventCount: show.eventsAfterSnapshot,
+              };
+              const result = evalRules(rules, show.state, candidate);
+              if (!result.allow && result.violation) {
+                return yield* Effect.fail(
+                  new ConstraintViolation({
+                    ruleId: result.violation.ruleId,
+                    reason: result.violation.reason,
+                    eventType: input.type,
+                    sessionId: input.sessionId,
+                  }),
+                );
+              }
+            }
+          }
+
           return yield* _appendAndMaybeSnapshot({
             type: input.type,
             payload: input.payload,

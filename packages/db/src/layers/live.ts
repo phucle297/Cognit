@@ -10,6 +10,7 @@ import { SessionService, SessionServiceLive } from "../session-service";
 import { SessionPolicy, SessionPolicyDefault } from "../session-policy";
 import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
 import { CognitionService, CognitionServiceLive } from "../cognition-service";
+import { ConstraintPolicy, ConstraintPolicyLive } from "../constraint-policy";
 import type { DbError, DbCorrupted } from "../errors";
 
 /**
@@ -52,7 +53,13 @@ export const DbLive = (
   dbPath: string,
   policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
 ): Layer.Layer<
-  DbConnection | EventStore | SessionService | SnapshotService | ProjectService | CognitionService,
+  | DbConnection
+  | EventStore
+  | SessionService
+  | SnapshotService
+  | ProjectService
+  | CognitionService
+  | ConstraintPolicy,
   DbError | DbCorrupted,
   never
 > => {
@@ -69,11 +76,16 @@ export const DbLive = (
   const snapshots = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   // ProjectService needs DbConnection + Uuid + Logger.
   const projects = Layer.provide(ProjectServiceLive, Layer.merge(leafs, dbConn));
-  // SessionService needs EventStore + SnapshotService + leafs.
-  // After we provide eventStore and snapshots below, the only
+  // ConstraintPolicy needs EventStore.
+  const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
+  // SessionService needs EventStore + SnapshotService + ConstraintPolicy
+  // + leafs. After we provide eventStore and snapshots below, the only
   // remaining dep on R is from the leafs, which we already provided.
   const sessions = Layer.provide(
-    Layer.provide(Layer.provide(SessionServiceLive, leafs), Layer.merge(eventStore, snapshots)),
+    Layer.provide(
+      Layer.provide(SessionServiceLive, leafs),
+      Layer.merge(Layer.merge(eventStore, snapshots), constraintPolicy),
+    ),
     leafs,
   );
   // CognitionService sits ON TOP of SessionService (the constraint
@@ -84,15 +96,24 @@ export const DbLive = (
   // Using Layer.provide on a Layer.merge merges the outputs and
   // satisfies the R channel.
   const inner = Layer.merge(
-    Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects),
-    cognition,
+    Layer.merge(
+      Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects),
+      cognition,
+    ),
+    constraintPolicy,
   );
   // Provide the SessionPolicy internally so the R channel stays
   // `never`. Phase 2.5b widens SessionService's R to include
   // SessionPolicy; the provide chain below satisfies that without
   // exposing the policy to callers.
   return Layer.provide(Layer.provide(inner, dbConn), policy) as Layer.Layer<
-    DbConnection | EventStore | SessionService | SnapshotService | ProjectService | CognitionService,
+    | DbConnection
+    | EventStore
+    | SessionService
+    | SnapshotService
+    | ProjectService
+    | CognitionService
+    | ConstraintPolicy,
     DbError | DbCorrupted,
     never
   >;

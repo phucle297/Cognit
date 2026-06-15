@@ -19,6 +19,7 @@ import {
   UuidTest,
 } from "../src";
 import { EventStoreLive } from "../src/event-store";
+import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy";
 
 /**
  * Test layer composing all the services the SessionService test needs.
@@ -44,17 +45,30 @@ const makeTestLayer = (
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
-  // sessionService needs EventStore + SnapshotService + leafs + DbConnection
-  // and now also SessionPolicy.
+  // constraintPolicy depends on EventStore.
+  const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
+  // sessionService needs EventStore + SnapshotService + ConstraintPolicy
+  // + leafs + DbConnection and now also SessionPolicy.
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
-    Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
+    Layer.merge(
+      Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+      dbConn,
+    ),
   );
   return Layer.merge(
-    Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+    Layer.merge(
+      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+      constraintPolicy,
+    ),
     Layer.merge(dbConn, LoggerNoop),
   ) as Layer.Layer<
-    EventStore | DbConnection | SessionService | SnapshotService | Logger,
+    | EventStore
+    | DbConnection
+    | SessionService
+    | SnapshotService
+    | Logger
+    | ConstraintPolicy,
     never,
     never
   >;
@@ -925,6 +939,152 @@ describe("SessionService.appendEvent (auto-snapshot)", () => {
         if (r._tag === "Left") {
           expect(r.left._tag).toBe("UnknownSession");
         }
+      }),
+    );
+  });
+});
+
+/**
+ * Phase 3c: constraint engine chokepoint.
+ *
+ * `SessionService.appendEvent` is the single boundary through which
+ * every event flows. When rules are added via `constraint_rule_added`,
+ * subsequent `appendEvent` calls must evaluate the rule set against
+ * the candidate event and the post-state-at-that-point; a matching
+ * `block` rule must fail with `ConstraintViolation` and write nothing.
+ *
+ * These tests exercise that path end-to-end against a real sqlite
+ * database. They share the same `makeTestLayer` shape as the
+ * snapshot/reducer suites (so the layer wiring stays uniform), then
+ * drive the API directly.
+ */
+describe("SessionService — constraint chokepoint (phase 3c)", () => {
+  let dbPath = "";
+  beforeEach(async () => {
+    dbPath = await withTempDb();
+  });
+
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
+    Effect.runPromise(
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
+    );
+
+  it("adds a block rule and rejects a matching observation_recorded", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const store = yield* EventStore;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({ projectId, goal: "block obs", actor: ACTOR });
+        const sessionId = created.session.id;
+        yield* store.append({
+          sessionId,
+          type: "constraint_rule_added",
+          payload: {
+            rule_id: "no_obs",
+            condition_json: JSON.stringify({
+              kind: "event.type",
+              equals: "observation_recorded",
+            }),
+            actions_json: JSON.stringify({ kind: "block" }),
+          },
+          actor: ACTOR,
+        });
+        const r = yield* service
+          .appendEvent({
+            sessionId,
+            type: "observation_recorded",
+            payload: { text: "should be blocked" },
+            actor: ACTOR,
+          })
+          .pipe(Effect.either);
+        expect(r._tag).toBe("Left");
+        if (r._tag === "Left") {
+          expect(r.left._tag).toBe("ConstraintViolation");
+          const violation = r.left as { ruleId: string };
+          expect(violation.ruleId).toBe("no_obs");
+        }
+      }),
+    );
+  });
+
+  it("allows a non-matching event after adding an unrelated rule", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const store = yield* EventStore;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({ projectId, goal: "ok", actor: ACTOR });
+        const sessionId = created.session.id;
+        yield* store.append({
+          sessionId,
+          type: "constraint_rule_added",
+          payload: {
+            rule_id: "block_promo",
+            condition_json: JSON.stringify({
+              kind: "event.type",
+              equals: "hypothesis_promoted",
+            }),
+            actions_json: JSON.stringify({ kind: "block" }),
+          },
+          actor: ACTOR,
+        });
+        const r = yield* service.appendEvent({
+          sessionId,
+          type: "observation_recorded",
+          payload: { text: "ok" },
+          actor: ACTOR,
+        });
+        expect(r.event.type).toBe("observation_recorded");
+      }),
+    );
+  });
+
+  it("does not block adding the constraint rule itself", async () => {
+    // The first constraint rule must be addable even though it would
+    // have blocked an event of a future type — adding the rule is the
+    // only way to start enforcing it. So the engine is excluded from
+    // its own predicate set.
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({ projectId, goal: "self", actor: ACTOR });
+        const sessionId = created.session.id;
+        const r = yield* service
+          .appendEvent({
+            sessionId,
+            type: "constraint_rule_added",
+            payload: {
+              rule_id: "r1",
+              condition_json: JSON.stringify({ kind: "event.type", equals: "x" }),
+              actions_json: JSON.stringify({ kind: "block" }),
+            },
+            actor: ACTOR,
+          })
+          .pipe(Effect.either);
+        expect(r._tag).toBe("Right");
+      }),
+    );
+  });
+
+  it("no rules loaded -> any event passes", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({ projectId, goal: "no rules", actor: ACTOR });
+        const r = yield* service.appendEvent({
+          sessionId: created.session.id,
+          type: "observation_recorded",
+          payload: { text: "fine" },
+          actor: ACTOR,
+        });
+        expect(r.event.type).toBe("observation_recorded");
       }),
     );
   });

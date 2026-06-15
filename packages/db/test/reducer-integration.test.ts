@@ -21,6 +21,7 @@ import {
 import { EventStoreLive } from "../src/event-store";
 import { reduce } from "@cognit/core/reducer";
 import { emptySessionState } from "@cognit/core/state";
+import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy";
 
 /**
  * Phase-2 done_when test.
@@ -46,22 +47,36 @@ const makeTestLayer = (dbPath: string) => {
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
-  // sessionService needs EventStore + SnapshotService + leafs + DbConnection
-  // and now also SessionPolicy. Use a high everyN so the auto-snapshot
-  // path doesn't trip on the manual takeIfDue call inside the test.
+  // constraintPolicy depends on EventStore.
+  const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
+  // sessionService needs EventStore + SnapshotService + ConstraintPolicy
+  // + leafs + DbConnection and now also SessionPolicy. Use a high
+  // everyN so the auto-snapshot path doesn't trip on the manual
+  // takeIfDue call inside the test.
   const policyLayer = Layer.succeed(SessionPolicy)({
     everyN: 999_999,
     forkOnResume: true,
   });
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
-    Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
+    Layer.merge(
+      Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+      dbConn,
+    ),
   );
   return Layer.merge(
-    Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+    Layer.merge(
+      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+      constraintPolicy,
+    ),
     Layer.merge(dbConn, LoggerNoop),
   ) as Layer.Layer<
-    EventStore | DbConnection | SessionService | SnapshotService | Logger,
+    | EventStore
+    | DbConnection
+    | SessionService
+    | SnapshotService
+    | Logger
+    | ConstraintPolicy,
     never,
     never
   >;
@@ -413,19 +428,31 @@ describe("reducer integration — auto-snapshot trigger", () => {
     const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
     const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
     const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
+    const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
     const policyLayer = Layer.succeed(SessionPolicy)({
       everyN: 3,
       forkOnResume: true,
     });
     const sessionService = Layer.provide(
       Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
-      Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
+      Layer.merge(
+        Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+        dbConn,
+      ),
     );
     return Layer.merge(
-      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+      Layer.merge(
+        Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+        constraintPolicy,
+      ),
       Layer.merge(dbConn, LoggerNoop),
     ) as Layer.Layer<
-      EventStore | DbConnection | SessionService | SnapshotService | Logger,
+      | EventStore
+      | DbConnection
+      | SessionService
+      | SnapshotService
+      | Logger
+      | ConstraintPolicy,
       never,
       never
     >;

@@ -20,6 +20,7 @@ import {
 import { EventStoreLive } from "../src/event-store";
 import { SessionServiceLive } from "../src/session-service";
 import { SnapshotServiceLive } from "../src/snapshot-service";
+import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy";
 import {
   inboxIgnored,
   makeInboxWatcher,
@@ -42,15 +43,28 @@ const makeTestLayer = (dbPath: string) => {
   // the working `session-service.test.ts` test layer.
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
+  const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, SessionPolicyDefault), leafs),
-    Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
+    Layer.merge(
+      Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+      dbConn,
+    ),
   );
   return Layer.merge(
-    Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+    Layer.merge(
+      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+      constraintPolicy,
+    ),
     Layer.merge(dbConn, LoggerNoop),
   ) as unknown as Layer.Layer<
-    EventStore | SessionService | SnapshotService | SessionPolicy | DbConnection | Logger,
+    | EventStore
+    | SessionService
+    | SnapshotService
+    | SessionPolicy
+    | DbConnection
+    | Logger
+    | ConstraintPolicy,
     never,
     never
   >;

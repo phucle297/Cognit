@@ -62,12 +62,26 @@ export class InboxError extends Data.TaggedError("InboxError")<{
   readonly cause?: unknown;
 }> {}
 
+/**
+ * Phase 3c: emitted by `SessionService.appendEvent` when a constraint
+ * rule's `block` action fires. The chokepoint catches this and the
+ * caller (CLI / 3d route / inbox watcher) surfaces the rule id +
+ * reason to the user.
+ */
+export class ConstraintViolation extends Data.TaggedError("ConstraintViolation")<{
+  readonly ruleId: string;
+  readonly reason: string;
+  readonly eventType: string;
+  readonly sessionId: string;
+}> {}
+
 export type AppendError =
   | UnknownEventType
   | UnknownEventVersion
   | ValidationFailure
   | UnknownSession
   | SessionClosed
+  | ConstraintViolation
   | DbError;
 
 export type ReadError = DbError | NotFound;
