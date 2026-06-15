@@ -5,6 +5,7 @@
   "description": "Git for AI cognition. Local-first persistent decision and knowledge layer for AI-assisted engineering.",
   "type": "module",
   "scripts": {
+    "preinstall": "pkill -f 'turbo.*daemon' >/dev/null 2>&1 || true",
     "build": "turbo run build",
     "dev": "turbo run dev --parallel",
     "typecheck": "turbo run typecheck",
