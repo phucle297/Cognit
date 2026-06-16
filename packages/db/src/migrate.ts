@@ -1,6 +1,9 @@
 import { Effect, Either, Layer, Schema } from "effect";
 import { MigrationRegistry } from "./context";
-import { CURRENT_VERSION, PAYLOAD_SCHEMAS_V1 } from "./event-schema";
+import {
+  PAYLOAD_SCHEMAS_BY_VERSION,
+  PAYLOAD_SCHEMAS_V1_1_0,
+} from "./event-schema";
 import { MigrationTransformError, ValidationFailure } from "./errors";
 import { semverGte, semverCompare } from "./semver";
 
@@ -20,15 +23,21 @@ export interface Transform {
 
 /**
  * The registry: ordered list of transforms. The runner walks
- * `transformsFor(from, CURRENT_VERSION)` to lift a payload.
+ * `transformsFor(from, to)` to lift a payload.
  *
- * No transforms registered yet (we are at v1.0.0). The infrastructure
- * is in place so a v1.1.0 change is a one-line addition + a test.
- *
- * To add a v1.0.0 -> v1.1.0 transform for `hypothesis_created`, prepend
- * to the list. The runner picks it up automatically.
+ * v1.0.0 -> v1.1.0 is an identity transform for all event types —
+ * the v1.1.0 schemas are a strict superset (all new fields optional
+ * with `null` defaults). Registered explicitly so the migration
+ * runner can prove the path exists and `migratePayload` can pick
+ * the right per-version schema for re-validation.
  */
-const TRANSFORMS: ReadonlyArray<Transform> = [];
+const TRANSFORMS: ReadonlyArray<Transform> = [
+  {
+    from: "1.0.0",
+    to: "1.1.0",
+    fn: (payload) => payload,
+  },
+];
 
 /** Live layer. */
 export const MigrationRegistryLive: Layer.Layer<MigrationRegistry> = Layer.succeed(
@@ -41,9 +50,18 @@ export const MigrationRegistryLive: Layer.Layer<MigrationRegistry> = Layer.succe
       }
       return TRANSFORMS.filter((t) => semverGte(t.to, to) && semverGte(t.from, from));
     },
-    knownVersions: () => [CURRENT_VERSION],
+    knownVersions: () => Object.keys(PAYLOAD_SCHEMAS_BY_VERSION),
   },
 );
+
+/**
+ * Pick the schema map for a target version. Falls back to the
+ * current v1.1.0 map for unknown versions — the schema-validation
+ * step that follows is the authoritative "this shape is not allowed"
+ * signal, so a forward-default is safe.
+ */
+const schemaMapFor = (version: string): Readonly<Record<string, Schema.Schema<any, any, never>>> =>
+  PAYLOAD_SCHEMAS_BY_VERSION[version] ?? PAYLOAD_SCHEMAS_V1_1_0;
 
 /**
  * Lift a stored payload to `target` version by walking transforms.
@@ -63,7 +81,7 @@ export const migratePayload = (
   Effect.gen(function* () {
     if (fromVersion === toVersion) {
       const result = Schema.decodeUnknownEither(
-        PAYLOAD_SCHEMAS_V1[type] as Schema.Schema<any, any, never>,
+        schemaMapFor(toVersion)[type] as Schema.Schema<any, any, never>,
       )(payload);
       if (Either.isLeft(result)) {
         return yield* Effect.fail(
@@ -94,7 +112,7 @@ export const migratePayload = (
       current = t.fn(current);
     }
     const result = Schema.decodeUnknownEither(
-      PAYLOAD_SCHEMAS_V1[type] as Schema.Schema<any, any, never>,
+      schemaMapFor(toVersion)[type] as Schema.Schema<any, any, never>,
     )(current);
     if (Either.isLeft(result)) {
       return yield* Effect.fail(

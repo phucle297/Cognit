@@ -44,6 +44,15 @@ export interface AppendEventInput {
    * never sets this today; v2 (non-block actions) will populate it.
    */
   readonly constraintMatchedRuleIds?: ReadonlyArray<string>;
+  /**
+   * v1.1.0 outcome columns. The append chokepoint forwards these
+   * directly to the row; the subprocess engine (Phase 4 / 4a) is the
+   * only intended writer. Defaults to null on every other event type.
+   */
+  readonly stdoutExcerpt?: string | null;
+  readonly exitCode?: number | null;
+  readonly durationMs?: number | null;
+  readonly createdArtifactId?: string | null;
 }
 
 export interface ListEventsQuery {
@@ -285,6 +294,10 @@ export const EventStoreLive: Layer.Layer<
                     confidence: input.confidence ?? null,
                     parent_verification_id: input.parentVerificationId ?? null,
                     linked_hypothesis_id: input.linkedHypothesisId ?? null,
+                    stdout_excerpt: input.stdoutExcerpt ?? null,
+                    exit_code: input.exitCode ?? null,
+                    duration_ms: input.durationMs ?? null,
+                    created_artifact_id: input.createdArtifactId ?? null,
                     created_at: createdAt,
                   }),
                 (e) => {
@@ -344,6 +357,10 @@ export const EventStoreLive: Layer.Layer<
                       confidence: null,
                       parent_verification_id: null,
                       linked_hypothesis_id: null,
+                      stdout_excerpt: null,
+                      exit_code: null,
+                      duration_ms: null,
+                      created_artifact_id: null,
                       created_at: createdAt,
                     }),
                   (e) => new DbError({ message: "append: insert redaction_applied", cause: e }),
@@ -379,6 +396,10 @@ export const EventStoreLive: Layer.Layer<
                       confidence: null,
                       parent_verification_id: null,
                       linked_hypothesis_id: null,
+                      stdout_excerpt: null,
+                      exit_code: null,
+                      duration_ms: null,
+                      created_artifact_id: null,
                       created_at: createdAt,
                     }),
                   (e) =>

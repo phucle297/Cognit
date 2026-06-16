@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { Either, Schema } from "effect";
-import { CURRENT_VERSION, EVENT_TYPES, PAYLOAD_SCHEMAS_V1 } from "../src";
+import {
+  CURRENT_VERSION,
+  EVENT_TYPES,
+  PAYLOAD_SCHEMAS_V1,
+  PAYLOAD_SCHEMAS_V1_1_0,
+} from "../src";
 
 describe("event schema registry", () => {
-  it("CURRENT_VERSION is 1.0.0", () => {
-    expect(CURRENT_VERSION).toBe("1.0.0");
+  it("CURRENT_VERSION is 1.1.0", () => {
+    expect(CURRENT_VERSION).toBe("1.1.0");
   });
 
   it("every event type from plan.xml has a schema", () => {
@@ -95,6 +100,59 @@ describe("event schema registry", () => {
           type: "fruit",
           linked_hypothesis_id: null,
         }),
+      ),
+    ).toBe(true);
+  });
+
+  it("v1.1.0 verification_passed decodes exit_code / duration_ms / stdout_excerpt / created_artifact_id", () => {
+    const s = PAYLOAD_SCHEMAS_V1_1_0["verification_passed"] as Schema.Schema<any, any, never>;
+    const full = Schema.decodeUnknownEither(s)({
+      exit_code: 0,
+      duration_ms: 1234,
+      stdout_excerpt: "ok 1\nok 2",
+      created_artifact_id: "01artxxxxxxxxxxxxxxxxxxxxxx",
+    });
+    expect(Either.isRight(full)).toBe(true);
+    if (Either.isRight(full)) {
+      const r = full.right as Record<string, unknown>;
+      expect(r.exit_code).toBe(0);
+      expect(r.duration_ms).toBe(1234);
+      expect(r.stdout_excerpt).toBe("ok 1\nok 2");
+      expect(r.created_artifact_id).toBe("01artxxxxxxxxxxxxxxxxxxxxxx");
+    }
+    // Empty body still decodes (all new fields are optional with defaults).
+    const empty = Schema.decodeUnknownEither(s)({});
+    expect(Either.isRight(empty)).toBe(true);
+  });
+
+  it("v1.1.0 verification_failed decodes new fields while keeping stderr_excerpt required", () => {
+    const s = PAYLOAD_SCHEMAS_V1_1_0["verification_failed"] as Schema.Schema<any, any, never>;
+    expect(
+      Either.isRight(
+        Schema.decodeUnknownEither(s)({
+          stderr_excerpt: "boom",
+          exit_code: 2,
+          duration_ms: 500,
+          stdout_excerpt: null,
+          created_artifact_id: null,
+        }),
+      ),
+    ).toBe(true);
+    // stderr_excerpt still required.
+    expect(Either.isLeft(Schema.decodeUnknownEither(s)({}))).toBe(true);
+  });
+
+  it("v1.1.0 verification_errored / cancelled carry optional duration_ms", () => {
+    const errored = PAYLOAD_SCHEMAS_V1_1_0["verification_errored"] as Schema.Schema<any, any, never>;
+    expect(
+      Either.isRight(
+        Schema.decodeUnknownEither(errored)({ error: "ENOENT", duration_ms: 42 }),
+      ),
+    ).toBe(true);
+    const cancelled = PAYLOAD_SCHEMAS_V1_1_0["verification_cancelled"] as Schema.Schema<any, any, never>;
+    expect(
+      Either.isRight(
+        Schema.decodeUnknownEither(cancelled)({ reason: "user_aborted", duration_ms: 7 }),
       ),
     ).toBe(true);
   });

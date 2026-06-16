@@ -141,6 +141,17 @@ export interface VerificationState {
   readonly parent_verification_id: string | null;
   readonly started_at: string;
   readonly ended_at: string | null;
+  /**
+   * v1.1.0 outcome fields. Populated by the reducer from the
+   * matching `verification_passed` / `verification_failed` /
+   * `verification_errored` / `verification_cancelled` event payload.
+   * All nullable on legacy v1.0.0 verifications.
+   */
+  readonly expected_duration_ms: number | null;
+  readonly duration_ms: number | null;
+  readonly exit_code: number | null;
+  readonly stdout_excerpt: string | null;
+  readonly created_artifact_id: string | null;
   readonly last_event_id: string;
 }
 

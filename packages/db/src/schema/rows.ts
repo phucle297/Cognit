@@ -48,6 +48,14 @@ export interface EventRow {
   confidence: number | null;
   parent_verification_id: string | null;
   linked_hypothesis_id: string | null;
+  // v1.1.0 outcome columns — populated by the subprocess engine
+  // (Phase 4 / 4a). NULL on v1.0.0 events and on events that did
+  // not produce the corresponding outcome (e.g. errored has no
+  // exit_code because the subprocess never returned one).
+  stdout_excerpt: string | null;
+  exit_code: number | null;
+  duration_ms: number | null;
+  created_artifact_id: string | null;
   // SQLite TEXT (ISO 8601). Parse with `new Date(row.created_at)` if you need a Date.
   created_at: string;
 }

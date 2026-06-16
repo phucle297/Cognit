@@ -637,6 +637,180 @@ describe("reducer — verification state machine", () => {
   });
 });
 
+describe("reducer — verification v1.1.0 outcome fields", () => {
+  it("verification_started captures expected_duration_ms and initializes outcome fields to null", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: JSON.stringify({
+            command: "pnpm test",
+            type: "test",
+            linked_hypothesis_id: null,
+            expected_duration_ms: 5000,
+          }),
+        }),
+      ],
+      baseState(),
+    );
+    const v = s.verifications.get("01v");
+    expect(v?.expected_duration_ms).toBe(5000);
+    expect(v?.duration_ms).toBeNull();
+    expect(v?.exit_code).toBeNull();
+    expect(v?.stdout_excerpt).toBeNull();
+    expect(v?.created_artifact_id).toBeNull();
+  });
+
+  it("verification_passed captures exit_code / duration_ms / stdout_excerpt / created_artifact_id", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}',
+        }),
+        mkEvent({
+          id: "01p",
+          type: "verification_passed",
+          payload_json: JSON.stringify({
+            exit_code: 0,
+            duration_ms: 1234,
+            stdout_excerpt: "ok 1\nok 2",
+            created_artifact_id: "01artxxxxxxxxxxxxxxxxxxxxxx",
+          }),
+        }),
+      ],
+      baseState(),
+    );
+    const v = s.verifications.get("01v");
+    expect(v?.state).toBe("passed");
+    expect(v?.exit_code).toBe(0);
+    expect(v?.duration_ms).toBe(1234);
+    expect(v?.stdout_excerpt).toBe("ok 1\nok 2");
+    expect(v?.created_artifact_id).toBe("01artxxxxxxxxxxxxxxxxxxxxxx");
+  });
+
+  it("verification_failed captures exit_code / duration_ms / stdout_excerpt alongside stderr_excerpt", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}',
+        }),
+        mkEvent({
+          id: "01f",
+          type: "verification_failed",
+          payload_json: JSON.stringify({
+            stderr_excerpt: "TypeError: x",
+            exit_code: 2,
+            duration_ms: 500,
+            stdout_excerpt: "partial",
+            created_artifact_id: null,
+          }),
+        }),
+      ],
+      baseState(),
+    );
+    const v = s.verifications.get("01v");
+    expect(v?.state).toBe("failed");
+    expect(v?.stderr_excerpt).toBe("TypeError: x");
+    expect(v?.exit_code).toBe(2);
+    expect(v?.duration_ms).toBe(500);
+    expect(v?.stdout_excerpt).toBe("partial");
+    expect(v?.created_artifact_id).toBeNull();
+  });
+
+  it("verification_errored captures duration_ms (no exit_code on the wire)", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}',
+        }),
+        mkEvent({
+          id: "01e",
+          type: "verification_errored",
+          payload_json: JSON.stringify({ error: "ENOENT", duration_ms: 9 }),
+        }),
+      ],
+      baseState(),
+    );
+    const v = s.verifications.get("01v");
+    expect(v?.state).toBe("errored");
+    expect(v?.error).toBe("ENOENT");
+    expect(v?.duration_ms).toBe(9);
+    expect(v?.exit_code).toBeNull();
+  });
+
+  it("verification_cancelled captures duration_ms alongside reason", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}',
+        }),
+        mkEvent({
+          id: "01c",
+          type: "verification_cancelled",
+          payload_json: JSON.stringify({ reason: "user_aborted", duration_ms: 7 }),
+        }),
+      ],
+      baseState(),
+    );
+    const v = s.verifications.get("01v");
+    expect(v?.state).toBe("cancelled");
+    expect(v?.error).toBe("user_aborted");
+    expect(v?.duration_ms).toBe(7);
+  });
+
+  it("verification_rerun resets all outcome fields to null on the new attempt", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01v",
+          type: "verification_started",
+          payload_json: '{"command":"x","type":"test","linked_hypothesis_id":null}',
+        }),
+        mkEvent({
+          id: "01f",
+          type: "verification_failed",
+          payload_json: JSON.stringify({
+            stderr_excerpt: "x",
+            exit_code: 1,
+            duration_ms: 100,
+            stdout_excerpt: "y",
+            created_artifact_id: "01artxxxxxxxxxxxxxxxxxxxxxx",
+          }),
+        }),
+        mkEvent({
+          id: "01r",
+          type: "verification_rerun",
+          payload_json: JSON.stringify({ parent_verification_id: "01v", duration_ms: 0 }),
+        }),
+      ],
+      baseState(),
+    );
+    const v = s.verifications.get("01r");
+    expect(v?.state).toBe("started");
+    expect(v?.exit_code).toBeNull();
+    expect(v?.duration_ms).toBeNull();
+    expect(v?.stdout_excerpt).toBeNull();
+    expect(v?.created_artifact_id).toBeNull();
+    expect(v?.stderr_excerpt).toBeNull();
+    expect(v?.error).toBeNull();
+  });
+});
+
 describe("reducer — artifact_attached and edge_created", () => {
   it("artifact_attached captures path/kind/role", () => {
     resetClock();

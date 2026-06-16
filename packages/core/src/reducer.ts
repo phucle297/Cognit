@@ -126,6 +126,18 @@ const getStringArray = (o: unknown, key: string): ReadonlyArray<string> => {
   return v.filter((x): x is string => typeof x === "string");
 };
 
+/**
+ * Read a finite numeric field from a payload object. Returns `null`
+ * for missing / non-numeric / NaN / Infinity values — v1.1.0 outcome
+ * fields are nullable on disk, so the reducer treats unknown as
+ * "not recorded".
+ */
+const getNumber = (o: unknown, key: string): number | null => {
+  if (!o || typeof o !== "object") return null;
+  const v = (o as Record<string, unknown>)[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+};
+
 const isVerificationKind = (s: string): s is VerificationKind =>
   s === "test" || s === "lint" || s === "build" || s === "exec" || s === "typecheck";
 
@@ -595,6 +607,7 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       const typeStr = getString(payload, "type") ?? "exec";
       const type: VerificationKind = isVerificationKind(typeStr) ? typeStr : "exec";
       const linked = getString(payload, "linked_hypothesis_id");
+      const expected_duration_ms = getNumber(payload, "expected_duration_ms");
       const v: import("./state.js").VerificationState = {
         id: event.id,
         command,
@@ -606,6 +619,11 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
         parent_verification_id: null,
         started_at: event.created_at,
         ended_at: null,
+        expected_duration_ms,
+        duration_ms: null,
+        exit_code: null,
+        stdout_excerpt: null,
+        created_artifact_id: null,
         last_event_id: event.id,
       };
       const verifications = new Map(state.verifications);
@@ -624,10 +642,18 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       const cur = state.verifications.get(id);
       if (!cur) return next;
       if (cur.state !== "started") return next;
+      const exit_code = getNumber(payload, "exit_code");
+      const duration_ms = getNumber(payload, "duration_ms");
+      const stdout_excerpt = getString(payload, "stdout_excerpt");
+      const created_artifact_id = getString(payload, "created_artifact_id");
       const updated: import("./state.js").VerificationState = {
         ...cur,
         state: "passed",
         ended_at: event.created_at,
+        exit_code,
+        duration_ms,
+        stdout_excerpt,
+        created_artifact_id,
         last_event_id: event.id,
       };
       const verifications = new Map(state.verifications);
@@ -641,11 +667,19 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       if (!cur) return next;
       if (cur.state !== "started") return next;
       const stderr = getString(payload, "stderr_excerpt");
+      const exit_code = getNumber(payload, "exit_code");
+      const duration_ms = getNumber(payload, "duration_ms");
+      const stdout_excerpt = getString(payload, "stdout_excerpt");
+      const created_artifact_id = getString(payload, "created_artifact_id");
       const updated: import("./state.js").VerificationState = {
         ...cur,
         state: "failed",
         stderr_excerpt: stderr,
         ended_at: event.created_at,
+        exit_code,
+        duration_ms,
+        stdout_excerpt,
+        created_artifact_id,
         last_event_id: event.id,
       };
       const verifications = new Map(state.verifications);
@@ -659,11 +693,13 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       if (!cur) return next;
       if (cur.state !== "started") return next;
       const err = getString(payload, "error");
+      const duration_ms = getNumber(payload, "duration_ms");
       const updated: import("./state.js").VerificationState = {
         ...cur,
         state: "errored",
         error: err,
         ended_at: event.created_at,
+        duration_ms,
         last_event_id: event.id,
       };
       const verifications = new Map(state.verifications);
@@ -677,11 +713,13 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       if (!cur) return next;
       if (cur.state !== "started") return next;
       const reason = getString(payload, "reason");
+      const duration_ms = getNumber(payload, "duration_ms");
       const updated: import("./state.js").VerificationState = {
         ...cur,
         state: "cancelled",
         error: reason,
         ended_at: event.created_at,
+        duration_ms,
         last_event_id: event.id,
       };
       const verifications = new Map(state.verifications);
@@ -704,6 +742,12 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
         parent_verification_id: parent,
         started_at: event.created_at,
         ended_at: null,
+        // Rerun starts a fresh attempt — clear all outcome fields
+        // (the new run will repopulate them on pass/fail).
+        duration_ms: null,
+        exit_code: null,
+        stdout_excerpt: null,
+        created_artifact_id: null,
         last_event_id: event.id,
       };
       const verifications = new Map(state.verifications);

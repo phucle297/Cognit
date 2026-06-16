@@ -5,7 +5,7 @@ import { Schema } from "effect";
  * On read, `migrate(eventRow, row.version, CURRENT_VERSION)` brings old
  * events up to current. Migrations are pure, additive, and tested.
  */
-export const CURRENT_VERSION = "1.0.0" as const;
+export const CURRENT_VERSION = "1.1.0" as const;
 
 /**
  * Per-event-type payload Schemas. Each is a Struct with the fields the
@@ -109,6 +109,68 @@ const VerificationCancelledPayload = Schema.Struct({
 const VerificationRerunPayload = Schema.Struct({
   parent_verification_id: Schema.String,
 });
+
+/**
+ * v1.1.0 verification payload schemas — extend v1.0.0 with the
+ * outcome fields recorded by the subprocess engine (Phase 4 / 4a).
+ * All new fields are optional with `null` defaults so v1.0.0 events
+ * decode against v1.1.0 without a transform.
+ */
+const VerificationStartedPayloadV1_1 = Schema.Struct({
+  command: Schema.String,
+  type: Schema.Literal("test", "lint", "build", "exec", "typecheck"),
+  linked_hypothesis_id: Schema.NullOr(Schema.String),
+  expected_duration_ms: Schema.optionalWith(Schema.NullOr(Schema.Number), {
+    default: () => null,
+  }),
+});
+const VerificationPassedPayloadV1_1 = Schema.Struct({
+  exit_code: Schema.optionalWith(Schema.Number.pipe(Schema.int()), {
+    default: () => 0,
+  }),
+  duration_ms: Schema.optionalWith(Schema.NullOr(Schema.Number.pipe(Schema.int())), {
+    default: () => null,
+  }),
+  stdout_excerpt: Schema.optionalWith(Schema.NullOr(Schema.String), {
+    default: () => null,
+  }),
+  created_artifact_id: Schema.optionalWith(Schema.NullOr(Schema.String), {
+    default: () => null,
+  }),
+});
+const VerificationFailedPayloadV1_1 = Schema.Struct({
+  stderr_excerpt: Schema.String,
+  exit_code: Schema.optionalWith(Schema.NullOr(Schema.Number.pipe(Schema.int())), {
+    default: () => null,
+  }),
+  duration_ms: Schema.optionalWith(Schema.NullOr(Schema.Number.pipe(Schema.int())), {
+    default: () => null,
+  }),
+  stdout_excerpt: Schema.optionalWith(Schema.NullOr(Schema.String), {
+    default: () => null,
+  }),
+  created_artifact_id: Schema.optionalWith(Schema.NullOr(Schema.String), {
+    default: () => null,
+  }),
+});
+const VerificationErroredPayloadV1_1 = Schema.Struct({
+  error: Schema.String,
+  duration_ms: Schema.optionalWith(Schema.NullOr(Schema.Number.pipe(Schema.int())), {
+    default: () => null,
+  }),
+});
+const VerificationCancelledPayloadV1_1 = Schema.Struct({
+  reason: Schema.String,
+  duration_ms: Schema.optionalWith(Schema.NullOr(Schema.Number.pipe(Schema.int())), {
+    default: () => null,
+  }),
+});
+const VerificationRerunPayloadV1_1 = Schema.Struct({
+  parent_verification_id: Schema.String,
+  duration_ms: Schema.optionalWith(Schema.NullOr(Schema.Number.pipe(Schema.int())), {
+    default: () => null,
+  }),
+});
 const ArtifactAttachedPayload = Schema.Struct({
   artifact_id: Schema.String,
   role: Schema.Literal("evidence", "code", "log", "config"),
@@ -146,9 +208,12 @@ const ProjectCreatedPayload = Schema.Struct({
 });
 
 /**
- * The set of (type → payload Schema) for CURRENT_VERSION.
- * AppendEvent uses this to validate. Adding an event type = adding
- * a row here + an entry in the union below.
+ * The set of (type → payload Schema) for v1.0.0.
+ *
+ * `PAYLOAD_SCHEMAS_V1` is preserved as the v1.0.0 strict map so
+ * historical event rows read back through the v1.0.0 schema (the
+ * migration runner and the "schema for v1.0.0 is strict" test both
+ * depend on this name). New writes go through v1.1.0 (see below).
  *
  * Typed as `Schema<any, any, never>` because the value type differs
  * per row. Callers should `decodeUnknownEither` and pattern-match.
@@ -193,8 +258,65 @@ export const PAYLOAD_SCHEMAS_V1: Readonly<Record<string, Schema.Schema<any, any,
 } as const;
 
 /**
+ * The set of (type → payload Schema) for v1.1.0. The current version
+ * of the wire format. Only verification_* payloads changed in this
+ * version; all others are shared with v1.0.0 (referenced by alias).
+ */
+export const PAYLOAD_SCHEMAS_V1_1_0: Readonly<Record<string, Schema.Schema<any, any, never>>> = {
+  project_created: ProjectCreatedPayload,
+  session_created: SessionCreatedPayload,
+  session_paused: SessionPausedPayload,
+  session_closed: SessionClosedPayload,
+  snapshot_created: SnapshotCreatedPayload,
+  observation_recorded: ObservationRecordedPayload,
+  finding_created: FindingCreatedPayload,
+  hypothesis_created: HypothesisCreatedPayload,
+  hypothesis_weakened: HypothesisWeakenedPayload,
+  hypothesis_rejected: HypothesisRejectedPayload,
+  hypothesis_promoted: HypothesisPromotedPayload,
+  theory_created: TheoryCreatedPayload,
+  theory_updated: TheoryUpdatedPayload,
+  theory_merged: TheoryMergedPayload,
+  theory_archived: TheoryArchivedPayload,
+  experiment_created: ExperimentCreatedPayload,
+  experiment_completed: ExperimentCompletedPayload,
+  decision_proposed: DecisionProposedPayload,
+  decision_accepted: DecisionAcceptedPayload,
+  decision_rejected: DecisionRejectedPayload,
+  decision_superseded: DecisionSupersededPayload,
+  conclusion_proposed: ConclusionProposedPayload,
+  conclusion_verified: ConclusionVerifiedPayload,
+  conclusion_rejected: ConclusionRejectedPayload,
+  verification_started: VerificationStartedPayloadV1_1,
+  verification_passed: VerificationPassedPayloadV1_1,
+  verification_failed: VerificationFailedPayloadV1_1,
+  verification_errored: VerificationErroredPayloadV1_1,
+  verification_cancelled: VerificationCancelledPayloadV1_1,
+  verification_rerun: VerificationRerunPayloadV1_1,
+  artifact_attached: ArtifactAttachedPayload,
+  edge_created: EdgeCreatedPayload,
+  actor_registered: ActorRegisteredPayload,
+  constraint_rule_added: ConstraintRuleAddedPayload,
+  constraint_rule_applied: ConstraintRuleAppliedPayload,
+  redaction_applied: RedactionAppliedPayload,
+} as const;
+
+/**
+ * Schema map keyed by payload version. The migration runner uses this
+ * to pick the right schema for the `to` version. Unlisted versions
+ * fall back to v1.0.0 strict schemas (defensive default — unknown
+ * versions should fail loudly at the schema-validation step).
+ */
+export const PAYLOAD_SCHEMAS_BY_VERSION: Readonly<
+  Record<string, Readonly<Record<string, Schema.Schema<any, any, never>>>>
+> = {
+  "1.0.0": PAYLOAD_SCHEMAS_V1,
+  "1.1.0": PAYLOAD_SCHEMAS_V1_1_0,
+};
+
+/**
  * Convenience: the same map typed as a record of Schemas.
  */
-export type PayloadSchemaByType = typeof PAYLOAD_SCHEMAS_V1;
+export type PayloadSchemaByType = typeof PAYLOAD_SCHEMAS_V1_1_0;
 export type EventType = keyof PayloadSchemaByType;
-export const EVENT_TYPES: ReadonlyArray<string> = Object.keys(PAYLOAD_SCHEMAS_V1);
+export const EVENT_TYPES: ReadonlyArray<string> = Object.keys(PAYLOAD_SCHEMAS_V1_1_0);

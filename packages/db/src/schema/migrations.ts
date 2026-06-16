@@ -9,11 +9,31 @@
  * The first migration (1.0.0) creates the initial schema via TABLES_DDL;
  * future versions add new DDL or ALTER statements.
  */
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Effect } from "effect";
 import { semverGte } from "../semver";
 import { TABLES_DDL } from "./tables";
 import type { SqliteHandle } from "../context";
 import { DbError } from "../errors";
+
+/**
+ * Resolve `__dirname` for ESM. Migration files are loaded relative to
+ * this file so the `.sql` next to `migrations.ts` is the single source
+ * of truth.
+ */
+const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Read a migration file from the sibling `migrations/` directory. The
+ * file is the canonical reference; this loader exposes its raw text to
+ * the migration runner which feeds it to `db.exec()`.
+ */
+const loadMigration = (file: string): string =>
+  readFileSync(join(here, "migrations", file), "utf8");
+
+const MIGRATION_0002_SQL = loadMigration("0002_payload_v1.1.0.sql");
 
 export interface Migration {
   readonly version: string;
@@ -29,6 +49,19 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
           for (const ddl of TABLES_DDL) db.exec(ddl);
         },
         catch: (e) => new DbError({ message: `migration 1.0.0 failed: ${String(e)}`, cause: e }),
+      }),
+  },
+  {
+    version: "1.1.0",
+    up: (db) =>
+      Effect.try({
+        try: () => {
+          // The .sql file contains multiple `;`-separated statements;
+          // better-sqlite3's `exec` runs them all in one call (same
+          // pattern as the 1.0.0 migration above iterating TABLES_DDL).
+          db.exec(MIGRATION_0002_SQL);
+        },
+        catch: (e) => new DbError({ message: `migration 1.1.0 failed: ${String(e)}`, cause: e }),
       }),
   },
 ];
@@ -52,7 +85,7 @@ export const applyMigrations = (
       catch: (e) => new DbError({ message: "schema_version bootstrap failed", cause: e }),
     });
 
-    const current = db.get<{ version: string }>("SELECT version FROM schema_version WHERE id = 1");
+    let current = db.get<{ version: string }>("SELECT version FROM schema_version WHERE id = 1");
     const currentVersion = current?.version ?? "0.0.0";
     const applied: string[] = [];
 
@@ -89,10 +122,17 @@ export const applyMigrations = (
           ts,
         ]);
       } else {
-        db.run("INSERT INTO schema_version (id, version, applied_at) VALUES (1, ?, ?)", [
-          m.version,
-          ts,
-        ]);
+        // Use INSERT OR REPLACE so subsequent migrations in the same
+        // run can also hit this branch when the `current` snapshot was
+        // captured once before any row existed. REPLACE is safe because
+        // `id` is the PRIMARY KEY and CHECK-locked to 1.
+        db.run(
+          "INSERT OR REPLACE INTO schema_version (id, version, applied_at) VALUES (1, ?, ?)",
+          [m.version, ts],
+        );
+        // The row now exists — any later migrations in this run must
+        // UPDATE, not re-INSERT, to keep the id constant.
+        current = { version: m.version };
       }
       applied.push(m.version);
     }

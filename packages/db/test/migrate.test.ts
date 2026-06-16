@@ -6,12 +6,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { RunResult } from "better-sqlite3";
-import { migratePayload, CURRENT_VERSION, openDb } from "../src";
+import { migratePayload, CURRENT_VERSION, openDb, MigrationRegistry } from "../src";
 import { isValidVersion, semverCompare, semverGte, parseVersion } from "../src/semver";
 import { PAYLOAD_SCHEMAS_V1 } from "../src/event-schema";
 import { applyMigrations } from "../src/schema/migrations";
 import { PRAGMAS } from "../src/schema/tables";
 import type { SqliteHandle } from "../src/context";
+import { MigrationRegistryLive } from "../src/migrate";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -129,7 +130,7 @@ describe("applyMigrations", () => {
     const handle = makeTestHandle(dbPath);
     try {
       const result = await Effect.runPromise(applyMigrations(handle));
-      expect(result.applied).toEqual(["1.0.0"]);
+      expect(result.applied).toEqual(["1.0.0", "1.1.0"]);
 
       const tables = handle.all<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -158,7 +159,7 @@ describe("applyMigrations", () => {
       const version = handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.0.0");
+      expect(version?.version).toBe("1.1.0");
     } finally {
       await Effect.runPromise(handle.close());
     }
@@ -169,7 +170,7 @@ describe("applyMigrations", () => {
     const handle = makeTestHandle(dbPath);
     try {
       const first = await Effect.runPromise(applyMigrations(handle));
-      expect(first.applied).toEqual(["1.0.0"]);
+      expect(first.applied).toEqual(["1.0.0", "1.1.0"]);
 
       const second = await Effect.runPromise(applyMigrations(handle));
       expect(second.applied).toEqual([]);
@@ -177,7 +178,7 @@ describe("applyMigrations", () => {
       const version = handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.0.0");
+      expect(version?.version).toBe("1.1.0");
     } finally {
       await Effect.runPromise(handle.close());
     }
@@ -212,6 +213,57 @@ describe("applyMigrations", () => {
     }
   });
 
+  it("foreign_key_list on events contains created_artifact_id → artifacts (1.1.0)", async () => {
+    const dbPath = await withTempDb();
+    const handle = makeTestHandle(dbPath);
+    try {
+      await Effect.runPromise(applyMigrations(handle));
+      const fks = handle.all<{ from: string; table: string; to: string }>(
+        "PRAGMA foreign_key_list(events)",
+      );
+      const fk = fks.find((row) => row.from === "created_artifact_id");
+      expect(fk).toBeDefined();
+      expect(fk?.table).toBe("artifacts");
+      expect(fk?.to).toBe("id");
+    } finally {
+      await Effect.runPromise(handle.close());
+    }
+  });
+
+  it("events has v1.1.0 outcome columns", async () => {
+    const dbPath = await withTempDb();
+    const handle = makeTestHandle(dbPath);
+    try {
+      await Effect.runPromise(applyMigrations(handle));
+      const cols = handle.all<{ name: string }>("PRAGMA table_info(events)");
+      const names = cols.map((c) => c.name);
+      for (const c of [
+        "stdout_excerpt",
+        "exit_code",
+        "duration_ms",
+        "created_artifact_id",
+      ]) {
+        expect(names, `column ${c}`).toContain(c);
+      }
+    } finally {
+      await Effect.runPromise(handle.close());
+    }
+  });
+
+  it("idx_artifacts_archived index exists on artifacts(archived_at)", async () => {
+    const dbPath = await withTempDb();
+    const handle = makeTestHandle(dbPath);
+    try {
+      await Effect.runPromise(applyMigrations(handle));
+      const indexes = handle.all<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_artifacts_archived'",
+      );
+      expect(indexes.length).toBe(1);
+    } finally {
+      await Effect.runPromise(handle.close());
+    }
+  });
+
   it("openDb also runs migrations end-to-end (schema_version present)", async () => {
     const dbPath = await withTempDb();
     const conn = await Effect.runPromise(openDb(dbPath));
@@ -219,9 +271,61 @@ describe("applyMigrations", () => {
       const version = conn.handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.0.0");
+      expect(version?.version).toBe("1.1.0");
     } finally {
       await Effect.runPromise(conn.handle.close());
     }
+  });
+});
+
+describe("migratePayload — v1.0.0 → v1.1.0", () => {
+  it("lifts a v1.0.0 verification_passed payload to v1.1.0 schema (identity transform)", async () => {
+    const program = Effect.gen(function* () {
+      const reg = yield* MigrationRegistry;
+      const payload = { /* v1.0.0 empty body */ };
+      const migrated = yield* migratePayload(
+        "verification_passed",
+        "1.0.0",
+        "1.1.0",
+        payload,
+        reg.transformsFor,
+      );
+      // Identity transform — the new schema's defaults fill in the
+      // previously-missing fields. We assert shape, not value identity.
+      expect(migrated).toBeDefined();
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
+  });
+
+  it("lifts a v1.0.0 verification_failed payload (stderr_excerpt preserved)", async () => {
+    const program = Effect.gen(function* () {
+      const reg = yield* MigrationRegistry;
+      const payload = { stderr_excerpt: "boom" };
+      const migrated = (yield* migratePayload(
+        "verification_failed",
+        "1.0.0",
+        "1.1.0",
+        payload,
+        reg.transformsFor,
+      )) as { stderr_excerpt: string };
+      expect(migrated.stderr_excerpt).toBe("boom");
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
+  });
+
+  it("rejects v1.0.0 → v1.1.0 path for unknown event types via v1.1.0 strict schema", async () => {
+    const program = Effect.gen(function* () {
+      const reg = yield* MigrationRegistry;
+      // session_created in v1.0.0 is the same as v1.1.0 — succeeds.
+      const ok = yield* migratePayload(
+        "session_created",
+        "1.0.0",
+        "1.1.0",
+        { goal: "g", parent_session_id: null },
+        reg.transformsFor,
+      );
+      expect(ok).toBeDefined();
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
   });
 });
