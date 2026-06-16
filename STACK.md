@@ -62,6 +62,8 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 | FP runtime | Effect        | error channels, dependency injection |
 | File watch | chokidar      | inbox adapter                        |
 | Search     | fuse.js       | fuzzy keyword                        |
+| Verify     | node spawn    | subprocess engine in `packages/verification` |
+| Bundle     | tar@7         | export/import tar.gz (gzip via minizlib) |
 
 **Why:**
 
@@ -72,6 +74,16 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 - **Effect** — typed async, typed errors, dependency injection, resource management. Keeps the event store, reducer, and SDK honest about side effects.
 - **chokidar** — the de facto file watcher for Node.
 - **fuse.js** — fuzzy keyword search with weighted fields, zero infra.
+- **node `child_process.spawn`** for the verify lifecycle — no
+  `execa` / `nano-spawn` dependency. We need spawn + signal + stream
+  capture; the standard library already does it. The
+  `packages/verification` package wraps it in Effect so the rest of
+  the code stays typed.
+- **tar@7** for export/import bundles — chosen over `tar-stream`
+  (lower-level, no compression helper) and `archiver` (heavier, ships
+  its own format registry). `tar.create` + minizlib gzip is the
+  smallest surface that produces a `.tar.gz` users can open with
+  stock `tar -xzf`.
 
 ### Service patterns
 

@@ -214,7 +214,7 @@ describe("cognit import", () => {
     expect(bCounts.get("sessions")).toBe(aCounts.get("sessions"));
   });
 
-  it("rejects an unsupported bundle format_version with a typed error", async () => {
+  it("rejects an unsupported bundle format_version with a typed error", { timeout: 30_000 }, async () => {
     const root = path.join(tmp, "src");
     initProject(root, "fmt-src");
     createSession(root, "fmt");

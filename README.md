@@ -179,6 +179,21 @@ The source of truth. A reproducible run of a command (lint, typecheck, test, bui
 
 A conclusion should only be `verified` when it is backed by at least one passed verification.
 
+```mermaid
+stateDiagram-v2
+    [*] --> started
+    started --> passed: exit_code=0
+    started --> failed: exit_code≠0
+    started --> errored: ENOENT/EACCES/EPERM
+    started --> cancelled: SIGINT/SIGTERM
+    passed --> started: rerun
+    failed --> started: rerun
+    errored --> started: rerun
+    cancelled --> started: rerun
+```
+
+Capture: stdout/stderr excerpt (≤1 MB inline) + sha256-keyed artifact file under `.cognit/artifacts/<id>.<ext>` when total output > 1 KB. Captures are linked from the `verification_passed` / `verification_failed` payload via `created_artifact_id`.
+
 ### Artifact
 
 Evidence stored as a file, addressed by content hash (sha256).
@@ -687,6 +702,8 @@ cognit verify start --type build|test|lint|typecheck|benchmark|custom --command 
 cognit verify cancel --id <verification-id>
 cognit verify pass --id <verification-id>
 cognit verify fail --id <verification-id>
+cognit verify error --id <verification-id> --reason "..."
+cognit verify rerun --parent <verification-id> --command "cmd" --type <type>
 
 cognit artifact add <file> --kind <kind>
 
@@ -696,6 +713,13 @@ cognit edge list [--session <id>] [--kind <kind>]
 cognit constraint add --json '{"when":{...},"then":{"kind":"block"},"reason":"..."}'
 cognit constraint list
 cognit constraint test --type <event-type> [--payload <json|file>]
+
+cognit redaction test "<raw string>"
+
+cognit export --output <bundle.tar.gz> [--include-artifacts]
+cognit import --input <bundle.tar.gz> [--merge-strategy skip|overwrite|fork]
+
+cognit gc [--dry-run] [--force] [--max-age-days N]
 
 cognit events [--session <id>] [--type <event-type>] [--limit <n>] [--follow]
 
@@ -709,10 +733,30 @@ cognit --json <command>             # emit the v1 JSON envelope
 
 All commands run on the sticky `current-session` pointer when `--session` is omitted; an explicit `--session <id>` always wins.
 
-### Deferred to v0.2 / phase 4
+### Bundle format (`cognit export` / `cognit import`)
 
-`cognit redaction test`, `cognit export`, `cognit import`, `cognit gc`, `cognit wrap`, and the
-dashboard on port 6970 are not yet shipped. Run `cognit --help` to see the live command list.
+`cognit export` produces a `.tar.gz` with this layout:
+
+```text
+manifest.json   # { format_version: 1, created_at, project_name, schema_version }
+cognit.yaml     # verbatim copy of the project config
+cognit.db       # SQLite snapshot (VACUUM INTO)
+artifacts/      # only when --include-artifacts is passed
+```
+
+`cognit import --merge-strategy <s>` decides what to do when an
+imported row collides with a local row:
+
+- `skip` — keep local, drop the imported row (default; safe to re-run)
+- `overwrite` — replace the local row with the imported one
+- `fork` — rewrite every imported id and remap FK columns
+  (`session_id`, `actor_id`, `causation_id`, `parent_verification_id`,
+  `linked_hypothesis_id`, edge `from/to`) so both sides survive
+
+### Deferred to v0.2 / phase 5
+
+`cognit wrap` and the dashboard on port 6970 are not yet shipped. Run
+`cognit --help` to see the live command list.
 
 ---
 

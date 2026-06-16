@@ -374,3 +374,43 @@ Total 298. See `docs/phase-3-results.md`.
 - `README.md` — pitch, quickstart, core concepts, success criteria
 - `plan.xml` — full spec: schema, phases, CLI/API surface, future direction
 - `docs/phase-3-results.md` — phase 3 acceptance verification + bug fixes
+- `docs/phase-4-results.md` — phase 4 acceptance verification + bug fixes
+
+## Phase 4 — what landed in this layer
+
+The four sub-beads in `plan.xml` phase 4:
+
+- **4a — Subprocess engine** in `packages/verification`:
+  `spawnVerification` (child_process.spawn, typed `SpawnError` on
+  ENOENT/EACCES/EPERM), `truncateExcerpt` (1 MB inline cap), and
+  `writeArtifact` (sha256-keyed file under
+  `.cognit/artifacts/<id>.<ext>`). `runVerification` composes the three
+  and emits the v1.1.0 terminal event (`verification_passed` /
+  `_failed` / `_errored`) via an injected `CognitionService` callback.
+  `CognitionService` gained `passVerification` / `failVerification` /
+  `errorVerification` / `rerunVerification`. The CLI `verify <command>`
+  auto-runs the engine; `verify pass|fail|error|rerun <id>` is the
+  manual-injection surface for the API and `cognit wrap` paths.
+- **4b — Redaction dry-run**: `redactWithSpans(text, patterns)` returns
+  a `pattern × match × [start, end]` table; `RedactorLive` now reads
+  user patterns from the injected `RedactionConfig` tag (the gap from
+  phase 3 where `cognit.yaml::redaction.patterns` was parsed but
+  silently dropped). `cognit redaction test "<string>"` prints the
+  matches and the redacted output. No write to the store.
+- **4c — `cognit gc`**: `getDbSizeBytes` (PRAGMA page_count ×
+  page_size), `ArtifactRepo.listArtifacts` / `markArtifactArchived` /
+  `deleteArtifact` (non-event storage ops — see the doc comment on
+  `artifact-repo.ts` for the audit trade-off), and a CLI that honors
+  `cleanup.unreferenced_action: archive|delete|keep` and the 80% warn /
+  100% hard-stop on `max_db_size_mb`.
+- **4d — Export / import**: `vacuumInto(db, targetPath)` (single SQL
+  `VACUUM INTO`, no-dep, fresh better-sqlite3 handle), `tar@7`
+  integration, and the bundle layout
+  `{ manifest.json (format_version 1, schema_version 1.1.0), cognit.yaml,
+  cognit.db, optional artifacts/ }`. `cognit import` reads the bundle
+  in dependency order, applies the merge strategy, and (for `fork`)
+  rewrites ids + FKs via a per-table `idMap` so no orphan
+  `events.session_id` remains. Cross-version payloads are migrated via
+  `migratePayload` on read (the v1.0.0 → v1.1.0 transform is identity
+  for the current set of event types — the schema is a strict
+  superset).
