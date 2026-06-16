@@ -793,6 +793,8 @@ Cognit v0.1 is complete when it can:
 - serve a Hono read API on `127.0.0.1:6971` (`cognit server`) with `GET /sessions/:id/state`, `GET /events/stream` (SSE), `POST /events` (funnelled through `appendEvent` so redaction + constraint still apply), and opt-in bearer auth on non-loopback bind
 - tail the event stream from the terminal with `cognit events --follow`, without requiring the API server
 
+**Phase 3 status (Cognit-5vl):** shipped. E2E coverage in `packages/cli/test/phase-3.e2e.test.ts` and `apps/server/test/phase-3.server.e2e.test.ts`. Test counts: 149 db / 82 cli / 52 core / 15 server (targets met: 130+ / 60+ / 50+ / 10+).
+
 A smaller **Bootstrap** (no API, no dashboard) only needs to ship phases 0-4 of the implementation plan and is enough to validate the data model with real sessions.
 
 Deferred to v0.2 / phase 4: dashboard on port 6970, MCP transport, reasoning traces

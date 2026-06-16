@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 3d: Hono server in apps/server (state/events/SSE, opt-in auth, bus)
+search: Phase 3: cognition-entity CLI + sticky session + JSON output + constraint engine + agent read API
 queue: 
-next: Cognit-5vl.11
+next: 
