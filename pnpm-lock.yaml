@@ -185,7 +185,13 @@ importers:
       '@cognit/core':
         specifier: workspace:*
         version: link:../core
+      effect:
+        specifier: 3.21.3
+        version: 3.21.3
     devDependencies:
+      '@types/node':
+        specifier: 22.10.2
+        version: 22.10.2
       typescript:
         specifier: 5.7.2
         version: 5.7.2
