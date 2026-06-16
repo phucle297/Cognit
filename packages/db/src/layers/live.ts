@@ -13,6 +13,8 @@ import { CognitionService, CognitionServiceLive } from "../cognition-service";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../constraint-policy";
 import { EventBus } from "../bus";
 import { EventBusNoop } from "../bus-noop";
+import { DbSize, DbSizeLive } from "../db-size";
+import { ArtifactRepo, ArtifactRepoLive } from "../artifact-repo";
 import type { DbError, DbCorrupted } from "../errors";
 
 /**
@@ -73,7 +75,9 @@ export const DbLive = (
   | ProjectService
   | CognitionService
   | ConstraintPolicy
-  | EventBus,
+  | EventBus
+  | DbSize
+  | ArtifactRepo,
   DbError | DbCorrupted,
   never
 > => {
@@ -100,6 +104,10 @@ export const DbLive = (
   const snapshots = Layer.provide(SnapshotServiceLive, Layer.merge(localLeafs, dbConn));
   // ProjectService needs DbConnection + Uuid + Logger.
   const projects = Layer.provide(ProjectServiceLive, Layer.merge(localLeafs, dbConn));
+  // DbSize and ArtifactRepo are storage helpers used by the gc CLI
+  // (Phase 4 / 4c). They only need DbConnection.
+  const dbSize = Layer.provide(DbSizeLive, dbConn);
+  const artifactRepo = Layer.provide(ArtifactRepoLive, dbConn);
   // ConstraintPolicy needs EventStore.
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   // SessionService needs EventStore + SnapshotService + ConstraintPolicy
@@ -128,14 +136,15 @@ export const DbLive = (
   // default bus for db-direct consumers (CLI, tests); production
   // callers (apps/server) override it with `EventBusLive` via
   // `Layer.merge`.
-  const inner = Layer.merge(
-    Layer.merge(
-      Layer.merge(
-        Layer.merge(Layer.merge(Layer.merge(eventStore, sessions), snapshots), projects),
-        cognition,
-      ),
-      constraintPolicy,
-    ),
+  const inner = Layer.mergeAll(
+    eventStore,
+    sessions,
+    snapshots,
+    projects,
+    cognition,
+    constraintPolicy,
+    dbSize,
+    artifactRepo,
     EventBusNoop,
   );
   // Provide the SessionPolicy + dbConn internally so the R channel
@@ -153,7 +162,9 @@ export const DbLive = (
     | ProjectService
     | CognitionService
     | ConstraintPolicy
-    | EventBus,
+    | EventBus
+    | DbSize
+    | ArtifactRepo,
     DbError | DbCorrupted,
     never
   >;

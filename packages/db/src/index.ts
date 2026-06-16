@@ -34,3 +34,5 @@ export * from "./layers/live";
 export * from "./schema/rows";
 export * from "./schema/migrations";
 export * from "./actor";
+export * from "./artifact-repo";
+export * from "./db-size";
