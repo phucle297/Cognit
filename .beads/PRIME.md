@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 6bz.3: verify CLI subcommands + E2E happy path
+search: 6bz.5: cognit redaction test CLI
 queue: 
 next: Cognit-oqd

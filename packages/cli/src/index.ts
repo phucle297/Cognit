@@ -18,6 +18,7 @@ import { registerVerification } from "./commands/verification.js";
 import { registerArtifact } from "./commands/artifact.js";
 import { registerEdge } from "./commands/edge.js";
 import { registerConstraint } from "./commands/constraint.js";
+import { registerRedaction } from "./commands/redaction.js";
 import { registerSchemaDump } from "./commands/schema-dump.js";
 import { registerServer } from "./commands/server.js";
 import { setOutputMode, type OutputMode } from "./output.js";
@@ -68,6 +69,7 @@ registerVerification(program);
 registerArtifact(program);
 registerEdge(program);
 registerConstraint(program);
+registerRedaction(program);
 registerSchemaDump(program);
 registerServer(program);
 

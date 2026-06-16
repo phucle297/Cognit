@@ -11,7 +11,7 @@ import {
   LoggerNoop,
   MigrationRegistryLive,
   openDb,
-  RedactorLive,
+  RedactorLiveWithDefault,
   UuidTest,
 } from "../src";
 import { EventStoreLive } from "../src/event-store";
@@ -29,7 +29,7 @@ import { EventStoreLive } from "../src/event-store";
  */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   return Layer.merge(
     Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn),
     Layer.merge(dbConn, LoggerNoop),

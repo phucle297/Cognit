@@ -10,7 +10,7 @@ import {
   LoggerNoop,
   MigrationRegistryLive,
   openDb,
-  RedactorLive,
+  RedactorLiveWithDefault,
   SessionPolicy,
   SessionService,
   SessionServiceLive,
@@ -40,7 +40,7 @@ const makeTestLayer = (
   }),
 ) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   // eventStore consumes DbConnection once; dbConn is merged back in below.
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.

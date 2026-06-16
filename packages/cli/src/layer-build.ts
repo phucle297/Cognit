@@ -13,6 +13,8 @@ import {
   SessionService,
   SnapshotService,
   Redactor,
+  RedactionConfig,
+  RedactionConfigDefault,
   MigrationRegistry,
   Uuid,
   CognitionService,
@@ -41,6 +43,7 @@ export type AppServices =
   | CognitionService
   | Logger
   | Redactor
+  | RedactionConfig
   | MigrationRegistry
   | Uuid;
 
@@ -59,11 +62,20 @@ export type AppLayer = Layer.Layer<AppServices, DbError | DbCorrupted, never>;
  * The optional `policy` lets callers inject a `SessionPolicy` (e.g.
  * one derived from `cognit.yaml`). When omitted, the default
  * `{ everyN: 100, forkOnResume: true }` policy is used.
+ *
+ * The optional `redactionConfig` lets callers inject a
+ * `RedactionConfig` carrying user patterns from
+ * `cognit.yaml::redaction.patterns`. When omitted, no user patterns
+ * are merged (built-ins only).
  */
 export const buildAppLayer = (
   root: string,
   policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
-): AppLayer => Layer.merge(DbLive(root + "/.cognit/cognit.db", policy), LoggerNoop) as AppLayer;
+  redactionConfig: Layer.Layer<RedactionConfig> = RedactionConfigDefault,
+): AppLayer => Layer.merge(
+  DbLive(root + "/.cognit/cognit.db", policy, redactionConfig),
+  LoggerNoop,
+) as AppLayer;
 
 /**
  * Run an Effect that depends on the app layer, providing the layer
@@ -91,12 +103,15 @@ export const withAppLayer: <A, E, R>(
 
 /**
  * Async variant: reads `cognit.yaml` from `root`, derives a
- * `SessionPolicy` from the `session` section, and provides it into
- * the app layer. Used by CLI commands that need the policy as a
- * value (e.g. to pass into `drainInbox({ ..., policy })`).
+ * `SessionPolicy` from the `session` section AND a `RedactionConfig`
+ * from the `redaction` section, then provides both into the app
+ * layer. Used by CLI commands that need the policy as a value (e.g.
+ * to pass into `drainInbox({ ..., policy })`) and by the redaction
+ * test CLI.
  *
  * `withAppLayer` stays sync for backwards compatibility — commands
- * that don't care about the policy keep its simple shape.
+ * that don't care about the policy / user patterns keep its simple
+ * shape.
  *
  * `readConfig` is async (it reads from disk), so this helper is
  * async. The CLI commands already use `await` at the action entry,
@@ -112,6 +127,14 @@ export const withAppLayerAndConfig = async <A, E, R>(
     everyN: config.session.snapshot_every_n_events,
     forkOnResume: config.session.fork_on_resume,
   });
+  // User-supplied redaction patterns from cognit.yaml. The default
+  // `cognit.yaml` produced by `cognit init` has `redaction.patterns: []`,
+  // so most projects end up with the built-ins only. Malformed
+  // regexes are caught by `makeRedactor` at construction time; the
+  // redaction test CLI catches the throw and reports a clean error.
+  const redactionCfg: Layer.Layer<RedactionConfig> = Layer.succeed(RedactionConfig)({
+    userPatterns: config.redaction.patterns,
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return eff.pipe(Effect.provide(buildAppLayer(root, policy))) as any;
+  return eff.pipe(Effect.provide(buildAppLayer(root, policy, redactionCfg))) as any;
 };

@@ -1,8 +1,8 @@
 import { Layer } from "effect";
-import { DbConnection, EventStore, LoggerNoop } from "../context";
+import { DbConnection, EventStore, LoggerNoop, RedactionConfig } from "../context";
 import { DbConnectionLive } from "../connection";
 import { EventStoreLive } from "../event-store";
-import { RedactorLive } from "../redaction";
+import { RedactionConfigDefault, RedactorLiveWithDefault } from "../redaction";
 import { MigrationRegistryLive } from "../migrate";
 import { UuidLive } from "../ulid";
 import { ProjectService, ProjectServiceLive } from "../project-service";
@@ -25,7 +25,7 @@ import type { DbError, DbCorrupted } from "../errors";
  *   - SessionPolicy    (runtime config: everyN, forkOnResume)
  *   - SnapshotService  (write / latest / takeIfDue)
  *   - ProjectService   (read + idempotent insert on `projects`)
- *   - Redactor         (built-in patterns, no user patterns)
+ *   - Redactor         (built-in patterns + optional user patterns from a `RedactionConfig` layer)
  *   - MigrationRegistry (pure transforms)
  *   - Uuid             (monotonic ulid)
  *   - Logger           (no-op; replace with a structured one in prod)
@@ -38,7 +38,12 @@ import type { DbError, DbCorrupted } from "../errors";
  * view. The build pattern below uses a single connection layer to
  * prevent that footgun.
  */
-const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidLive, LoggerNoop);
+// `RedactorLiveWithDefault` keeps the default (empty) RedactionConfig
+// satisfied so the leafs layer has a `never` R channel — callers that
+// want user patterns from `cognit.yaml` plumb them via `DbLive`'s
+// `redactionConfig` parameter, which rebuilds the leafs with the
+// override. See `buildAppLayer` in the CLI package.
+const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidLive, LoggerNoop);
 
 /**
  * Full live layer for the local `.cognit/cognit.db`. Provides DbConnection,
@@ -51,10 +56,15 @@ const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidLive, Logg
  * Pass an optional `policy` to override the default snapshot/resume
  * policy (e.g. from `cognit.yaml`); pass `undefined` to use
  * `SessionPolicyDefault`.
+ *
+ * Pass an optional `redactionConfig` to merge user patterns from
+ * `cognit.yaml` (`redaction.patterns`) into the Redactor on top of
+ * the built-ins; pass `undefined` to use the empty default.
  */
 export const DbLive = (
   dbPath: string,
   policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
+  redactionConfig: Layer.Layer<RedactionConfig> = RedactionConfigDefault,
 ): Layer.Layer<
   | DbConnection
   | EventStore
@@ -74,12 +84,22 @@ export const DbLive = (
   // explicitly. Production code (e.g. the CLI) hits the multi-conn
   // footgun and gets "Service not found" at runtime.
   const dbConn = DbConnectionLive(dbPath);
+  // Rebuild leafs with the caller-supplied RedactionConfig so user
+  // patterns from `cognit.yaml` actually take effect. When the
+  // default config is in play, this is identical to the module-level
+  // `leafs` (modulo a fresh layer object).
+  const localLeafs = Layer.mergeAll(
+    Layer.provide(RedactorLiveWithDefault, redactionConfig),
+    MigrationRegistryLive,
+    UuidLive,
+    LoggerNoop,
+  );
   // EventStore needs DbConnection + Redactor + Uuid + Logger (leafs).
-  const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
+  const eventStore = Layer.provide(Layer.provide(EventStoreLive, localLeafs), dbConn);
   // SnapshotService needs DbConnection + Uuid + Logger.
-  const snapshots = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
+  const snapshots = Layer.provide(SnapshotServiceLive, Layer.merge(localLeafs, dbConn));
   // ProjectService needs DbConnection + Uuid + Logger.
-  const projects = Layer.provide(ProjectServiceLive, Layer.merge(leafs, dbConn));
+  const projects = Layer.provide(ProjectServiceLive, Layer.merge(localLeafs, dbConn));
   // ConstraintPolicy needs EventStore.
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   // SessionService needs EventStore + SnapshotService + ConstraintPolicy
@@ -87,10 +107,10 @@ export const DbLive = (
   // remaining dep on R is from the leafs, which we already provided.
   const sessions = Layer.provide(
     Layer.provide(
-      Layer.provide(SessionServiceLive, leafs),
+      Layer.provide(SessionServiceLive, localLeafs),
       Layer.merge(Layer.merge(eventStore, snapshots), constraintPolicy),
     ),
-    leafs,
+    localLeafs,
   );
   // CognitionService sits ON TOP of SessionService (the constraint
   // chokepoint). Provide it with the SessionService layer so it lands

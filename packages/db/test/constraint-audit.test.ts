@@ -37,7 +37,7 @@ import {
   LoggerNoop,
   MigrationRegistryLive,
   openDb,
-  RedactorLive,
+  RedactorLiveWithDefault,
   SessionPolicy,
   SessionService,
   SessionServiceLive,
@@ -90,7 +90,7 @@ const makeAuditLayer = (
   never
 > => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   // Inject the fixture policy in place of ConstraintPolicyLive.

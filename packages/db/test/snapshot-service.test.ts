@@ -9,7 +9,7 @@ import {
   LoggerNoop,
   MigrationRegistryLive,
   openDb,
-  RedactorLive,
+  RedactorLiveWithDefault,
   SnapshotService,
   SnapshotServiceLive,
   UuidTest,
@@ -24,7 +24,7 @@ import {
  */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   const snapshot = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   return Layer.merge(snapshot, Layer.merge(dbConn, LoggerNoop)) as Layer.Layer<
     SnapshotService | DbConnection | Logger,

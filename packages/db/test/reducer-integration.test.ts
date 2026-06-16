@@ -10,7 +10,7 @@ import {
   LoggerNoop,
   MigrationRegistryLive,
   openDb,
-  RedactorLive,
+  RedactorLiveWithDefault,
   SessionPolicy,
   SessionService,
   SessionServiceLive,
@@ -42,7 +42,7 @@ import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy
 /** Test layer composing the services we need for the full E2E. */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   // eventStore consumes DbConnection once; dbConn is merged back in below.
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.
@@ -425,7 +425,7 @@ describe("reducer integration — auto-snapshot trigger", () => {
   // Custom layer factory with everyN=3.
   const makeAutoSnapLayer = (dbPath: string) => {
     const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-    const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+    const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
     const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
     const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
     const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);

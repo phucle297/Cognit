@@ -3,6 +3,7 @@ import type { Database, RunResult } from "better-sqlite3";
 import type { AppendEventInput, EventRow, ListEventsQuery } from "./event-store";
 import type { RedactionHit } from "./redaction";
 import type { Transform } from "./migrate";
+import type { BuiltInRedactionPattern } from "@cognit/core/redaction";
 import type {
   DbError,
   NotFound,
@@ -39,6 +40,23 @@ export interface RedactorShape {
 }
 
 export class Redactor extends Context.Tag("@cognit/db/Redactor")<Redactor, RedactorShape>() {}
+
+/**
+ * RedactionConfig: user-supplied patterns from `cognit.yaml` under
+ * `redaction.patterns`. The `RedactorLive` service reads this tag to
+ * merge user patterns on top of the built-ins. The `redaction.enabled`
+ * flag is honoured by callers (the redactor itself always applies the
+ * merged set — disabling redaction is a higher-level decision at the
+ * event-store boundary).
+ */
+export interface RedactionConfigShape {
+  readonly userPatterns: ReadonlyArray<BuiltInRedactionPattern>;
+}
+
+export class RedactionConfig extends Context.Tag("@cognit/db/RedactionConfig")<
+  RedactionConfig,
+  RedactionConfigShape
+>() {}
 
 /** Migration registry: pure transforms between payload versions. */
 export interface MigrationRegistryShape {

@@ -11,7 +11,7 @@ import {
   Logger,
   LoggerNoop,
   MigrationRegistryLive,
-  RedactorLive,
+  RedactorLiveWithDefault,
   SessionPolicy,
   SessionPolicyDefault,
   SessionService,
@@ -32,7 +32,7 @@ import {
 
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   // Build a complete live layer the same way `DbLive` does in
   // production, but with our test connection. The watcher needs
   // `SessionService` on its R channel; `SessionService` pulls in

@@ -11,7 +11,7 @@ import {
   openDb,
   ProjectService,
   ProjectServiceLive,
-  RedactorLive,
+  RedactorLiveWithDefault,
   resetUuidTestCounter,
   UuidTest,
 } from "../src";
@@ -23,7 +23,7 @@ import {
  */
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLive, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   const project = Layer.provide(ProjectServiceLive, Layer.merge(leafs, dbConn));
   return Layer.merge(project, Layer.merge(dbConn, LoggerNoop)) as Layer.Layer<
     ProjectService | DbConnection | Logger,
