@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 6bz.1: subprocess engine in packages/verification
+search: 6bz.3: verify CLI subcommands + E2E happy path
 queue: 
-next: Cognit-oqd.3
+next: Cognit-oqd

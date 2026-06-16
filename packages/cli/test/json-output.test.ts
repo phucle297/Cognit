@@ -237,23 +237,35 @@ describe("cognit --json envelope", () => {
     expect(data.event.type).toBe("conclusion_proposed");
   });
 
-  it("cognit --json verification.start emits { version: 1, kind: 'verification.start', data: { event } }", () => {
+  it("cognit --json verification.start emits { version: 1, kind: 'verification.start', data: { started, terminal, ... } }", () => {
     const sessionId = bootstrapSession("json verify start");
+    // `--` separates commander options from the spawned command. Use
+    // a deterministic `node -e` so the test never depends on a
+    // real `pnpm` install.
     const r = runCli(tmp, [
       "--json",
       "verify",
-      "pnpm test",
       "--type",
       "test",
       "--session",
       sessionId,
+      "--",
+      "node",
+      "-e",
+      "process.stdout.write('hi')",
     ]);
     expect(r.status).toBe(0);
     const env = JSON.parse(r.stdout) as Envelope;
     expect(env.version).toBe(1);
     expect(env.kind).toBe("verification.start");
-    const data = env.data as { event: { type: string } };
-    expect(data.event.type).toBe("verification_started");
+    const data = env.data as {
+      started: { type: string };
+      terminal: { type: string };
+      terminal_type: string;
+    };
+    expect(data.started.type).toBe("verification_started");
+    expect(data.terminal.type).toBe("verification_passed");
+    expect(data.terminal_type).toBe("verification_passed");
   });
 
   it("cognit --json edge.add emits { version: 1, kind: 'edge.add', data: { event, edge } }", () => {

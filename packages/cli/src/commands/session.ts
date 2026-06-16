@@ -214,6 +214,39 @@ const printSessionShow = (result: SessionShowResult): void => {
     }
   }
 
+  // Phase 4 / 6bz.3: surface verifications (state + stdout_excerpt).
+  // `st.verifications` is a Map<id, VerificationState>; print the
+  // most recent 5 in insertion order so the operator can see whether
+  // the latest verify run passed/failed/errored at a glance.
+  const verifs = Array.from((st.verifications as ReadonlyMap<string, {
+    readonly id: string;
+    readonly command: string;
+    readonly type: string;
+    readonly state: string;
+    readonly exit_code: number | null;
+    readonly duration_ms: number | null;
+    readonly stdout_excerpt: string | null;
+    readonly stderr_excerpt: string | null;
+    readonly error: string | null;
+  }>).values());
+  if (verifs.length > 0) {
+    const last = verifs.slice(-5);
+    process.stdout.write(`\nVerifications (last ${last.length} of ${verifs.length}):\n`);
+    for (const v of last) {
+      const excerpt =
+        v.state === "failed"
+          ? (v.stderr_excerpt ?? "").slice(0, 80)
+          : (v.stdout_excerpt ?? "").slice(0, 80);
+      process.stdout.write(
+        `  - ${v.id}  ${v.type}  ${v.state}` +
+          (v.exit_code !== null ? `  exit=${v.exit_code}` : "") +
+          (v.duration_ms !== null ? `  ${v.duration_ms}ms` : "") +
+          (excerpt ? `  | ${excerpt}` : "") +
+          "\n",
+      );
+    }
+  }
+
   if (st.timeline.length > 0) {
     const last = st.timeline.slice(-10);
     process.stdout.write(`\nTimeline (last ${last.length} of ${st.timeline.length} events):\n`);

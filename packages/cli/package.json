@@ -17,6 +17,7 @@
   "dependencies": {
     "@cognit/core": "workspace:*",
     "@cognit/db": "workspace:*",
+    "@cognit/verification": "workspace:*",
     "chokidar": "^4.0.0",
     "commander": "12.1.0",
     "effect": "3.21.3",

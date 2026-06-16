@@ -75,6 +75,21 @@ export class ConstraintViolation extends Data.TaggedError("ConstraintViolation")
   readonly sessionId: string;
 }> {}
 
+/**
+ * Phase 4 / 6bz.2: raised by callers that need to surface a
+ * `verification_errored` terminal as an exception (rather than as an
+ * event row). `CognitionService.errorVerification` itself does NOT
+ * fail with this error — it appends the event and returns normally,
+ * matching the pass/fail siblings. The CLI / inbox / E2E driver maps
+ * the resulting `verification_errored` row to this tagged error when
+ * it needs the effect chain to short-circuit on the terminal state.
+ */
+export class VerificationErrored extends Data.TaggedError("VerificationErrored")<{
+  readonly verificationId: string;
+  readonly error: string;
+  readonly errorCode?: string;
+}> {}
+
 export type AppendError =
   | UnknownEventType
   | UnknownEventVersion

@@ -76,6 +76,9 @@ importers:
       '@cognit/db':
         specifier: workspace:*
         version: link:../db
+      '@cognit/verification':
+        specifier: workspace:*
+        version: link:../verification
       chokidar:
         specifier: ^4.0.0
         version: 4.0.3

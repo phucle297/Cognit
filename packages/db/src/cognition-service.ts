@@ -195,6 +195,71 @@ export interface CancelVerificationInput {
   readonly actor: { readonly name: string; readonly type: ActorType };
 }
 
+/**
+ * Resolve a started verification as `passed`. The reducer attaches
+ * the outcome fields (exit_code, duration_ms, stdout_excerpt,
+ * created_artifact_id) to the existing VerificationState and clears
+ * `current_verification_id`. The append is routed through
+ * `SessionService.appendEvent` and the resulting event row carries
+ * `parent_verification_id = verificationId` so the chain back to the
+ * `verification_started` row is queryable from the events table.
+ */
+export interface PassVerificationInput {
+  readonly sessionId: string;
+  readonly verificationId: string;
+  readonly exitCode?: number;
+  readonly durationMs?: number;
+  readonly stdoutExcerpt?: string;
+  readonly createdArtifactId?: string;
+  readonly actor: { readonly name: string; readonly type: ActorType };
+}
+
+/**
+ * Resolve a started verification as `failed`. `stderrExcerpt` is the
+ * single required outcome field (every other field mirrors the pass
+ * path).
+ */
+export interface FailVerificationInput {
+  readonly sessionId: string;
+  readonly verificationId: string;
+  readonly stderrExcerpt: string;
+  readonly exitCode?: number;
+  readonly durationMs?: number;
+  readonly stdoutExcerpt?: string;
+  readonly createdArtifactId?: string;
+  readonly actor: { readonly name: string; readonly type: ActorType };
+}
+
+/**
+ * Resolve a started verification as `errored` (the subprocess engine
+ * failed to spawn / launch the command). `error` is the human-readable
+ * message; `errorCode` mirrors the typed `SpawnError.code` ("enoent",
+ * "eacces", "eperm") when present so the CLI can map back to exit
+ * semantics.
+ */
+export interface ErrorVerificationInput {
+  readonly sessionId: string;
+  readonly verificationId: string;
+  readonly error: string;
+  readonly errorCode?: string;
+  readonly durationMs?: number;
+  readonly actor: { readonly name: string; readonly type: ActorType };
+}
+
+/**
+ * Chain a fresh verification attempt from a previously-terminal one.
+ * Appends a `verification_rerun` event whose payload carries
+ * `parent_verification_id`. The reducer re-opens the parent's command/
+ * type/linked_hypothesis_id under the new event id and resets the
+ * terminal outcome fields.
+ */
+export interface RerunVerificationInput {
+  readonly sessionId: string;
+  readonly parentVerificationId: string;
+  readonly durationMs?: number;
+  readonly actor: { readonly name: string; readonly type: ActorType };
+}
+
 export type ArtifactRole = "evidence" | "code" | "log" | "config";
 
 export interface AttachArtifactInput {
@@ -434,6 +499,47 @@ export interface CognitionServiceShape {
    */
   readonly cancelVerification: (
     input: CancelVerificationInput,
+  ) => Effect.Effect<EventRow, SessionError, SessionService>;
+
+  // --- verification resolution (Phase 4 / 6bz.2) ---
+  /**
+   * Resolve a started verification as `passed`. Appends a
+   * `verification_passed` v1.1.0 event whose payload carries the
+   * outcome fields (exit_code defaults to 0, duration/stdout/artifact
+   * default to null). The event row's `parent_verification_id` field
+   * links the terminal back to the originating `verification_started`
+   * row.
+   */
+  readonly passVerification: (
+    input: PassVerificationInput,
+  ) => Effect.Effect<EventRow, SessionError, SessionService>;
+  /**
+   * Resolve a started verification as `failed`. Appends a
+   * `verification_failed` v1.1.0 event whose payload carries
+   * `stderr_excerpt` (required) plus the same outcome fields as the
+   * pass path.
+   */
+  readonly failVerification: (
+    input: FailVerificationInput,
+  ) => Effect.Effect<EventRow, SessionError, SessionService>;
+  /**
+   * Resolve a started verification as `errored` (subprocess spawn
+   * failure). Appends a `verification_errored` v1.1.0 event whose
+   * payload carries the human-readable `error` and the typed
+   * `error_code` (when supplied).
+   */
+  readonly errorVerification: (
+    input: ErrorVerificationInput,
+  ) => Effect.Effect<EventRow, SessionError, SessionService>;
+  /**
+   * Chain a fresh attempt from a terminal verification. Appends a
+   * `verification_rerun` event; the reducer re-opens the parent
+   * verification under the new event id with terminal outcome fields
+   * cleared. The event row's `parent_verification_id` mirrors the
+   * payload field.
+   */
+  readonly rerunVerification: (
+    input: RerunVerificationInput,
   ) => Effect.Effect<EventRow, SessionError, SessionService>;
   /**
    * Attach an artifact to the session. Builds the
@@ -758,6 +864,74 @@ export const CognitionServiceLive: Layer.Layer<CognitionService, never, SessionS
             type: "verification_cancelled",
             payload: { reason: input.reason },
             actor: input.actor,
+          });
+          return event;
+        }),
+
+      // --- verification resolution (Phase 4 / 6bz.2) ---
+      passVerification: (input) =>
+        Effect.gen(function* () {
+          const payload: Record<string, unknown> = {
+            exit_code: input.exitCode ?? 0,
+            duration_ms: input.durationMs ?? null,
+            stdout_excerpt: input.stdoutExcerpt ?? null,
+            created_artifact_id: input.createdArtifactId ?? null,
+          };
+          const { event } = yield* sessions.appendEvent({
+            sessionId: input.sessionId,
+            type: "verification_passed",
+            payload,
+            actor: input.actor,
+            parentVerificationId: input.verificationId,
+          });
+          return event;
+        }),
+      failVerification: (input) =>
+        Effect.gen(function* () {
+          const payload: Record<string, unknown> = {
+            stderr_excerpt: input.stderrExcerpt,
+            exit_code: input.exitCode ?? null,
+            duration_ms: input.durationMs ?? null,
+            stdout_excerpt: input.stdoutExcerpt ?? null,
+            created_artifact_id: input.createdArtifactId ?? null,
+          };
+          const { event } = yield* sessions.appendEvent({
+            sessionId: input.sessionId,
+            type: "verification_failed",
+            payload,
+            actor: input.actor,
+            parentVerificationId: input.verificationId,
+          });
+          return event;
+        }),
+      errorVerification: (input) =>
+        Effect.gen(function* () {
+          const payload: Record<string, unknown> = {
+            error: input.error,
+            duration_ms: input.durationMs ?? null,
+          };
+          if (input.errorCode !== undefined) payload.error_code = input.errorCode;
+          const { event } = yield* sessions.appendEvent({
+            sessionId: input.sessionId,
+            type: "verification_errored",
+            payload,
+            actor: input.actor,
+            parentVerificationId: input.verificationId,
+          });
+          return event;
+        }),
+      rerunVerification: (input) =>
+        Effect.gen(function* () {
+          const payload: Record<string, unknown> = {
+            parent_verification_id: input.parentVerificationId,
+            duration_ms: input.durationMs ?? null,
+          };
+          const { event } = yield* sessions.appendEvent({
+            sessionId: input.sessionId,
+            type: "verification_rerun",
+            payload,
+            actor: input.actor,
+            parentVerificationId: input.parentVerificationId,
           });
           return event;
         }),
