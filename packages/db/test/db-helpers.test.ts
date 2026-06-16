@@ -345,4 +345,29 @@ describe("ArtifactRepo", () => {
     });
     await Effect.runPromise(program.pipe(Effect.provide(buildLayer(dbPath))));
   });
+
+  it("deleteArtifact removes the row and returns 0 for unknown id", async () => {
+    const program = Effect.gen(function* () {
+      const repo = yield* ArtifactRepo;
+      const conn = yield* DbConnection;
+      seedProjectAndSession(conn);
+      seedArtifact(conn, {
+        id: "01delxxxxxxxxxxxxxxxxxxxxx",
+        sessionId: "01sessionxxxxxxxxxxxxxxxxx",
+        path: "/d",
+        kind: "log",
+        sha256: "x",
+        sizeBytes: 1,
+        archivedAt: null,
+        createdAt: isoMinusDays(1),
+      });
+      const first = yield* repo.deleteArtifact("01delxxxxxxxxxxxxxxxxxxxxx");
+      expect(first).toBe(1);
+      const second = yield* repo.deleteArtifact("01delxxxxxxxxxxxxxxxxxxxxx");
+      expect(second).toBe(0);
+      const unknown = yield* repo.deleteArtifact("01nopeexxxxxxxxxxxxxxxxxxxx");
+      expect(unknown).toBe(0);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(buildLayer(dbPath))));
+  });
 });

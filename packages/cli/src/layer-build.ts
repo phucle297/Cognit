@@ -1,9 +1,11 @@
 import { Effect, Layer } from "effect";
 import {
+  ArtifactRepo,
   DbConnection,
   DbError,
   DbCorrupted,
   DbLive,
+  DbSize,
   EventStore,
   Logger,
   LoggerNoop,
@@ -45,6 +47,8 @@ export type AppServices =
   | Redactor
   | RedactionConfig
   | MigrationRegistry
+  | DbSize
+  | ArtifactRepo
   | Uuid;
 
 /**

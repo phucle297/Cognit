@@ -21,6 +21,7 @@ import { registerConstraint } from "./commands/constraint.js";
 import { registerRedaction } from "./commands/redaction.js";
 import { registerSchemaDump } from "./commands/schema-dump.js";
 import { registerServer } from "./commands/server.js";
+import { registerGc } from "./commands/gc.js";
 import { setOutputMode, type OutputMode } from "./output.js";
 
 const program = new Command();
@@ -72,6 +73,7 @@ registerConstraint(program);
 registerRedaction(program);
 registerSchemaDump(program);
 registerServer(program);
+registerGc(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`cognit: ${(err as Error).message}\n`);

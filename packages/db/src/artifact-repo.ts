@@ -51,6 +51,12 @@ export interface ArtifactRepoShape {
     id: string,
     archivedAt: string,
   ) => Effect.Effect<number, DbError>;
+  /**
+   * Direct DELETE: remove the row entirely. Used by the gc CLI when
+   * `cleanup.unreferenced_action = "delete"`. Returns the number of
+   * rows removed (0 if the id is unknown).
+   */
+  readonly deleteArtifact: (id: string) => Effect.Effect<number, DbError>;
 }
 
 export class ArtifactRepo extends Context.Tag("@cognit/db/ArtifactRepo")<
@@ -104,6 +110,12 @@ export const ArtifactRepoLive: Layer.Layer<ArtifactRepo, never, DbConnection> = 
               [archivedAt, id],
             ).changes,
           (e) => new DbError({ message: "markArtifactArchived", cause: e }),
+        ),
+
+      deleteArtifact: (id) =>
+        trySync(
+          () => conn.handle.run(`DELETE FROM artifacts WHERE id = ?`, [id]).changes,
+          (e) => new DbError({ message: "deleteArtifact", cause: e }),
         ),
     };
   }),
