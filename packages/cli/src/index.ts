@@ -40,6 +40,16 @@ program.option("--json", "emit a stable JSON envelope on stdout").hook("preActio
   setOutputMode(mode);
 });
 
+// Global `--root <path>`. Lets the docker entrypoint pass it before
+// the subcommand (`cognit --root /data init`). Per-subcommand `--root`
+// flags still work for the more common `cognit <subcommand> --root …`
+// form; the action handler resolves root from
+// `command.optsWithGlobals()` so both shapes hit the same code path.
+program.option(
+  "--root <path>",
+  "project root (default: $COGNIT_ROOT or current directory); applies to every subcommand",
+);
+
 registerInit(program);
 registerConfig(program);
 registerSession(program);

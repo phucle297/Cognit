@@ -49,7 +49,9 @@ export const requireBearer = (cfg: BearerConfig): MiddlewareHandler => {
  * Decide whether bearer auth should be enforced.
  *
  * - `isLoopback` = true → never require auth (loopback is OS-isolated).
- * - `apiToken` undefined → no auth (caller didn't opt in).
+ * - `apiToken` undefined or empty/whitespace → no auth (caller didn't
+ *   opt in; `cognit init` writes `server: { api_token: "" }` as the
+ *   explicit "no token" sentinel and we honour that).
  * - otherwise → require bearer.
  */
 export const shouldEnforceAuth = (
@@ -57,6 +59,6 @@ export const shouldEnforceAuth = (
   isLoopback: boolean,
 ): boolean => {
   if (isLoopback) return false;
-  if (!apiToken) return false;
+  if (!apiToken || apiToken.trim() === "") return false;
   return true;
 };

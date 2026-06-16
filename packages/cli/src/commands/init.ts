@@ -1,39 +1,59 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { Effect } from "effect";
 import { Command } from "commander";
 import { defaultConfig } from "@cognit/core/config";
+import { ProjectService } from "@cognit/db";
 import { COGNIT_SUBDIRS, projectPaths, isCognitProject } from "../paths.js";
 import { writeConfig, writeCognitGitignore } from "../yaml-io.js";
+import { withAppLayer } from "../layer-build.js";
 
 interface InitOptions {
   project?: string;
   force?: boolean;
+  root?: string;
 }
 
 /**
- * `cognit init [--project name] [--force]`
+ * `cognit init [--project name] [--force] [--root <path>]`
  *
- * Initialise a local Cognit project in the current directory. Creates
- * the `.cognit/` directory tree, writes a default `cognit.yaml`, and
- * adds a `.gitignore` snippet that keeps the database and runtime
- * state out of version control while committing the config.
+ * Initialise a local Cognit project. Root resolution order:
+ *   1. `--root` flag
+ *   2. `$COGNIT_ROOT` env var (used by the docker entrypoint so the
+ *      `cli` service in `docker-compose.yml` can initialise the
+ *      persistent volume at `/data` instead of the image's `/app`)
+ *   3. `process.cwd()`
+ *
+ * Creates the `.cognit/` directory tree, writes a default
+ * `cognit.yaml`, and adds a `.gitignore` snippet that keeps the
+ * database and runtime state out of version control while committing
+ * the config.
  */
 export function registerInit(program: Command): void {
   program
     .command("init")
-    .description("initialise a local Cognit project in the current directory")
+    .description("initialise a local Cognit project in the current directory (or $COGNIT_ROOT / --root)")
     .option("-p, --project <name>", "project name (default: directory name)")
     .option("-f, --force", "re-initialise an existing project (overwrite cognit.yaml)")
-    .action(async (opts: InitOptions) => {
-      const cwd = process.cwd();
-      const projectRoot = cwd;
+    .option("--root <path>", "project root (default: $COGNIT_ROOT or current directory)")
+    .action(async (opts: InitOptions, command) => {
+      // Accept `--root` from the program level (so `cognit --root /data init`
+      // works, as the docker entrypoint invokes) or from this subcommand.
+      const globals = command.optsWithGlobals() as { root?: string };
+      const projectRoot =
+        opts.root ??
+        globals.root ??
+        process.env.COGNIT_ROOT ??
+        process.cwd();
       const paths = projectPaths(projectRoot);
 
       if (isCognitProject(projectRoot) && !opts.force) {
-        process.stderr.write(
-          `cognit: ${paths.config} already exists. Pass --force to overwrite.\n`,
-        );
-        process.exitCode = 2;
+        // Idempotent: the docker `init` service runs `cognit init`
+        // on every `docker compose up`; treat an already-initialised
+        // project as success so the bootstrap never wedges `up` on
+        // existing volumes. The user can still pass `--force` to
+        // overwrite the config.
+        process.stdout.write(`cognit: ${paths.config} already exists; nothing to do.\n`);
         return;
       }
 
@@ -48,6 +68,23 @@ export function registerInit(program: Command): void {
       const config = defaultConfig(projectName);
       await writeConfig(paths.config, config);
       await writeCognitGitignore(paths.gitignore);
+
+      // Bootstrap the SQLite DB and insert the project row. The
+      // server (and every CLI subcommand that touches the DB) reads
+      // `projects` to resolve the current project; without this row
+      // the server boots into a "no project found" crash loop.
+      // `ensure` is idempotent — re-running init against an existing
+      // row is a no-op — so the docker `init` service can run on
+      // every `up` without harm.
+      await Effect.runPromise(
+        withAppLayer(
+          projectRoot,
+          Effect.gen(function* () {
+            const projectService = yield* ProjectService;
+            yield* projectService.ensure({ name: projectName });
+          }),
+        ),
+      );
 
       process.stdout.write(`Initialised Cognit project: ${projectName}\n`);
       process.stdout.write(`  ${paths.config}\n`);

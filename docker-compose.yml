@@ -9,6 +9,24 @@
 # host, use `docker compose run --rm cli session list`.
 
 services:
+  init:
+    # One-shot bootstrap. Runs `cognit init` against the persistent
+    # volume before the server starts, so a fresh `docker compose up`
+    # works without a manual init step. Idempotent: if the project
+    # already exists in the volume, exits 0.
+    build:
+      context: .
+      args:
+        APP_NAME: cli
+    image: cognit:cli
+    volumes:
+      - cognit-data:/data
+    environment:
+      COGNIT_ROOT: /data
+    entrypoint: ["cognit-entrypoint"]
+    command: ["init"]
+    restart: "no"
+
   server:
     build:
       context: .
@@ -23,6 +41,9 @@ services:
       PORT: "6971"
     volumes:
       - cognit-data:/data
+    depends_on:
+      init:
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6971/healthz"]
@@ -32,8 +53,7 @@ services:
 
   cli:
     # One-shot CLI. Use as: `docker compose run --rm cli <subcommand> [args]`
-    # e.g. `docker compose run --rm cli init`
-    #      `docker compose run --rm cli session create "demo"`
+    # e.g. `docker compose run --rm cli session create "demo"`
     #      `docker compose run --rm cli observe "hello"`
     build:
       context: .

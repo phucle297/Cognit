@@ -28,7 +28,8 @@ case "${APP_NAME:-server}" in
       ${COGNIT_ROOT:+--root "$COGNIT_ROOT"}
     ;;
   cli)
-    exec ./packages/cli/node_modules/.bin/tsx packages/cli/src/index.ts "$@"
+    exec ./packages/cli/node_modules/.bin/tsx packages/cli/src/index.ts \
+      ${COGNIT_ROOT:+--root "$COGNIT_ROOT"} "$@"
     ;;
   dev)
     exec pnpm run dev

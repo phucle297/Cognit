@@ -56,11 +56,14 @@ describe("cognit init", () => {
     expect(stdout).toContain("cognit-fixture");
   });
 
-  it("refuses to overwrite an existing project without --force", async () => {
+  it("is idempotent: re-running init against an existing project exits 0", async () => {
     runCli(tmp, ["init"]);
     const second = runCli(tmp, ["init"]);
-    expect(second.status).toBe(2);
-    expect(second.stderr).toContain("already exists");
+    // Init is idempotent so the docker `init` service can run on every
+    // `up` without wedging the stack. The "nothing to do" message tells
+    // the operator the second run was a no-op.
+    expect(second.status).toBe(0);
+    expect(second.stdout).toContain("already exists");
   });
 
   it("overwrites when --force is passed", async () => {
