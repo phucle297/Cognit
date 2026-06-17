@@ -32,6 +32,8 @@ import os from "node:os";
 import fs from "node:fs/promises";
 import {
   DbConnection,
+  EventBus,
+  EventBusNoop,
   EventStore,
   Logger,
   LoggerNoop,
@@ -110,17 +112,21 @@ const makeAuditLayer = (
     forkOnResume: true,
   });
   // sessionService needs EventStore + SnapshotService + ConstraintPolicy
-  // + leafs + DbConnection + SessionPolicy. Same wiring shape as the
-  // existing test, but the ConstraintPolicy slot is the fixture
-  // rather than ConstraintPolicyLive.
+  // + leafs + DbConnection + SessionPolicy + EventBus. Same wiring
+  // shape as the existing test, but the ConstraintPolicy slot is the
+  // fixture rather than ConstraintPolicyLive. EventBusNoop provided
+  // INSIDE the chain so the constructed `sessionService` has R=never.
   const sessionService = Layer.provide(
     Layer.provide(
       Layer.provide(SessionServiceLive, sessionPolicyLayer),
       policyLayer,
     ),
     Layer.merge(
-      Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
-      leafs,
+      Layer.merge(
+        Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
+        leafs,
+      ),
+      EventBusNoop,
     ),
   );
   return Layer.merge(
@@ -135,7 +141,8 @@ const makeAuditLayer = (
     | SessionService
     | SnapshotService
     | Logger
-    | ConstraintPolicy,
+    | ConstraintPolicy
+    | EventBus,
     never,
     never
   >;

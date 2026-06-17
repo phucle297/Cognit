@@ -5,6 +5,8 @@ import os from "node:os";
 import fs from "node:fs/promises";
 import {
   DbConnection,
+  EventBus,
+  EventBusNoop,
   EventStore,
   Logger,
   LoggerNoop,
@@ -48,12 +50,18 @@ const makeTestLayer = (
   // constraintPolicy depends on EventStore.
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   // sessionService needs EventStore + SnapshotService + ConstraintPolicy
-  // + leafs + DbConnection and now also SessionPolicy.
+  // + leafs + DbConnection + SessionPolicy + EventBus. Provide
+  // EventBusNoop INSIDE the chain so the constructed `sessionService`
+  // has R=never; without that, the public merge would have to
+  // self-satisfy and runtime builds flake.
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
     Layer.merge(
-      Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
-      dbConn,
+      Layer.merge(
+        Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+        dbConn,
+      ),
+      EventBusNoop,
     ),
   );
   return Layer.merge(
@@ -68,7 +76,8 @@ const makeTestLayer = (
     | SessionService
     | SnapshotService
     | Logger
-    | ConstraintPolicy,
+    | ConstraintPolicy
+    | EventBus,
     never,
     never
   >;

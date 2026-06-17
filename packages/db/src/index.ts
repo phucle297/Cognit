@@ -21,6 +21,7 @@ export * from "./redaction";
 export * from "./event-store";
 export * from "./bus";
 export * from "./bus-noop";
+export * from "./bus-live";
 export * from "./inbox";
 export * from "./connection";
 export * from "./project-service";

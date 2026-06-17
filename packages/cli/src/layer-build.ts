@@ -6,6 +6,8 @@ import {
   DbCorrupted,
   DbLive,
   DbSize,
+  EventBus,
+  EventBusNoop,
   EventStore,
   Logger,
   LoggerNoop,
@@ -49,13 +51,17 @@ export type AppServices =
   | MigrationRegistry
   | DbSize
   | ArtifactRepo
-  | Uuid;
+  | Uuid
+  | EventBus;
 
 /**
  * The full Layer for a given project root. DbLive composes
  * DbConnection + EventStore + SessionService + SnapshotService +
- * ProjectService. We merge `LoggerNoop` so the resulting Layer is
- * usable as-is by commands that don't wire a structured logger.
+ * ProjectService. We merge `LoggerNoop` and `EventBusNoop` so the
+ * resulting Layer is usable as-is by commands that don't wire a
+ * structured logger or a real bus. (`EventBus` enters the R-channel
+ * of `SessionService` in phase 5.1; the CLI never subscribes, so
+ * `EventBusNoop` is the right default here.)
  */
 export type AppLayer = Layer.Layer<AppServices, DbError | DbCorrupted, never>;
 
@@ -76,9 +82,12 @@ export const buildAppLayer = (
   root: string,
   policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
   redactionConfig: Layer.Layer<RedactionConfig> = RedactionConfigDefault,
-): AppLayer => Layer.merge(
-  DbLive(root + "/.cognit/cognit.db", policy, redactionConfig),
-  LoggerNoop,
+): AppLayer => Layer.provideMerge(
+  Layer.merge(
+    DbLive(root + "/.cognit/cognit.db", policy, redactionConfig),
+    LoggerNoop,
+  ),
+  EventBusNoop,
 ) as AppLayer;
 
 /**

@@ -23,7 +23,6 @@ import {
   type EventRow,
   type ActorType,
 } from "@cognit/db";
-import { EventBus } from "../bus.js";
 import { envelope } from "../envelope.js";
 import { sseHandler } from "../sse.js";
 import { listRecentForSessionE, listRecentAcrossProjectE } from "../event-queries.js";
@@ -155,7 +154,6 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
 
     const program = Effect.gen(function* () {
       const session = yield* SessionService;
-      const bus = yield* EventBus;
       const r = yield* session.appendEvent({
         sessionId: parsed.value.session_id,
         type: parsed.value.type,
@@ -164,8 +162,9 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
         ...(parsed.value.id !== undefined ? { id: parsed.value.id } : {}),
         ...(parsed.value.source !== undefined ? { source: parsed.value.source } : {}),
       });
-      // Publish to bus for live SSE subscribers
-      yield* bus.publish(r.event);
+      // Bus publish happens inside SessionService.appendEvent
+      // (phase 5.1 chokepoint). Do NOT publish here — duplicates
+      // would double-deliver to SSE subscribers.
       return r;
     });
 

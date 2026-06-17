@@ -35,6 +35,7 @@ import { evalRules, type CandidateEvent } from "./constraint-engine";
 import { emptySessionState, type SessionState } from "@cognit/core/state";
 import { SnapshotService } from "./snapshot-service";
 import { SessionPolicy } from "./session-policy";
+import { EventBus } from "./bus";
 import type { AppendEventInput } from "./event-store";
 
 export type SessionError =
@@ -50,6 +51,7 @@ type EventStoreService = Context.Tag.Service<typeof EventStore>;
 type SnapshotServiceT = Context.Tag.Service<typeof SnapshotService>;
 type UuidService = Context.Tag.Service<typeof Uuid>;
 type LoggerService = Context.Tag.Service<typeof Logger>;
+type EventBusT = Context.Tag.Service<typeof EventBus>;
 
 export type SessionLifecycleStatus = "active" | "paused" | "closed";
 
@@ -315,7 +317,14 @@ const rehydrateSessionState = (parsed: Record<string, unknown>): SessionState =>
 export const SessionServiceLive: Layer.Layer<
   SessionService,
   never,
-  DbConnection | EventStore | SnapshotService | Uuid | Logger | SessionPolicy | ConstraintPolicy
+  | DbConnection
+  | EventStore
+  | SnapshotService
+  | Uuid
+  | Logger
+  | SessionPolicy
+  | ConstraintPolicy
+  | EventBus
 > = Layer.effect(
   SessionService,
   Effect.gen(function* () {
@@ -326,6 +335,7 @@ export const SessionServiceLive: Layer.Layer<
     const logger: LoggerService = yield* Logger;
     const policy: Context.Tag.Service<typeof SessionPolicy> = yield* SessionPolicy;
     const constraintPolicy = yield* ConstraintPolicy;
+    const eventBus: EventBusT = yield* EventBus;
 
     // Private helper: the snapshot+tail replay path. Used by both
     // `show` (the public read API) and `appendEvent` (phase 3c
@@ -403,6 +413,12 @@ export const SessionServiceLive: Layer.Layer<
      * logged and swallowed so the append still succeeds. The event
      * log is the source of truth; the snapshot is a rebuild
      * optimisation.
+     *
+     * Single bus chokepoint: every event inserted by SessionService
+     * (lifecycle + user events, `appendEvent` + the inbox watcher)
+     * fans out to subscribers here, exactly once. Bus errors are
+     * ignored — the bus is observability, the event log is the
+     * system of record. Callers MUST NOT publish in parallel.
      */
     const _appendAndMaybeSnapshot = (
       input: AppendEventInput,
@@ -432,8 +448,10 @@ export const SessionServiceLive: Layer.Layer<
             { sessionId: input.sessionId, error: String(result.left) },
             "session append: auto-snapshot failed (continuing)",
           );
+          yield* eventBus.publish(event).pipe(Effect.ignoreLogged);
           return { event, snapshotTaken: false };
         }
+        yield* eventBus.publish(event).pipe(Effect.ignoreLogged);
         return { event, snapshotTaken: result.right !== null };
       });
 

@@ -10,10 +10,9 @@
  * own no-op default (`EventBusNoop`) into `DbLive`, keeping db-direct
  * consumers (CLI, tests) from needing a real bus implementation.
  *
- * Production `EventBusLive` (the in-process Ref-based fan-out) lives
- * in `apps/server/src/bus.ts`; it re-exports `EventBus` from here
- * for backward compatibility so existing server-side imports keep
- * working.
+ * Production `EventBusLive` (the in-process Ref-based fan-out) also
+ * lives in `@cognit/db` (`./bus-live`); `apps/server/src/bus.ts` is
+ * a re-export shim for backward compatibility.
  *
  * Bus state is held inside the `EventBus` service. There is no
  * cross-process fan-out (that's a phase 4 / v0.2 item).
@@ -34,6 +33,14 @@ export interface EventBusShape {
     never,
     never
   >;
+  /**
+   * Shut down every active subscriber queue. After `shutdown`, any
+   * fiber blocked on `Queue.take` will reject with a defect, so
+   * long-running drain fibers (e.g. the SSE loop) can observe
+   * termination and close the response stream on SIGTERM.
+   * Idempotent: calling twice is a no-op.
+   */
+  readonly shutdown: Effect.Effect<void, never, never>;
 }
 
 export class EventBus extends Context.Tag("@cognit/db/EventBus")<

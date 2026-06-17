@@ -11,8 +11,6 @@ import { SessionPolicy, SessionPolicyDefault } from "../session-policy";
 import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
 import { CognitionService, CognitionServiceLive } from "../cognition-service";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../constraint-policy";
-import { EventBus } from "../bus";
-import { EventBusNoop } from "../bus-noop";
 import { DbSize, DbSizeLive } from "../db-size";
 import { ArtifactRepo, ArtifactRepoLive } from "../artifact-repo";
 import type { DbError, DbCorrupted } from "../errors";
@@ -75,7 +73,6 @@ export const DbLive = (
   | ProjectService
   | CognitionService
   | ConstraintPolicy
-  | EventBus
   | DbSize
   | ArtifactRepo,
   DbError | DbCorrupted,
@@ -124,7 +121,7 @@ export const DbLive = (
   // chokepoint). Provide it with the SessionService layer so it lands
   // in the public Layer's output set.
   const cognition = Layer.provide(CognitionServiceLive, sessions);
-  // Build a public layer providing DbConnection + the five services.
+  // Build a public layer providing DbConnection + the services.
   // Using Layer.provideMerge on a Layer.merge merges the outputs and
   // satisfies the R channel — and crucially KEEPS the provided layer's
   // output in the result. `Layer.provide` alone OMITS the provided
@@ -132,10 +129,13 @@ export const DbLive = (
   // why this used to break callers that consumed DbConnection through
   // the public layer (server tests crashed with "Service not found:
   // @cognit/db/DbConnection" even though the type signature said the
-  // layer provided it — the runtime didn't). `EventBusNoop` is the
-  // default bus for db-direct consumers (CLI, tests); production
-  // callers (apps/server) override it with `EventBusLive` via
-  // `Layer.merge`.
+  // layer provided it — the runtime didn't).
+  //
+  // EventBus is intentionally NOT in this output set. `SessionService`
+  // widens its R to include `EventBus` (phase 5.1 chokepoint) so a
+  // caller that uses `DbLive` directly must Layer.merge a bus
+  // (EventBusNoop for tests, EventBusLive for production). See the
+  // test layers in this package for the wiring shape.
   const inner = Layer.mergeAll(
     eventStore,
     sessions,
@@ -145,7 +145,6 @@ export const DbLive = (
     constraintPolicy,
     dbSize,
     artifactRepo,
-    EventBusNoop,
   );
   // Provide the SessionPolicy + dbConn internally so the R channel
   // stays `never`, AND keep their outputs in the result so callers
@@ -162,7 +161,6 @@ export const DbLive = (
     | ProjectService
     | CognitionService
     | ConstraintPolicy
-    | EventBus
     | DbSize
     | ArtifactRepo,
     DbError | DbCorrupted,

@@ -119,7 +119,7 @@ const buildRuntime = async (
   managed: ManagedRuntime.ManagedRuntime<TestContext, never>;
   closeRuntime: () => Promise<void>;
 }> => {
-  const appLayer = Layer.merge(
+  const appLayer = Layer.provideMerge(
     DbLive(dbPath, SessionPolicyDefault),
     Layer.merge(EventBusLive, LoggerNoop),
   );

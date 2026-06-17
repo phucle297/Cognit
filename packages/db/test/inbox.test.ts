@@ -36,33 +36,36 @@ const makeTestLayer = (dbPath: string) => {
   // Build a complete live layer the same way `DbLive` does in
   // production, but with our test connection. The watcher needs
   // `SessionService` on its R channel; `SessionService` pulls in
-  // `EventStore`, `SnapshotService`, and `SessionPolicy` internally.
-  // Default `everyN=100` keeps the test runs from accidentally
-  // snapshotting (each test appends a handful of events at most).
+  // `EventStore`, `SnapshotService`, `SessionPolicy`, and now
+  // `EventBus` internally. Default `everyN=100` keeps the test runs
+  // from accidentally snapshotting (each test appends a handful of
+  // events at most).
   //
   // Note: `SessionPolicy` is provided FIRST (innermost) so the layer
-  // composition yields a working runtime. The order is mirrored from
-  // the working `session-service.test.ts` test layer.
+  // composition yields a working runtime. `EventBusNoop` is provided
+  // INSIDE the SessionService chain so the constructed
+  // `sessionService` has R=never — without that, the runtime build
+  // flaks with "Service not found: EventBus".
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, SessionPolicyDefault), leafs),
     Layer.merge(
-      Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
-      dbConn,
+      Layer.merge(
+        Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+        dbConn,
+      ),
+      EventBusNoop,
     ),
   );
   return Layer.merge(
     Layer.merge(
       Layer.merge(
-        Layer.merge(
-          Layer.merge(eventStore, sessionService),
-          snapshotService,
-        ),
-        constraintPolicy,
+        Layer.merge(eventStore, sessionService),
+        snapshotService,
       ),
-      EventBusNoop,
+      constraintPolicy,
     ),
     Layer.merge(dbConn, LoggerNoop),
   ) as unknown as Layer.Layer<

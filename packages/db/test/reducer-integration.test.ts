@@ -5,6 +5,8 @@ import os from "node:os";
 import fs from "node:fs/promises";
 import {
   DbConnection,
+  EventBus,
+  EventBusNoop,
   EventStore,
   Logger,
   LoggerNoop,
@@ -50,9 +52,9 @@ const makeTestLayer = (dbPath: string) => {
   // constraintPolicy depends on EventStore.
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   // sessionService needs EventStore + SnapshotService + ConstraintPolicy
-  // + leafs + DbConnection and now also SessionPolicy. Use a high
-  // everyN so the auto-snapshot path doesn't trip on the manual
-  // takeIfDue call inside the test.
+  // + leafs + DbConnection + SessionPolicy + EventBus. Provide
+  // EventBusNoop INSIDE the chain so the constructed `sessionService`
+  // has R=never.
   const policyLayer = Layer.succeed(SessionPolicy)({
     everyN: 999_999,
     forkOnResume: true,
@@ -60,8 +62,11 @@ const makeTestLayer = (dbPath: string) => {
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
     Layer.merge(
-      Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
-      dbConn,
+      Layer.merge(
+        Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+        dbConn,
+      ),
+      EventBusNoop,
     ),
   );
   return Layer.merge(
@@ -76,7 +81,8 @@ const makeTestLayer = (dbPath: string) => {
     | SessionService
     | SnapshotService
     | Logger
-    | ConstraintPolicy,
+    | ConstraintPolicy
+    | EventBus,
     never,
     never
   >;
@@ -433,11 +439,16 @@ describe("reducer integration — auto-snapshot trigger", () => {
       everyN: 3,
       forkOnResume: true,
     });
+    // sessionService needs EventBus in R now. Provide EventBusNoop
+    // INSIDE the chain.
     const sessionService = Layer.provide(
       Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
       Layer.merge(
-        Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
-        dbConn,
+        Layer.merge(
+          Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+          dbConn,
+        ),
+        EventBusNoop,
       ),
     );
     return Layer.merge(
@@ -452,7 +463,8 @@ describe("reducer integration — auto-snapshot trigger", () => {
       | SessionService
       | SnapshotService
       | Logger
-      | ConstraintPolicy,
+      | ConstraintPolicy
+      | EventBus,
       never,
       never
     >;

@@ -6,7 +6,8 @@
  * subscribers, so it's free), `subscribe` returns a real but empty
  * `Queue` plus a no-op `unsub` (the queue is never offered to, so
  * it stays empty and `take` blocks forever — fine for a default
- * that has no SSE consumers).
+ * that has no SSE consumers). `shutdown` is a no-op — no subscriber
+ * queues were ever created, so there's nothing to tear down.
  *
  * Production consumers (apps/server) override this with `EventBusLive`
  * so SSE subscribers actually receive events.
@@ -25,5 +26,6 @@ export const EventBusNoop: Layer.Layer<EventBus, never, never> = Layer.succeed(
         const unsub: Effect.Effect<void, never, never> = Effect.void;
         return { queue: q, unsub };
       }),
+    shutdown: Effect.void,
   },
 );
