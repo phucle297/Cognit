@@ -26,7 +26,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { Effect, Layer, ManagedRuntime, Queue } from "effect";
+import { Effect, Fiber, Layer, ManagedRuntime, Queue } from "effect";
 import {
   DbConnection,
   DbLive,
@@ -301,14 +301,16 @@ describe("cognit server — SSE bus", () => {
       }),
     );
     const runtime: ServerRuntime = {
-      runPromise: (eff) => managed.runPromise(eff as unknown as Effect.Effect<unknown, never, Ctx>),
-      runPromiseExit: async (eff) => {
-        const r = await managed.runPromiseExit(eff as unknown as Effect.Effect<unknown, never, Ctx>);
+      runPromise: <A, E>(eff: Effect.Effect<A, E, never>) =>
+        managed.runPromise(eff as unknown as Effect.Effect<A, never, Ctx>) as Promise<A>,
+      runPromiseExit: async <A, E>(eff: Effect.Effect<A, E, never>) => {
+        const r = await managed.runPromiseExit(eff as unknown as Effect.Effect<A, never, Ctx>);
         return r._tag === "Success"
-          ? { _tag: "Success" as const, value: r.value }
+          ? { _tag: "Success" as const, value: r.value as A }
           : { _tag: "Failure" as const, cause: r.cause };
       },
-      runFork: (eff) => managed.runFork(eff as unknown as Effect.Effect<unknown, never, Ctx>),
+      runFork: <A, E>(eff: Effect.Effect<A, E, never>) =>
+        managed.runFork(eff as unknown as Effect.Effect<A, never, Ctx>) as Fiber.RuntimeFiber<A, E>,
     };
     const app = new Hono();
     app.get("/events/stream", sseHandler(runtime, { projectId, heartbeatMs: 50, replayLimit: 5 }));

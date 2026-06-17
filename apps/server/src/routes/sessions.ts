@@ -1,22 +1,40 @@
 /**
- * apps/server/src/routes/sessions.ts — `GET /sessions`,
- * `GET /sessions/:id/state`, `GET /sessions/:id`.
+ * apps/server/src/routes/sessions.ts — sessions routes.
  *
- * `GET /sessions/:id/state` returns the `SessionStateView` (the
- * same shape `cognit session show` prints). Backed by
- * `SessionService.show` which already does the snapshot+tail replay
- * and returns the projected state.
+ *   GET  /sessions                      list
+ *   GET  /sessions/:id                  row by id
+ *   GET  /sessions/:id/state            SessionState view
+ *   POST /sessions                      create (201)
+ *   POST /sessions/:id/pause            pause (200 / 404 / 409)
+ *   POST /sessions/:id/close            close  (200 / 404 / 409)
+ *   POST /sessions/:id/resume           resume (200 / 404 / 409)
  *
- * For v1 the state view *is* the `SessionState` from `@cognit/core`.
- * We don't re-shape it — a future phase 4 might project a
- * `SessionStateView` with derived fields (counts, freshness) but
- * the same on-the-wire shape keeps client and CLI consistent.
+ * Mutations funnel through `SessionService` so the redaction boundary,
+ * the constraint chokepoint, and the single bus publish (phase 5.1)
+ * stay in effect. We never write via a parallel code path.
+ *
+ * Bodies (hand-rolled validation, no Effect Schema):
+ *   POST /sessions                       { goal, parent_session_id?, actor: {name, type} }
+ *   POST /sessions/:id/pause             { actor: {name, type} }
+ *   POST /sessions/:id/close             { actor: {name, type} }
+ *   POST /sessions/:id/resume            { actor: {name, type}, fork_on_resume?: boolean }
+ *
+ * Errors:
+ *   400 validation_failed  — body shape / actor type.
+ *   404 not_found          — session id unknown.
+ *   409 conflict           — illegal transition (e.g. pause closed).
+ *   500 internal           — DbError surface.
  */
 import { Effect, Fiber } from "effect";
 import { Hono } from "hono";
-import { SessionService, type SessionRow, type SnapshotRow } from "@cognit/db";
+import {
+  SessionService,
+  type SessionRow,
+  type SnapshotRow,
+} from "@cognit/db";
 import type { SessionState } from "@cognit/core/state";
 import { envelope } from "../envelope.js";
+import { registerSessionsMutations } from "./sessions-mutations.js";
 
 /**
  * Tiny runtime facade. The server boot (and tests) build this
@@ -67,7 +85,12 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       program as Effect.Effect<unknown, unknown, never>,
     );
     if (exit._tag === "Failure") {
-      return c.json({ error: "internal", cause: (exit as { cause: unknown }).cause }, 500);
+      const cause = (exit as { cause: unknown }).cause;
+      const err = JSON.stringify(cause);
+      if (err.includes("UnknownGoalOrId")) {
+        return c.json({ error: "not_found", id }, 404);
+      }
+      return c.json({ error: "internal", cause }, 500);
     }
     type R = { readonly session: SessionRow; readonly matches: ReadonlyArray<SessionRow> };
     const v = (exit as { value: R }).value;
@@ -98,4 +121,9 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
     const v = (exit as { value: { session: SessionRow; state: SessionState; snapshot: SnapshotRow | null; eventsAfterSnapshot: number } }).value;
     return c.json(envelope("session.state", v));
   });
+
+  // Mutations (POST /sessions, pause, close, resume) live in a
+  // sibling module to keep this file readable. Both modules share
+  // the same Hono app — `app.route` accumulates handlers.
+  registerSessionsMutations(app, deps);
 };

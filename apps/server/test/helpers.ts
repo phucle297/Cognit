@@ -40,6 +40,8 @@ import {
   SessionPolicyDefault,
   SessionService,
   ConstraintPolicy,
+  Uuid,
+  UuidLive,
 } from "@cognit/db";
 import { EventBus, EventBusLive } from "../src/bus.js";
 import { requireBearer } from "../src/auth.js";
@@ -53,6 +55,7 @@ import { registerHealthz } from "../src/routes/healthz.js";
 import { registerAuthRoutes } from "../src/routes/auth.js";
 import { registerSessionsRoutes, type ServerRuntime } from "../src/routes/sessions.js";
 import { registerEventsRoutes } from "../src/routes/events.js";
+import { registerProjectsRoutes } from "../src/routes/projects.js";
 
 /** All Context tags the test runtime provides. Mirrors `src/index.ts`. */
 type TestContext =
@@ -62,7 +65,8 @@ type TestContext =
   | ProjectService
   | ConstraintPolicy
   | EventBus
-  | Logger;
+  | Logger
+  | Uuid;
 
 export interface TestApp {
   readonly app: Hono;
@@ -128,7 +132,7 @@ const buildRuntime = async (
 }> => {
   const appLayer = Layer.provideMerge(
     DbLive(dbPath, SessionPolicyDefault),
-    Layer.merge(EventBusLive, LoggerNoop),
+    Layer.mergeAll(EventBusLive, LoggerNoop, UuidLive),
   );
   // `ManagedRuntime.make` is synchronous in effect@3.21 — it returns
   // the ManagedRuntime object directly, which has `runPromise` and
@@ -194,6 +198,7 @@ const buildHono = (
   if (auth !== null) registerAuthRoutes(app, auth);
   registerSessionsRoutes(app, { runtime, projectId });
   registerEventsRoutes(app, { runtime, projectId });
+  registerProjectsRoutes(app, { runtime });
   return app;
 };
 

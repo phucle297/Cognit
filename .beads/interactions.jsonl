@@ -38,3 +38,7 @@
 {"id":"int-2d5fc2c6","kind":"field_change","created_at":"2026-06-16T12:56:52.020691786Z","actor":"PerMees","issue_id":"Cognit-oqd.11","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-2e6f1ecc","kind":"field_change","created_at":"2026-06-16T13:05:19.640117169Z","actor":"PerMees","issue_id":"Cognit-oqd.12","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-c2946c28","kind":"field_change","created_at":"2026-06-17T04:33:01.423232726Z","actor":"PerMees","issue_id":"Cognit-oqd","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-d36758ef","kind":"field_change","created_at":"2026-06-17T06:40:32.0515294Z","actor":"PerMees","issue_id":"Cognit-w61.9","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-eaae9f2e","kind":"field_change","created_at":"2026-06-17T07:03:09.070456751Z","actor":"PerMees","issue_id":"Cognit-w61.2","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-ae901471","kind":"field_change","created_at":"2026-06-17T07:09:12.545523338Z","actor":"PerMees","issue_id":"Cognit-w61.3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-b9faf2cd","kind":"field_change","created_at":"2026-06-17T07:29:03.877105746Z","actor":"PerMees","issue_id":"Cognit-w61.4","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

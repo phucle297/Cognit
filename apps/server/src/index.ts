@@ -50,6 +50,7 @@ import { registerHealthz } from "./routes/healthz.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerSessionsRoutes } from "./routes/sessions.js";
 import { registerEventsRoutes } from "./routes/events.js";
+import { registerProjectsRoutes } from "./routes/projects.js";
 import {
   buildServerConfig,
   resolveAuthConfig,
@@ -196,6 +197,7 @@ registerHealthz(app);
 registerAuthRoutes(app, auth);
 registerSessionsRoutes(app, { runtime, projectId });
 registerEventsRoutes(app, { runtime, projectId });
+registerProjectsRoutes(app, { runtime });
 
 // Same-origin dashboard (phase 6): serve `apps/dashboard/dist` from
 // the same port. `serveStatic` resolves lazily per-request; if the
