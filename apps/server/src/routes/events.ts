@@ -113,8 +113,8 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
     return c.json(envelope("events.list", { session_id: sessionId, events }));
   });
 
-  // GET /events/stream  (SSE)
-  app.get("/events/stream", sseHandler(runtime, { replayLimit: 50, projectId }));
+  // GET /events/stream  (SSE) — default replay 1000, heartbeat 15s, retry 5000
+  app.get("/events/stream", sseHandler(runtime, { replayLimit: 1000, projectId }));
 
   // GET /events/feed  — project-wide tail (read-only)
   app.get("/events/feed", async (c) => {

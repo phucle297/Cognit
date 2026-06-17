@@ -145,7 +145,8 @@ registerHealthz(app);
 registerSessionsRoutes(app, { runtime, projectId });
 registerEventsRoutes(app, { runtime, projectId });
 
-serve({ fetch: app.fetch, hostname: opts.host, port: opts.port }, (info) => {
+let server: ReturnType<typeof serve> | undefined;
+server = serve({ fetch: app.fetch, hostname: opts.host, port: opts.port }, (info) => {
   process.stdout.write(
     `cognit-server: listening on http://${info.address}:${info.port}\n`,
   );
@@ -153,3 +154,24 @@ serve({ fetch: app.fetch, hostname: opts.host, port: opts.port }, (info) => {
     `cognit-server: project=${projectId} db=${dbPath} auth=${enforceAuth ? "bearer" : "off"}\n`,
   );
 });
+
+// SIGTERM / SIGINT: shut the bus down so every in-flight SSE drain
+// fiber rejects its `Queue.take` and exits cleanly. The HTTP server
+// then closes on `server.close()`. Without this, a graceful restart
+// leaves connected SSE clients hanging until their TCP keepalive
+// times out (minutes).
+const shutdownBus = Effect.gen(function* () {
+  const bus = yield* EventBus;
+  yield* bus.shutdown;
+}).pipe(Effect.ignoreLogged);
+
+const handleShutdown = (signal: string) => {
+  process.stderr.write(`cognit-server: received ${signal}, shutting down\n`);
+  void runtime.runPromise(shutdownBus).then(() => {
+    server?.close(() => process.exit(0));
+    // Hard exit if server.close hangs (e.g. blocked keepalive).
+    setTimeout(() => process.exit(1), 5_000).unref();
+  });
+};
+process.on("SIGTERM", () => handleShutdown("SIGTERM"));
+process.on("SIGINT", () => handleShutdown("SIGINT"));

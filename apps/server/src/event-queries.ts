@@ -45,3 +45,26 @@ export const listRecentForSessionE = (
     );
     return rows.slice().reverse();
   });
+
+/**
+ * Cursor-paginated replay: events for a project with `id > afterId`,
+ * ordered ascending. Used by SSE when the client reconnects with a
+ * `Last-Event-ID` header — replay everything since that id instead
+ * of the last N. ULIDs sort lex-correctly so `>` is enough.
+ */
+export const listAfterEventAcrossProjectE = (
+  projectId: string,
+  afterId: string,
+  limit: number,
+): Effect.Effect<ReadonlyArray<EventRow>, never, DbConnection> =>
+  Effect.gen(function* () {
+    const conn = yield* DbConnection;
+    const rows = conn.handle.all<EventRow>(
+      `SELECT * FROM events
+       WHERE project_id = ? AND id > ?
+       ORDER BY id ASC
+       LIMIT ?`,
+      [projectId, afterId, limit],
+    );
+    return rows;
+  });
