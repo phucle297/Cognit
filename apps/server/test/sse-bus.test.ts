@@ -41,58 +41,7 @@ import {
 import { EventBus, EventBusLive } from "../src/bus.js";
 import { sseHandler } from "../src/sse.js";
 import type { ServerRuntime } from "../src/routes/sessions.js";
-import { bootServer, type BootedServer } from "./helpers.js";
-
-const parseSseFrames = (chunk: string): Array<{ event: string; data: string }> => {
-  // SSE frames are `event: <name>\ndata: <json>\n\n`. We split on
-  // the double-newline and parse each block.
-  const frames: Array<{ event: string; data: string }> = [];
-  for (const block of chunk.split("\n\n")) {
-    if (!block) continue;
-    let eventName = "message";
-    let data = "";
-    for (const line of block.split("\n")) {
-      if (line.startsWith("event: ")) eventName = line.slice("event: ".length);
-      else if (line.startsWith("data: ")) data += line.slice("data: ".length);
-    }
-    if (data) frames.push({ event: eventName, data });
-  }
-  return frames;
-};
-
-const readUntil = async (
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  decoder: InstanceType<typeof TextDecoder>,
-  predicate: (acc: string) => boolean,
-  timeoutMs: number,
-): Promise<string> => {
-  const acc: string[] = [];
-  const start = Date.now();
-  let done = false;
-  while (!done) {
-    if (Date.now() - start > timeoutMs) {
-      throw new Error(`readUntil: timed out after ${timeoutMs}ms. Accumulated: ${acc.join("")}`);
-    }
-    const remain = Math.max(1, timeoutMs - (Date.now() - start));
-    const { value, done: rdone } = await Promise.race([
-      reader.read(),
-      new Promise<{ value: undefined; done: true }>((r) =>
-        setTimeout(() => r({ value: undefined, done: true }), remain),
-      ),
-    ]);
-    if (value) {
-      const text = decoder.decode(value, { stream: true });
-      acc.push(text);
-      if (predicate(acc.join(""))) {
-        done = true;
-      }
-    }
-    if (rdone) {
-      done = true;
-    }
-  }
-  return acc.join("");
-};
+import { bootServer, parseSseFrames, readUntil, type BootedServer } from "./helpers.js";
 
 describe("cognit server — SSE bus", () => {
   let server: BootedServer;

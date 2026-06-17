@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "echo \"server: no build yet (Phase 5)\"",
+    "build": "tsup src/index.ts --format esm --target node24 --clean --dts",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run --passWithNoTests",
     "test:watch": "vitest",
@@ -20,6 +20,9 @@
     "hono": "^4.12.25"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "better-sqlite3": "^11.5.0",
+    "tsup": "8.3.5",
     "tsx": "4.19.2",
     "typescript": "5.7.2",
     "vitest": "2.1.8"

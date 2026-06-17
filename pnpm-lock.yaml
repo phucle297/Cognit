@@ -61,6 +61,15 @@ importers:
         specifier: ^4.12.25
         version: 4.12.25
     devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
+      better-sqlite3:
+        specifier: ^11.5.0
+        version: 11.10.0
+      tsup:
+        specifier: 8.3.5
+        version: 8.3.5(postcss@8.5.15)(tsx@4.19.2)(typescript@5.7.2)(yaml@2.6.1)
       tsx:
         specifier: 4.19.2
         version: 4.19.2

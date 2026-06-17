@@ -283,6 +283,7 @@ export interface BootedServer {
   readonly app: Hono;
   readonly projectId: string;
   readonly sessionId: string;
+  readonly dbPath: string;
 }
 
 /**
@@ -328,6 +329,7 @@ export const bootServer = async (opts: {
           projectId,
           sessionId,
           app,
+          dbPath: tmp.dbPath,
           close: async () => {
             server?.close();
             await closeRuntime();
@@ -354,3 +356,69 @@ export const fetchApp = (app: Hono) => async (
   path: string,
   init: RequestInit = {},
 ): Promise<Response> => app.fetch(new Request(`http://localhost${path}`, init));
+
+/**
+ * Parse an SSE chunk into frames. SSE frames are
+ * `event: <name>\ndata: <json>\n\n`. We split on the double-newline
+ * and parse each block.
+ *
+ * Exported so the phase-5 E2E and `sse-bus.test.ts` share one parser.
+ */
+export const parseSseFrames = (
+  chunk: string,
+): Array<{ event: string; data: string }> => {
+  const frames: Array<{ event: string; data: string }> = [];
+  for (const block of chunk.split("\n\n")) {
+    if (!block) continue;
+    let eventName = "message";
+    let data = "";
+    for (const line of block.split("\n")) {
+      if (line.startsWith("event: ")) eventName = line.slice("event: ".length);
+      else if (line.startsWith("data: ")) data += line.slice("data: ".length);
+    }
+    if (data) frames.push({ event: eventName, data });
+  }
+  return frames;
+};
+
+/**
+ * Read from a `ReadableStreamDefaultReader` until `predicate(acc)`
+ * returns true, or until `timeoutMs` elapses. Returns the
+ * accumulated text. Throws on timeout with the accumulated text in
+ * the error message.
+ *
+ * Exported so the phase-5 E2E and `sse-bus.test.ts` share one helper.
+ */
+export const readUntil = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  decoder: InstanceType<typeof TextDecoder>,
+  predicate: (acc: string) => boolean,
+  timeoutMs: number,
+): Promise<string> => {
+  const acc: string[] = [];
+  const start = Date.now();
+  let done = false;
+  while (!done) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`readUntil: timed out after ${timeoutMs}ms. Accumulated: ${acc.join("")}`);
+    }
+    const remain = Math.max(1, timeoutMs - (Date.now() - start));
+    const { value, done: rdone } = await Promise.race([
+      reader.read(),
+      new Promise<{ value: undefined; done: true }>((r) =>
+        setTimeout(() => r({ value: undefined, done: true }), remain),
+      ),
+    ]);
+    if (value) {
+      const text = decoder.decode(value, { stream: true });
+      acc.push(text);
+      if (predicate(acc.join(""))) {
+        done = true;
+      }
+    }
+    if (rdone) {
+      done = true;
+    }
+  }
+  return acc.join("");
+};
