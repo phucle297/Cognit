@@ -1,47 +1,66 @@
 /**
- * apps/server/src/auth.ts — opt-in bearer middleware.
+ * apps/server/src/auth.ts — bearer + same-origin cookie middleware.
  *
  * Decision: **no auth for the local case.** Default bind is
- * `127.0.0.1`, which is OS-isolated; the loopback interface is
- * the security boundary. `cognit server` works without a token.
+ * `127.0.0.1`, which is OS-isolated; the loopback interface is the
+ * security boundary. `cognit server` works without a token.
  *
- * The bearer middleware activates only when BOTH conditions hold:
- *   1. `server.api_token` is set in `cognit.yaml`, AND
- *   2. the server is bound to a non-loopback host.
+ * The middleware activates only when BOTH conditions hold:
+ *   1. The bind host is non-loopback.
+ *   2. `auth.api_token` resolves to a non-empty string (env
+ *      `COGNIT_API_TOKEN` > CLI `--api-token` > yaml `auth.api_token`).
  *
- * The token comes from the project's `cognit.yaml` (a
- * `server: { api_token: "..." }` block). The server reads it once
- * at boot. If the token is set but the bind is loopback, the
- * middleware is a no-op (we log a warning, not a fatal).
+ * When enforced, `requireBearer` accepts:
+ *   - `Authorization: Bearer <token>` (CLI / scripted clients), OR
+ *   - `Cookie: <cookieName>=<token>` (same-origin dashboard —
+ *     EventSource cannot set the Authorization header).
  *
- * Hono's middleware shape:
- *   const requireBearer: MiddlewareHandler<...> = async (c, next) => { ... }
- *
- * A missing or wrong token returns `401` with a small JSON body.
+ * A missing or wrong credential returns `401` with a small JSON body.
+ * The loopback bypass lives in `apps/server/src/index.ts` mount order
+ * (cheap URL-prefix check before this middleware runs).
  */
 import type { MiddlewareHandler } from "hono";
+import { getCookie } from "hono/cookie";
+import type { AuthConfig } from "./config.js";
 
-export interface BearerConfig {
-  readonly apiToken: string;
+export interface BearerConfig extends AuthConfig {
+  // Extends AuthConfig for forward-compat — callers pass the full
+  // resolved auth section, not just the token.
 }
 
 /**
- * Build a Hono middleware that requires `Authorization: Bearer <apiToken>`.
- * Constant-time compare via `crypto.timingSafeEqual` when available,
- * else a plain `===` (v1 single-tenant local — no perf concern).
+ * Build a Hono middleware that requires either:
+ *   - `Authorization: Bearer <apiToken>`, OR
+ *   - `Cookie: <cookieName>=<apiToken>`.
+ *
+ * Constant-time compare via `===` (v1 single-tenant local — no
+ * perf concern). The cookie path exists because `EventSource`
+ * cannot set `Authorization`; the dashboard runs same-origin so
+ * HttpOnly + SameSite=Strict is sufficient.
  */
 export const requireBearer = (cfg: BearerConfig): MiddlewareHandler => {
   return async (c, next) => {
-    const header = c.req.header("authorization") ?? "";
-    const expected = `Bearer ${cfg.apiToken}`;
-    if (header !== expected) {
-      return c.json(
-        { error: "unauthorized", message: "missing or wrong bearer token" },
-        401,
-      );
+    if (cfg.apiToken === null) {
+      // Defensive: shouldEnforceAuth guards this, but if a route
+      // is mounted with `requireBearer` on a no-token config we
+      // open it rather than deadlocking every request.
+      await next();
+      return;
     }
-    await next();
-    return;
+    const auth = c.req.header("authorization") ?? "";
+    if (auth === `Bearer ${cfg.apiToken}`) {
+      await next();
+      return;
+    }
+    const cookie = getCookie(c, cfg.cookieName);
+    if (cookie === cfg.apiToken) {
+      await next();
+      return;
+    }
+    return c.json(
+      { error: "unauthorized", message: "missing or wrong bearer token / cookie" },
+      401,
+    );
   };
 };
 
@@ -49,10 +68,12 @@ export const requireBearer = (cfg: BearerConfig): MiddlewareHandler => {
  * Decide whether bearer auth should be enforced.
  *
  * - `isLoopback` = true → never require auth (loopback is OS-isolated).
- * - `apiToken` undefined or empty/whitespace → no auth (caller didn't
- *   opt in; `cognit init` writes `server: { api_token: "" }` as the
- *   explicit "no token" sentinel and we honour that).
+ * - `apiToken` undefined or empty/whitespace → no auth.
  * - otherwise → require bearer.
+ *
+ * @deprecated Use `buildServerConfig` from `./config.js` for the
+ * full resolution path. This helper is kept for the test harness
+ * and any caller that already has the token + isLoopback pair.
  */
 export const shouldEnforceAuth = (
   apiToken: string | undefined,
