@@ -23,6 +23,7 @@ import {
   type EventRow,
 } from "@cognit/db";
 import { envelope } from "../envelope.js";
+import { apiErrorResponse } from "../api-error.js";
 import type { ServerRuntime } from "./sessions.js";
 
 const VALID_ACTOR_TYPES: ReadonlyArray<ActorType> = ["human", "worker", "system"];
@@ -76,8 +77,7 @@ export const registerActorsRoutes = (app: Hono, deps: ActorsRouteDeps): void => 
       program as unknown as Effect.Effect<ReadonlyArray<ActorRow>, unknown, never>,
     );
     if (exit._tag === "Failure") {
-      const cause = (exit as { cause: unknown }).cause;
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "actors.list: query failed");
     }
     let rows = (exit as { value: ReadonlyArray<ActorRow> }).value;
 
@@ -109,34 +109,30 @@ export const registerActorsRoutes = (app: Hono, deps: ActorsRouteDeps): void => 
     try {
       raw = await c.req.json();
     } catch (e) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(e as Error).message}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(e as Error).message}`,
       );
     }
     if (!isObject(raw)) {
-      return c.json({ error: "bad_request", message: "body must be a JSON object" }, 400);
+      return apiErrorResponse(c, "bad_request", "body must be a JSON object");
     }
     const name = isString(raw.name) ? raw.name : null;
     if (name === null || name.length === 0 || name.length > 120) {
-      return c.json(
-        { error: "bad_request", message: "name must be a non-empty string up to 120 chars" },
-        400,
-      );
+      return apiErrorResponse(c, "validation_failed", "name must be a non-empty string up to 120 chars");
     }
     const type = isString(raw.type) && VALID_ACTOR_TYPES.includes(raw.type as ActorType) ? raw.type : null;
     if (type === null) {
-      return c.json(
-        { error: "bad_request", message: `type must be one of ${VALID_ACTOR_TYPES.join("|")}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "validation_failed",
+        `type must be one of ${VALID_ACTOR_TYPES.join("|")}`,
       );
     }
     const trustBody = typeof raw.trust_score === "number" ? raw.trust_score : undefined;
     if (trustBody !== undefined && (trustBody < 0 || trustBody > 1)) {
-      return c.json(
-        { error: "bad_request", message: "trust_score must be in [0, 1]" },
-        400,
-      );
+      return apiErrorResponse(c, "validation_failed", "trust_score must be in [0, 1]");
     }
     const sessionId = isString(raw.session_id) ? raw.session_id : undefined;
 
@@ -152,14 +148,15 @@ export const registerActorsRoutes = (app: Hono, deps: ActorsRouteDeps): void => 
       lookupProgram as unknown as Effect.Effect<ActorRow | null, unknown, never>,
     );
     if (lookupExit._tag === "Failure") {
-      const cause = (lookupExit as { cause: unknown }).cause;
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "actors.create: lookup failed");
     }
     const existing = (lookupExit as { value: ActorRow | null }).value;
     if (existing !== null) {
-      return c.json(
-        { error: "conflict", message: `actor with name '${name}' already exists`, name },
-        409,
+      return apiErrorResponse(
+        c,
+        "conflict",
+        `actor with name '${name}' already exists`,
+        { name },
       );
     }
 
@@ -193,12 +190,14 @@ export const registerActorsRoutes = (app: Hono, deps: ActorsRouteDeps): void => 
       const cause = (insertExit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("SQLITE_CONSTRAINT_UNIQUE") || err.includes("UNIQUE constraint failed")) {
-        return c.json(
-          { error: "conflict", message: `actor with name '${name}' already exists`, name },
-          409,
+        return apiErrorResponse(
+          c,
+          "conflict",
+          `actor with name '${name}' already exists`,
+          { name },
         );
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "actors.create: insert failed");
     }
     const inserted = (insertExit as { value: Inserted }).value;
 

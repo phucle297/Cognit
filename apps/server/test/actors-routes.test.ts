@@ -108,7 +108,8 @@ describe("cognit server — /actors routes (phase 5.6)", () => {
       }),
     });
     expect(dup.status).toBe(409);
-    const dupBody = (await dup.json()) as { error: string };
-    expect(dupBody.error).toBe("conflict");
+    const dupBody = (await dup.json()) as { kind: string; code: string };
+    expect(dupBody.kind).toBe("api_error");
+    expect(dupBody.code).toBe("conflict");
   });
 });

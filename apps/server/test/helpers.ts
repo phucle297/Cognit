@@ -59,6 +59,7 @@ import { registerProjectsRoutes } from "../src/routes/projects.js";
 import { registerEdgesRoutes } from "../src/routes/edges.js";
 import { registerVerifyRoutes } from "../src/routes/verify.js";
 import { registerActorsRoutes } from "../src/routes/actors.js";
+import { requestIdMiddleware } from "../src/api-error.js";
 
 /** All Context tags the test runtime provides. Mirrors `src/index.ts`. */
 type TestContext =
@@ -174,10 +175,12 @@ const buildHono = (
   auth: AuthConfig | null,
 ): Hono => {
   const app = new Hono();
+  app.use("*", requestIdMiddleware);
   app.use("*", async (c, next) => {
     c.header("access-control-allow-origin", "*");
-    c.header("access-control-allow-headers", "content-type, authorization");
+    c.header("access-control-allow-headers", "content-type, authorization, x-request-id");
     c.header("access-control-allow-methods", "GET,POST,OPTIONS");
+    c.header("access-control-expose-headers", "x-request-id");
     await next();
   });
   app.options("*", (c) => c.body(null, 204));

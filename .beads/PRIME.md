@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 5.6 Verify + actors routes
+search: 5.7 Filtered /events + error envelope
 queue: 
-next: Cognit-w61.7
+next: Cognit-w61

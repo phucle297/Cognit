@@ -39,6 +39,7 @@ import {
   type TerminalEvent,
 } from "@cognit/verification";
 import { envelope } from "../envelope.js";
+import { apiErrorResponse } from "../api-error.js";
 import type { ServerRuntime } from "./sessions.js";
 
 const VALID_ACTOR_TYPES = new Set<ActorType>(["human", "worker", "system"]);
@@ -93,30 +94,29 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
     try {
       raw = await c.req.json();
     } catch (e) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(e as Error).message}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(e as Error).message}`,
       );
     }
     if (!isObject(raw)) {
-      return c.json({ error: "bad_request", message: "body must be a JSON object" }, 400);
+      return apiErrorResponse(c, "bad_request", "body must be a JSON object");
     }
     const sessionId = isString(raw.session_id) ? raw.session_id : null;
     if (sessionId === null) {
-      return c.json({ error: "bad_request", message: "session_id must be a non-empty string" }, 400);
+      return apiErrorResponse(c, "bad_request", "session_id must be a non-empty string");
     }
     const command = isString(raw.command) ? raw.command : null;
     if (command === null || command.length === 0) {
-      return c.json({ error: "bad_request", message: "command must be a non-empty string" }, 400);
+      return apiErrorResponse(c, "bad_request", "command must be a non-empty string");
     }
     const type = isString(raw.type) && VALID_VERIFICATION_TYPES.has(raw.type) ? raw.type : null;
     if (type === null) {
-      return c.json(
-        {
-          error: "bad_request",
-          message: `type must be one of ${[...VALID_VERIFICATION_TYPES].join("|")}`,
-        },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `type must be one of ${[...VALID_VERIFICATION_TYPES].join("|")}`,
       );
     }
     const timeoutMs = typeof raw.timeout_ms === "number" ? raw.timeout_ms : undefined;
@@ -124,7 +124,7 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
     const correlationId = isString(raw.correlation_id) ? raw.correlation_id : undefined;
     const actorParsed = parseActor(raw.actor);
     if (!actorParsed.ok) {
-      return c.json({ error: "bad_request", message: actorParsed.error }, 400);
+      return apiErrorResponse(c, "bad_request", actorParsed.error);
     }
 
     const program = Effect.gen(function* () {
@@ -152,12 +152,12 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("SessionClosed")) {
-        return c.json({ error: "session_unavailable", cause }, 409);
+        return apiErrorResponse(c, "session_unavailable", "session is not accepting events");
       }
       if (err.includes("UnknownSession")) {
-        return c.json({ error: "not_found", session_id: sessionId }, 404);
+        return apiErrorResponse(c, "not_found", `session '${sessionId}' not found`, { session_id: sessionId });
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "verification.started: append failed");
     }
 
     const value = (exit as { value: { event: EventRow; snapshotTaken: boolean } }).value;
@@ -224,7 +224,7 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
     }
     const actorParsed = parseActor(raw["actor"]);
     if (!actorParsed.ok) {
-      return c.json({ error: "bad_request", message: actorParsed.error }, 400);
+      return apiErrorResponse(c, "bad_request", actorParsed.error);
     }
     const reason = isString(raw["reason"]) ? raw["reason"] : "user_cancelled";
 
@@ -266,12 +266,11 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
       lookupProgram as unknown as Effect.Effect<unknown, unknown, never>,
     );
     if (lookupExit._tag === "Failure") {
-      const cause = (lookupExit as { cause: unknown }).cause;
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "verification.cancel: lookup failed");
     }
     const looked = (lookupExit as { value: LookupResult }).value;
     if (!looked.started) {
-      return c.json({ error: "not_found", id: verificationId }, 404);
+      return apiErrorResponse(c, "not_found", `verification '${verificationId}' not found`, { id: verificationId });
     }
 
     // 2. Idempotent terminal: return current state at 200.
@@ -312,8 +311,7 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
       cancelProgram as unknown as Effect.Effect<EventRow, unknown, never>,
     );
     if (cancelExit._tag === "Failure") {
-      const cause = (cancelExit as { cause: unknown }).cause;
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "verification.cancel: append failed");
     }
 
     return c.json(

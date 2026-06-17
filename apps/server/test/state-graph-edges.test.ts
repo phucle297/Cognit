@@ -401,7 +401,10 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
       }),
     });
     expect(r.status).toBe(400);
-    const body = (await r.json()) as { error: string };
-    expect(body.error).toBe("unknown_edge_type");
+    const body = (await r.json()) as { kind: string; code: string; message: string; request_id: string };
+    expect(body.kind).toBe("api_error");
+    expect(body.code).toBe("validation_failed");
+    expect(body.message).toContain("made_up_type");
+    expect(typeof body.request_id).toBe("string");
   });
 });

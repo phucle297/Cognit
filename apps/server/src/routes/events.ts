@@ -1,22 +1,29 @@
 /**
- * apps/server/src/routes/events.ts — `GET /sessions/:id/events`,
- * `GET /events/stream`, `POST /events`.
+ * apps/server/src/routes/events.ts — event HTTP surface.
  *
- * POST /events funnels through `SessionService.appendEvent` so
- * the redaction boundary + the constraint chokepoint (phase 3c)
+ *   GET  /sessions/:id/events?limit=N      session-scoped recent
+ *   GET  /events/stream                     SSE live mode (5.2)
+ *   GET  /events/feed?limit=N               project-wide tail
+ *   GET  /events?session=&type=&actor=&since=&limit=&cursor=
+ *                                          filtered + ULID-cursor pagination
+ *   POST /events                            funneled through appendEvent
+ *
+ * POST funnels through `SessionService.appendEvent` so the
+ * redaction boundary + the constraint chokepoint (phase 3c)
  * stay in effect. The same path the CLI uses. We never write
  * via a parallel code path.
  *
- * The handler is wired to the project root via `runtime.runPromise`.
- * The runtime provides `SessionService`, `EventStore`, `DbConnection`,
- * `EventBus`, and the `Logger`.
- *
  * On a successful POST, the bus receives the inserted `EventRow`
  * so live SSE subscribers see the new event without polling.
+ *
+ * Errors use the v1 ApiError envelope (`./api-error.ts`). The
+ * request_id stamped by `requestIdMiddleware` is echoed on every
+ * error response and in the `x-request-id` header.
  */
 import { Effect } from "effect";
 import { Hono } from "hono";
 import {
+  DbConnection,
   DbError,
   SessionService,
   UnknownEventType,
@@ -24,13 +31,23 @@ import {
   type ActorType,
 } from "@cognit/db";
 import { envelope } from "../envelope.js";
+import { apiErrorResponse } from "../api-error.js";
 import { sseHandler } from "../sse.js";
-import { listRecentForSessionE, listRecentAcrossProjectE } from "../event-queries.js";
+import {
+  listRecentForSessionE,
+  listRecentAcrossProjectE,
+} from "../event-queries.js";
 import type { ServerRuntime } from "./sessions.js";
 
 const VALID_ACTOR_TYPES = new Set<ActorType>(["human", "worker", "system"]);
 
-/** Minimal hand-rolled shape check; the heavy validation lives in `EventStore.append`. */
+/**
+ * Crockford ULID: 26 base32 chars from `0123456789ABCDEFGHJKMNPQRSTVWXYZ`.
+ * Lenient check for routing purposes — full Crockford grammar is
+ * out of scope. We require 26 chars drawn from the encoding alphabet.
+ */
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
 interface PostEventBody {
   readonly session_id: string;
   readonly type: string;
@@ -129,26 +146,114 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
     return c.json(envelope("events.feed", { events }));
   });
 
+  // GET /events — filtered + ULID-cursor paginated.
+  // Filters:
+  //   session    session_id (exact match)
+  //   type[]     event type (repeatable: ?type=a&type=b)
+  //   actor      actor name (exact match against actors.name)
+  //   since      ULID; events with id > since (strict ULID lex order)
+  //   cursor     ULID; same predicate as `since` (mutually exclusive
+  //              with `since`; UI uses `cursor` for paging, `since`
+  //              for "since this point in time")
+  //   limit      1..500, default 100
+  app.get("/events", async (c) => {
+    const sessionQ = c.req.query("session");
+    const typeQ = c.req.queries("type");
+    const actorQ = c.req.query("actor");
+    const sinceQ = c.req.query("since");
+    const cursorQ = c.req.query("cursor");
+    const limitRaw = c.req.query("limit");
+    const limit = limitRaw === undefined
+      ? 100
+      : Math.max(1, Math.min(500, Number(limitRaw)));
+
+    if (sinceQ !== undefined && !ULID_RE.test(sinceQ)) {
+      return apiErrorResponse(c, "bad_request", "`since` must be a 26-char ULID");
+    }
+    if (cursorQ !== undefined && !ULID_RE.test(cursorQ)) {
+      return apiErrorResponse(c, "bad_request", "`cursor` must be a 26-char ULID");
+    }
+    if (sinceQ !== undefined && cursorQ !== undefined) {
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        "`since` and `cursor` are mutually exclusive",
+      );
+    }
+
+    const afterId = sinceQ ?? cursorQ ?? null;
+
+    type ListResult = ReadonlyArray<EventRow>;
+    const listProgram: Effect.Effect<ListResult, unknown, DbConnection> = Effect.gen(function* () {
+      const conn = yield* DbConnection;
+      const where: string[] = ["project_id = ?"];
+      const params: Array<string | number> = [projectId];
+      if (sessionQ !== undefined) {
+        where.push("session_id = ?");
+        params.push(sessionQ);
+      }
+      if (typeQ !== undefined && typeQ.length > 0) {
+        const placeholders = typeQ.map(() => "?").join(",");
+        where.push(`type IN (${placeholders})`);
+        params.push(...typeQ);
+      }
+      if (actorQ !== undefined) {
+        // Join to actors so the filter is by actor name (not actor_id).
+        where.push("actor_id = (SELECT id FROM actors WHERE name = ?)");
+        params.push(actorQ);
+      }
+      if (afterId !== null) {
+        where.push("id > ?");
+        params.push(afterId);
+      }
+      // Fetch limit+1 to detect next page.
+      params.push(limit + 1);
+      const sql = `SELECT * FROM events
+                   WHERE ${where.join(" AND ")}
+                   ORDER BY id ASC
+                   LIMIT ?`;
+      return conn.handle.all<EventRow>(sql, params);
+    });
+    const listExit = await runtime.runPromiseExit(
+      listProgram as unknown as Effect.Effect<ListResult, unknown, never>,
+    );
+    if (listExit._tag === "Failure") {
+      return apiErrorResponse(c, "internal", "events.list: query failed");
+    }
+    const rows = (listExit as { value: ListResult }).value;
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const next_cursor = hasMore ? page[page.length - 1]!.id : null;
+    return c.json(
+      envelope("events.list", {
+        events: page,
+        next_cursor,
+      }),
+    );
+  });
+
   // POST /events
   app.post("/events", async (c) => {
     let body: unknown;
     try {
       body = await c.req.json();
     } catch (e) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(e as Error).message}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(e as Error).message}`,
       );
     }
     const parsed = parseBody(body);
     if (!parsed.ok) {
-      return c.json({ error: "bad_request", message: parsed.error }, 400);
+      return apiErrorResponse(c, "bad_request", parsed.error);
     }
     const actor = parseActorString(parsed.value.actor);
     if (!actor) {
-      return c.json(
-        { error: "bad_request", message: "actor must be 'name:type' with type human|worker|system" },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        "actor must be 'name:type' with type human|worker|system",
       );
     }
 
@@ -176,15 +281,15 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("UnknownEventType")) {
-        return c.json({ error: "unknown_event_type", cause }, 400);
+        return apiErrorResponse(c, "unknown_event_type", `event type not in catalog`);
       }
       if (err.includes("SessionClosed") || err.includes("UnknownSession")) {
-        return c.json({ error: "session_unavailable", cause }, 409);
+        return apiErrorResponse(c, "session_unavailable", "session is not accepting events");
       }
       if (err.includes("ConstraintViolation")) {
-        return c.json({ error: "constraint_violation", cause }, 422);
+        return apiErrorResponse(c, "constraint_violation", "constraint engine rejected the event");
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "event.append failed");
     }
     const value = (exit as { value: { event: EventRow; snapshotTaken: boolean } }).value;
     return c.json(
@@ -196,4 +301,3 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
     );
   });
 };
-

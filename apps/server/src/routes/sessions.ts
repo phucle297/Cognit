@@ -36,6 +36,7 @@ import {
 } from "@cognit/db";
 import type { SessionState } from "@cognit/core/state";
 import { envelope } from "../envelope.js";
+import { apiErrorResponse } from "../api-error.js";
 import { registerSessionsMutations } from "./sessions-mutations.js";
 
 /**
@@ -90,14 +91,14 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("UnknownGoalOrId")) {
-        return c.json({ error: "not_found", id }, 404);
+        return apiErrorResponse(c, "not_found", `session '${id}' not found`, { id });
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "session.get: query failed");
     }
     type R = { readonly session: SessionRow; readonly matches: ReadonlyArray<SessionRow> };
     const v = (exit as { value: R }).value;
     if (!v.session) {
-      return c.json({ error: "not_found", id }, 404);
+      return apiErrorResponse(c, "not_found", `session '${id}' not found`, { id });
     }
     return c.json(envelope("session.get", { session: v.session, matches: v.matches }));
   });
@@ -116,9 +117,9 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("UnknownSession")) {
-        return c.json({ error: "not_found", id }, 404);
+        return apiErrorResponse(c, "not_found", `session '${id}' not found`, { id });
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "session.state: query failed");
     }
     const v = (exit as { value: { session: SessionRow; state: SessionState; snapshot: SnapshotRow | null; eventsAfterSnapshot: number } }).value;
     return c.json(envelope("session.state", v));
@@ -143,9 +144,9 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("UnknownSession")) {
-        return c.json({ error: "not_found", id }, 404);
+        return apiErrorResponse(c, "not_found", `session '${id}' not found`, { id });
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "session.graph: query failed");
     }
     const v = (exit as {
       value: {
@@ -256,9 +257,9 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("UnknownSession")) {
-        return c.json({ error: "not_found", id }, 404);
+        return apiErrorResponse(c, "not_found", `session '${id}' not found`, { id });
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "session.recovery: query failed");
     }
     const v = (exit as {
       value: {

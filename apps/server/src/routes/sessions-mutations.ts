@@ -23,6 +23,7 @@ import {
   DbError,
 } from "@cognit/db";
 import { envelope } from "../envelope.js";
+import { apiErrorResponse } from "../api-error.js";
 import type { SessionsRouteDeps, ServerRuntime } from "./sessions.js";
 
 const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>([
@@ -104,16 +105,16 @@ const runMutation = async <A,>(
     const cause = unwrapCause((exit as { cause: unknown }).cause);
     if (isUnknownSession(cause)) {
       const id = unknownSessionId(cause) ?? c.req.param("id") ?? "(unknown)";
-      return c.json({ error: "not_found", id }, 404 as ContentfulStatusCode);
+      return apiErrorResponse(c, "not_found", `session '${id}' not found`, { id });
     }
     if (isDbError(cause)) {
       const message = (cause as { message?: string }).message ?? "";
       if (isIllegalTransition(message)) {
-        return c.json({ error: "conflict", message }, 409 as ContentfulStatusCode);
+        return apiErrorResponse(c, "conflict", message);
       }
-      return c.json({ error: "internal", cause }, 500 as ContentfulStatusCode);
+      return apiErrorResponse(c, "internal", message || "session mutation failed");
     }
-    return c.json({ error: "internal", cause }, 500 as ContentfulStatusCode);
+    return apiErrorResponse(c, "internal", "session mutation failed");
   }
   return c.json(
     envelope(successKind, (exit as { value: unknown }).value),
@@ -131,23 +132,24 @@ export const registerSessionsMutations = (
   app.post("/sessions", async (c) => {
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(raw as { __badJson: string }).__badJson}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(raw as { __badJson: string }).__badJson}`,
       );
     }
     if (!isObject(raw)) {
-      return c.json({ error: "bad_request", message: "body must be a JSON object" }, 400);
+      return apiErrorResponse(c, "bad_request", "body must be a JSON object");
     }
     if (!isString(raw.goal) || raw.goal.trim().length === 0) {
-      return c.json({ error: "validation_failed", message: "goal must be a non-empty string" }, 400);
+      return apiErrorResponse(c, "validation_failed", "goal must be a non-empty string");
     }
     if (raw.parent_session_id !== undefined && raw.parent_session_id !== null && !isString(raw.parent_session_id)) {
-      return c.json({ error: "validation_failed", message: "parent_session_id must be a string" }, 400);
+      return apiErrorResponse(c, "validation_failed", "parent_session_id must be a string");
     }
     const actor = parseActor(raw.actor);
     if (!actor.ok) {
-      return c.json({ error: "validation_failed", message: actor.error }, 400);
+      return apiErrorResponse(c, "validation_failed", actor.error);
     }
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
@@ -176,14 +178,15 @@ export const registerSessionsMutations = (
     const id = c.req.param("id");
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(raw as { __badJson: string }).__badJson}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(raw as { __badJson: string }).__badJson}`,
       );
     }
     const actor = parseActor(typeof raw === "object" && raw !== null && "actor" in raw ? (raw as Record<string, unknown>).actor : undefined);
     if (!actor.ok) {
-      return c.json({ error: "validation_failed", message: actor.error }, 400);
+      return apiErrorResponse(c, "validation_failed", actor.error);
     }
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
@@ -204,14 +207,15 @@ export const registerSessionsMutations = (
     const id = c.req.param("id");
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(raw as { __badJson: string }).__badJson}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(raw as { __badJson: string }).__badJson}`,
       );
     }
     const actor = parseActor(typeof raw === "object" && raw !== null && "actor" in raw ? (raw as Record<string, unknown>).actor : undefined);
     if (!actor.ok) {
-      return c.json({ error: "validation_failed", message: actor.error }, 400);
+      return apiErrorResponse(c, "validation_failed", actor.error);
     }
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
@@ -232,17 +236,18 @@ export const registerSessionsMutations = (
     const id = c.req.param("id");
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(raw as { __badJson: string }).__badJson}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(raw as { __badJson: string }).__badJson}`,
       );
     }
     if (!isObject(raw)) {
-      return c.json({ error: "bad_request", message: "body must be a JSON object" }, 400);
+      return apiErrorResponse(c, "bad_request", "body must be a JSON object");
     }
     const actor = parseActor(raw.actor);
     if (!actor.ok) {
-      return c.json({ error: "validation_failed", message: actor.error }, 400);
+      return apiErrorResponse(c, "validation_failed", actor.error);
     }
     // fork_on_resume defaults to true per plan §5.4.2.
     const forkOnResume = raw.fork_on_resume === undefined ? true : Boolean(raw.fork_on_resume);

@@ -27,6 +27,7 @@ import {
   type EventRow,
 } from "@cognit/db";
 import { envelope } from "../envelope.js";
+import { apiErrorResponse } from "../api-error.js";
 import type { ServerRuntime } from "./sessions.js";
 
 /**
@@ -115,9 +116,9 @@ export const registerEdgesRoutes = (app: Hono, deps: EdgesRouteDeps): void => {
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("UnknownSession")) {
-        return c.json({ error: "not_found", id: sessionId }, 404);
+        return apiErrorResponse(c, "not_found", `session '${sessionId}' not found`, { id: sessionId });
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "session.edges: query failed");
     }
     const all = (exit as { value: ReadonlyArray<import("@cognit/core/state").EdgeState> }).value;
 
@@ -126,20 +127,14 @@ export const registerEdgesRoutes = (app: Hono, deps: EdgesRouteDeps): void => {
     if (from !== undefined) {
       const [t, i] = from.split(":", 2);
       if (!t || !i) {
-        return c.json(
-          { error: "bad_request", message: "`from` must be `entity_type:entity_id`" },
-          400,
-        );
+        return apiErrorResponse(c, "bad_request", "`from` must be `entity_type:entity_id`");
       }
       rows = rows.filter((e) => e.from_entity_type === t && e.from_entity_id === i);
     }
     if (to !== undefined) {
       const [t, i] = to.split(":", 2);
       if (!t || !i) {
-        return c.json(
-          { error: "bad_request", message: "`to` must be `entity_type:entity_id`" },
-          400,
-        );
+        return apiErrorResponse(c, "bad_request", "`to` must be `entity_type:entity_id`");
       }
       rows = rows.filter((e) => e.to_entity_type === t && e.to_entity_id === i);
     }
@@ -175,56 +170,51 @@ export const registerEdgesRoutes = (app: Hono, deps: EdgesRouteDeps): void => {
     try {
       raw = await c.req.json();
     } catch (e) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(e as Error).message}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(e as Error).message}`,
       );
     }
     if (!isObject(raw)) {
-      return c.json({ error: "bad_request", message: "body must be a JSON object" }, 400);
+      return apiErrorResponse(c, "bad_request", "body must be a JSON object");
     }
     if (!isString(raw.edge_type)) {
-      return c.json({ error: "bad_request", message: "edge_type must be a non-empty string" }, 400);
+      return apiErrorResponse(c, "bad_request", "edge_type must be a non-empty string");
     }
     const rule = EDGE_CATALOG[raw.edge_type];
     if (rule === undefined) {
-      return c.json(
-        {
-          error: "unknown_edge_type",
-          message: `edge_type '${raw.edge_type}' is not in the v0.1 catalog`,
-        },
-        400,
+      return apiErrorResponse(
+        c,
+        "validation_failed",
+        `edge_type '${raw.edge_type}' is not in the v0.1 catalog`,
       );
     }
     const fromParsed = parseEndpoint(raw.from, "from");
     if (!fromParsed.ok) {
-      return c.json({ error: "bad_request", message: fromParsed.error }, 400);
+      return apiErrorResponse(c, "bad_request", fromParsed.error);
     }
     const toParsed = parseEndpoint(raw.to, "to");
     if (!toParsed.ok) {
-      return c.json({ error: "bad_request", message: toParsed.error }, 400);
+      return apiErrorResponse(c, "bad_request", toParsed.error);
     }
     if (!matchesCatalog(rule.from, fromParsed.value.entity_type)) {
-      return c.json(
-        {
-          error: "edge_type_mismatch",
-          message: `edge_type '${raw.edge_type}' does not accept from=${fromParsed.value.entity_type}`,
-        },
-        400,
+      return apiErrorResponse(
+        c,
+        "validation_failed",
+        `edge_type '${raw.edge_type}' does not accept from=${fromParsed.value.entity_type}`,
       );
     }
     if (!matchesCatalog(rule.to, toParsed.value.entity_type)) {
-      return c.json(
-        {
-          error: "edge_type_mismatch",
-          message: `edge_type '${raw.edge_type}' does not accept to=${toParsed.value.entity_type}`,
-        },
-        400,
+      return apiErrorResponse(
+        c,
+        "validation_failed",
+        `edge_type '${raw.edge_type}' does not accept to=${toParsed.value.entity_type}`,
       );
     }
     const actor = parseActor(raw.actor);
     if (!actor.ok) {
-      return c.json({ error: "bad_request", message: actor.error }, 400);
+      return apiErrorResponse(c, "bad_request", actor.error);
     }
     const clientEdgeId = isString(raw.client_edge_id) ? raw.client_edge_id : undefined;
     const confidence = typeof raw.confidence === "number" ? raw.confidence : undefined;
@@ -281,15 +271,15 @@ export const registerEdgesRoutes = (app: Hono, deps: EdgesRouteDeps): void => {
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
       if (err.includes("UnknownEventType")) {
-        return c.json({ error: "unknown_event_type", cause }, 400);
+        return apiErrorResponse(c, "unknown_event_type", "event type not in catalog");
       }
       if (err.includes("SessionClosed") || err.includes("UnknownSession")) {
-        return c.json({ error: "session_unavailable", cause }, 409);
+        return apiErrorResponse(c, "session_unavailable", "session is not accepting events");
       }
       if (err.includes("ConstraintViolation")) {
-        return c.json({ error: "constraint_violation", cause }, 422);
+        return apiErrorResponse(c, "constraint_violation", "constraint engine rejected the edge");
       }
-      return c.json({ error: "internal", cause }, 500);
+      return apiErrorResponse(c, "internal", "edge.created: append failed");
     }
 
     const value = (exit as { value: { event: EventRow; snapshotTaken: boolean } }).value;

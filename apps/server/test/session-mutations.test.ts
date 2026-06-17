@@ -135,8 +135,9 @@ describe("cognit server — session mutations", () => {
       body: JSON.stringify({ actor }),
     });
     expect(pause.status).toBe(409);
-    const body = (await pause.json()) as { error: string };
-    expect(body.error).toBe("conflict");
+    const body = (await pause.json()) as { kind: string; code: string };
+    expect(body.kind).toBe("api_error");
+    expect(body.code).toBe("conflict");
   });
 
   it("POST /sessions/:id/pause on an unknown id returns 404 not_found", async () => {
@@ -147,8 +148,9 @@ describe("cognit server — session mutations", () => {
       body: JSON.stringify({ actor }),
     });
     expect(r.status).toBe(404);
-    const body = (await r.json()) as { error: string; id: string };
-    expect(body.error).toBe("not_found");
-    expect(body.id).toBe("01nonexistentxxxxxxxxxx");
+    const body = (await r.json()) as { kind: string; code: string; details: { id: string } };
+    expect(body.kind).toBe("api_error");
+    expect(body.code).toBe("not_found");
+    expect(body.details?.id).toBe("01nonexistentxxxxxxxxxx");
   });
 });
