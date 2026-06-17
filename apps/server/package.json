@@ -13,6 +13,7 @@
   "dependencies": {
     "@cognit/core": "workspace:*",
     "@cognit/db": "workspace:*",
+    "@cognit/verification": "workspace:^",
     "@hono/node-server": "^2.0.4",
     "commander": "12.1.0",
     "effect": "3.21.3",

@@ -57,6 +57,8 @@ import { registerSessionsRoutes, type ServerRuntime } from "../src/routes/sessio
 import { registerEventsRoutes } from "../src/routes/events.js";
 import { registerProjectsRoutes } from "../src/routes/projects.js";
 import { registerEdgesRoutes } from "../src/routes/edges.js";
+import { registerVerifyRoutes } from "../src/routes/verify.js";
+import { registerActorsRoutes } from "../src/routes/actors.js";
 
 /** All Context tags the test runtime provides. Mirrors `src/index.ts`. */
 type TestContext =
@@ -201,6 +203,8 @@ const buildHono = (
   registerEventsRoutes(app, { runtime, projectId });
   registerProjectsRoutes(app, { runtime });
   registerEdgesRoutes(app, { runtime, projectId });
+  registerVerifyRoutes(app, { runtime, projectId });
+  registerActorsRoutes(app, { runtime, projectId });
   return app;
 };
 

@@ -45,6 +45,9 @@ importers:
       '@cognit/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@cognit/verification':
+        specifier: workspace:^
+        version: link:../../packages/verification
       '@hono/node-server':
         specifier: ^2.0.4
         version: 2.0.4(hono@4.12.25)
