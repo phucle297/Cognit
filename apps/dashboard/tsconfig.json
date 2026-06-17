@@ -18,5 +18,6 @@
       "@/components/*": ["./src/components/*"]
     }
   },
-  "include": ["src/**/*", "test/**/*", "vite.config.ts"]
+  "include": ["src/**/*", "test/**/*", "vite.config.ts"],
+  "exclude": ["test/**/*.e2e.test.ts", "test/budget.mjs"]
 }

@@ -57,7 +57,7 @@ describe("production index.ts live boot", () => {
     await waitFor(() => /listening on http:\/\/127\.0\.0\.1:\d+/.test(stdout));
     const m = stdout.match(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
     if (!m) throw new Error("never bound. stdout=" + stdout + " stderr=" + stderrBuf.slice(0, 800));
-    port = parseInt(m[1], 10);
+    port = parseInt(m[1] ?? "0", 10);
 
     // Proof of route registration: response body must be ApiError envelope,
 // NOT Hono's default 404 (empty body, no JSON envelope).
@@ -70,11 +70,13 @@ describe("production index.ts live boot", () => {
       ["POST", "/sessions/missing/edges", false],
     ];
     for (const [method, p, expectOk] of checks) {
-      const res = await fetch(`http://127.0.0.1:${port}${p}`, {
+      const isPost = method === "POST";
+      const init: RequestInit = {
         method,
         headers: { "content-type": "application/json" },
-        body: method === "POST" ? "{}" : undefined,
-      });
+        ...(isPost ? { body: "{}" } : {}),
+      };
+      const res = await fetch(`http://127.0.0.1:${port}${p}`, init);
       const body = (await res.text()).slice(0, 400);
       if (expectOk) {
         expect(res.status, `${method} ${p} should be 2xx, got ${res.status} body=${body}`).toBeLessThan(300);

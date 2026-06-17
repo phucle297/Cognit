@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest --run --passWithNoTests",
     "test:watch": "vitest",
+    "test:budget": "node ./test/budget.mjs",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
