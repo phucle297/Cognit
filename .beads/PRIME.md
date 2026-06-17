@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 6.1 Vite + React scaffold + login + base layout
+search: 6.5 Decision Graph + Verification pages
 queue: 
-next: Cognit-8ix.5
+next: Cognit-8ix
