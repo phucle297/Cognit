@@ -46,6 +46,7 @@ export default defineConfig({
       "@/entities": path.resolve(__dirname, "src/entities"),
       "@/shared": path.resolve(__dirname, "src/shared"),
       "@/lib": path.resolve(__dirname, "src/lib"),
+      "@/components": path.resolve(__dirname, "src/components"),
     },
   },
   test: {

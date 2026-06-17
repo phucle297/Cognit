@@ -16,9 +16,9 @@ import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../shared/ui/card";
 import { useApi } from "../lib/use-api";
 
-import { GraphCanvas, type GraphResp, type LayoutMode } from "../components/GraphCanvas";
-import { GraphControls } from "../components/GraphControls";
-import { NodeSidePanel } from "../components/NodeSidePanel";
+import { GraphCanvas, type GraphResp, type LayoutMode } from "@/components/GraphCanvas";
+import { GraphControls } from "@/components/GraphControls";
+import { NodeSidePanel } from "@/components/NodeSidePanel";
 
 const AUTO_CONSTELLATION_THRESHOLD = 200;
 

@@ -24,8 +24,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import {
   VerificationList,
   type VerificationListItem,
-} from "../components/VerificationList";
-import type { ActorLike } from "../components/RerunButton";
+} from "@/components/VerificationList";
+import type { ActorLike } from "@/components/RerunButton";
 
 type VerificationLifecycle = "started" | "passed" | "failed" | "errored" | "cancelled";
 

@@ -26,7 +26,7 @@ import {
   DecisionList,
   type DecisionListEdge,
   type DecisionListItem,
-} from "../components/DecisionList";
+} from "@/components/DecisionList";
 
 type DecisionLifecycle = "proposed" | "accepted" | "rejected" | "superseded";
 

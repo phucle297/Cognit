@@ -23,10 +23,10 @@ import { useSearchParams } from "react-router-dom";
 import { useApi } from "@/lib/use-api";
 import { useEventSource } from "@/lib/use-event-source";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-import { FilterBar } from "../components/FilterBar";
-import { PauseSseButton } from "../components/PauseSseButton";
-import { TimelineList } from "../components/TimelineList";
-import type { EventRowShape } from "../components/EventRow";
+import { FilterBar } from "@/components/FilterBar";
+import { PauseSseButton } from "@/components/PauseSseButton";
+import { TimelineList } from "@/components/TimelineList";
+import type { EventRowShape } from "@/components/EventRow";
 
 export type EventsResp = {
   events: ReadonlyArray<EventRowShape>;

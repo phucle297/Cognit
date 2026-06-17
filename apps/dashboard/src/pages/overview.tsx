@@ -15,8 +15,8 @@ import { useMemo, useState, type JSX } from "react";
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
 import { useApi } from "@/lib/use-api";
-import { ProjectCard, type ProjectCardSession } from "../components/ProjectCard";
-import { NewProjectDialog } from "../components/NewProjectDialog";
+import { ProjectCard, type ProjectCardSession } from "@/components/ProjectCard";
+import { NewProjectDialog } from "@/components/NewProjectDialog";
 
 type Project = {
   readonly id: string;
