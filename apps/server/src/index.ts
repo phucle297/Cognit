@@ -51,6 +51,9 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerSessionsRoutes } from "./routes/sessions.js";
 import { registerEventsRoutes } from "./routes/events.js";
 import { registerProjectsRoutes } from "./routes/projects.js";
+import { registerEdgesRoutes } from "./routes/edges.js";
+import { registerVerifyRoutes } from "./routes/verify.js";
+import { registerActorsRoutes } from "./routes/actors.js";
 import {
   buildServerConfig,
   resolveAuthConfig,
@@ -198,6 +201,9 @@ registerAuthRoutes(app, auth);
 registerSessionsRoutes(app, { runtime, projectId });
 registerEventsRoutes(app, { runtime, projectId });
 registerProjectsRoutes(app, { runtime });
+registerEdgesRoutes(app, { runtime, projectId });
+registerVerifyRoutes(app, { runtime, projectId });
+registerActorsRoutes(app, { runtime, projectId });
 
 // Same-origin dashboard (phase 6): serve `apps/dashboard/dist` from
 // the same port. `serveStatic` resolves lazily per-request; if the
