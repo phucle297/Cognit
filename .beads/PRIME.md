@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 6.7 E2E + cleanup + results doc + test count audit + build-size budget
+search: Phase 6 plan: Dashboard (v0.1 MVP)
 queue: 
-next: Cognit-8ix
+next: Cognit-etj

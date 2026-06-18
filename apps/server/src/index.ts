@@ -143,7 +143,16 @@ const yamlBindMatch = authBlockText.match(
 const yamlCookieNameMatch = authBlockText.match(
   /^[ \t]*cookie_name:[ \t]*['"]?([^'"\n]+)['"]?/m,
 );
+const yamlCookieSecureMatch = authBlockText.match(
+  /^[ \t]*cookie_secure:[ \t]*(true|false|1|0)['"]?[ \t]*$/m,
+);
 const yamlBind = (yamlBindMatch?.[1] as BindAddress | undefined) ?? undefined;
+const yamlCookieSecure = yamlCookieSecureMatch
+  ? yamlCookieSecureMatch[1] === "true" || yamlCookieSecureMatch[1] === "1"
+  : undefined;
+const envCookieSecure = process.env.COGNIT_COOKIE_SECURE
+  ? process.env.COGNIT_COOKIE_SECURE === "true" || process.env.COGNIT_COOKIE_SECURE === "1"
+  : undefined;
 
 const auth = resolveAuthConfig({
   envToken: process.env.COGNIT_API_TOKEN,
@@ -152,6 +161,8 @@ const auth = resolveAuthConfig({
   cliHost: opts.host,
   yamlBind,
   yamlCookieName: yamlCookieNameMatch?.[1],
+  yamlCookieSecure,
+  envCookieSecure,
 });
 const cfg = buildServerConfig(auth);
 if (cfg.enforceAuth) {

@@ -27,6 +27,20 @@ export interface AuthConfig {
   readonly apiToken: string | null;
   readonly bind: BindAddress;
   readonly cookieName: string;
+  /**
+   * Whether the session cookie should carry the `Secure` flag.
+   *
+   * - `true`  → set `Secure` (production / TLS terminator in front).
+   * - `false` → omit `Secure` (plain http, e.g. local docker demo).
+   *
+   * Resolution (highest first):
+   *   1. `COGNIT_COOKIE_SECURE` env var ("1"/"0"/"true"/"false")
+   *   2. `auth.cookie_secure` in `.cognit/cognit.yaml`
+   *   3. Default: `true` when bind is non-loopback, `false` when
+   *      loopback. The default tracks the historical behaviour and
+   *      keeps existing deployments working.
+   */
+  readonly cookieSecure: boolean;
 }
 
 export interface ServerConfig {
@@ -60,6 +74,10 @@ export const resolveAuthConfig = (input: {
   readonly yamlBind?: BindAddress | undefined;
   /** Value of `auth.cookie_name` parsed from yaml. */
   readonly yamlCookieName?: string | undefined;
+  /** Value of `auth.cookie_secure` parsed from yaml (already-resolved). */
+  readonly yamlCookieSecure?: boolean | undefined;
+  /** Value of `COGNIT_COOKIE_SECURE` env var (already-resolved). */
+  readonly envCookieSecure?: boolean | undefined;
 }): AuthConfig => {
   const apiToken =
     trimOrNull(input.envToken) ??
@@ -71,7 +89,14 @@ export const resolveAuthConfig = (input: {
       ? (input.cliHost as BindAddress)
       : input.yamlBind ?? "127.0.0.1";
   const cookieName = input.yamlCookieName ?? DEFAULT_COOKIE_NAME;
-  return { apiToken, bind, cookieName };
+  // Cookie Secure flag. Env > yaml > bind-derived default. Loopback
+  // binds historically omit Secure (browser only sends Secure cookies
+  // over https); a non-loopback bind defaults to Secure.
+  const cookieSecure =
+    input.envCookieSecure ??
+    input.yamlCookieSecure ??
+    !isLoopbackHost(bind);
+  return { apiToken, bind, cookieName, cookieSecure };
 };
 
 /**

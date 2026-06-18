@@ -110,7 +110,7 @@ export const registerAuthRoutes = (app: Hono, cfg: AuthConfig): void => {
       return c.json({ error: "unauthorized", message: "token does not match" }, 401);
     }
 
-    const secure = !isLoopbackForCookie(cfg.bind);
+    const secure = cfg.cookieSecure;
     const cookie = [
       `${cfg.cookieName}=${parsed.value.token}`,
       "HttpOnly",
@@ -123,6 +123,3 @@ export const registerAuthRoutes = (app: Hono, cfg: AuthConfig): void => {
     return c.body(null, 204);
   });
 };
-
-const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
-const isLoopbackForCookie = (bind: string): boolean => LOOPBACK.has(bind);
