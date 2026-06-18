@@ -32,6 +32,12 @@
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Inter var", sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
 
+  /* spacing semantic aliases */
+  --space-page-x: 1.5rem;     /* page horizontal padding */
+  --space-page-y: 2rem;       /* page vertical padding */
+  --space-card:  1.5rem;      /* card inner padding */
+  --space-stack: 1rem;        /* vertical stack between siblings */
+
   /* radius scale */
   --radius-sm: 0.25rem;
   --radius: 0.5rem;
