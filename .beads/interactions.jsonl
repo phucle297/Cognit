@@ -57,3 +57,6 @@
 {"id":"int-7e4c16da","kind":"field_change","created_at":"2026-06-17T12:54:35.239944639Z","actor":"PerMees","issue_id":"Cognit-8ix.6","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-54c4d09b","kind":"field_change","created_at":"2026-06-17T13:17:12.374707495Z","actor":"PerMees","issue_id":"Cognit-8ix.7","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-ed77ae04","kind":"field_change","created_at":"2026-06-18T04:25:38.947861407Z","actor":"PerMees","issue_id":"Cognit-8ix","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-12310c70","kind":"field_change","created_at":"2026-06-18T06:29:37.486167274Z","actor":"PerMees","issue_id":"Cognit-8ix.9.1","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-c71bb7cd","kind":"field_change","created_at":"2026-06-18T06:45:16.794522046Z","actor":"PerMees","issue_id":"Cognit-8ix.9.2","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-b734dd45","kind":"field_change","created_at":"2026-06-18T07:11:20.262519929Z","actor":"PerMees","issue_id":"Cognit-8ix.9.3","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

@@ -1,139 +1,102 @@
 /**
- * apps/dashboard/src/widgets/sidebar/index.tsx — primary nav.
- *
- * FSD layer: widgets. Composes 7 NavLink entries grouped into
- * Main / Explore / Admin sections. Reads collapsed state from
- * SidebarProvider; width switches between w-14 and w-56 so the
- * parent grid (lg:grid-cols-[auto_1fr]) reflows without media
- * queries. Icons come from lucide-react.
+ * apps/dashboard/src/widgets/sidebar/index.tsx — left rail nav.
  */
-import {
-  Activity,
-  GitBranch,
-  Layers,
-  LifeBuoy,
-  Settings as SettingsIcon,
-  ShieldCheck,
-  LayoutDashboard,
-  PanelLeftClose,
-  PanelLeftOpen,
-  type LucideIcon,
-} from "lucide-react";
+import { Boxes, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import type { JSX } from "react";
-import { cn } from "@/shared/lib/cn";
+import type { LucideIcon } from "lucide-react";
 import { useSidebar } from "./sidebar-provider";
+import { cn } from "@/shared/lib/cn";
+import { transition } from "@/shared/lib/motion";
 
-interface NavEntry {
-  readonly to: string;
-  readonly label: string;
-  readonly icon: LucideIcon;
-  readonly end?: boolean;
+interface NavItem {
+  to: string;
+  label: string;
+  icon: LucideIcon;
 }
 
-interface NavSection {
-  readonly title: string;
-  readonly items: ReadonlyArray<NavEntry>;
-}
-
-const SECTIONS: ReadonlyArray<NavSection> = [
+const SECTIONS: ReadonlyArray<{ title: string; items: ReadonlyArray<NavItem> }> = [
   {
     title: "Main",
     items: [
-      { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
-      { to: "/timeline", label: "Timeline", icon: Activity },
+      { to: "/", label: "Overview", icon: Boxes },
+      { to: "/timeline", label: "Timeline", icon: Boxes },
     ],
   },
   {
     title: "Explore",
     items: [
-      { to: "/knowledge-graph", label: "Knowledge Graph", icon: Layers },
-      { to: "/decision-graph", label: "Decision Graph", icon: GitBranch },
-      { to: "/verification", label: "Verification", icon: ShieldCheck },
+      { to: "/knowledge-graph", label: "Knowledge Graph", icon: Boxes },
+      { to: "/decision-graph", label: "Decision Graph", icon: Boxes },
+      { to: "/verification", label: "Verification", icon: Boxes },
     ],
   },
   {
     title: "Admin",
     items: [
-      { to: "/recovery-center", label: "Recovery", icon: LifeBuoy },
-      { to: "/settings", label: "Settings", icon: SettingsIcon },
+      { to: "/recovery-center", label: "Recovery", icon: Boxes },
+      { to: "/settings", label: "Settings", icon: Boxes },
     ],
   },
 ];
 
-export const Sidebar = (): JSX.Element => {
+export const Sidebar = () => {
   const { collapsed, toggle } = useSidebar();
-
   return (
     <aside
       className={cn(
-        "border-r bg-card",
+        "sticky top-0 flex h-screen flex-col border-r bg-card",
+        transition("width", "base"),
         collapsed ? "w-14" : "w-56",
-        "shrink-0",
       )}
-      aria-label="Primary sidebar"
     >
-      <nav
-        aria-label="Primary"
-        className={cn(
-          "flex h-full flex-col gap-4 py-4",
-          collapsed ? "px-2" : "px-3",
-        )}
-      >
-        <div className={cn("flex items-center", collapsed ? "justify-center" : "justify-end")}>
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-expanded={!collapsed}
-            className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="size-4" aria-hidden />
-            ) : (
-              <PanelLeftClose className="size-4" aria-hidden />
-            )}
-          </button>
-        </div>
-
-        <ul className="flex flex-1 flex-col gap-4">
-          {SECTIONS.map((section) => (
-            <li key={section.title} className="flex flex-col gap-1">
-              {!collapsed ? (
-                <div className="px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {section.title}
-                </div>
-              ) : null}
-              <ul className="flex flex-col gap-0.5">
-                {section.items.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.to}>
-                      <NavLink
-                        to={item.to}
-                        end={item.end ?? false}
-                        aria-label={item.label}
-                        className={({ isActive }) =>
-                          cn(
-                            "group flex items-center gap-3 rounded-md text-sm font-medium",
-                            collapsed ? "h-9 w-9 justify-center" : "h-9 px-2",
-                            isActive
-                              ? "bg-accent text-accent-foreground"
-                              : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                          )
-                        }
-                      >
-                        <Icon className="size-4 shrink-0" aria-hidden />
-                        {!collapsed ? <span className="truncate">{item.label}</span> : null}
-                      </NavLink>
-                    </li>
-                  );
-                })}
-              </ul>
-            </li>
-          ))}
-        </ul>
+      <div className={cn("flex h-12 items-center border-b", collapsed ? "justify-center px-2" : "px-4")}>
+        <Boxes className="size-5 shrink-0" aria-hidden />
+        {!collapsed ? <span className="ml-2 font-semibold tracking-tight">Cognit</span> : null}
+      </div>
+      <nav className="flex-1 overflow-y-auto p-2">
+        {SECTIONS.map((section) => (
+          <div key={section.title} className="mb-4">
+            {!collapsed ? (
+              <div className="mb-1 px-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                {section.title}
+              </div>
+            ) : null}
+            {section.items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-medium",
+                    transition("colors", "fast"),
+                    isActive
+                      ? "bg-accent text-accent-foreground"
+                      : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground",
+                    collapsed && "justify-center",
+                  )
+                }
+              >
+                <item.icon className="size-4 shrink-0" aria-hidden />
+                {!collapsed ? <span>{item.label}</span> : null}
+              </NavLink>
+            ))}
+          </div>
+        ))}
       </nav>
+      <button
+        type="button"
+        onClick={toggle}
+        className={cn(
+          "flex h-10 items-center border-t text-sm text-muted-foreground hover:bg-accent/60",
+          transition("colors", "fast"),
+          collapsed ? "justify-center" : "px-4",
+        )}
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
+        {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        {!collapsed ? <span className="ml-2">Collapse</span> : null}
+      </button>
     </aside>
   );
 };
