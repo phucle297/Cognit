@@ -9,6 +9,7 @@
 @import "tailwindcss";
 
 @theme {
+  /* existing color tokens (unchanged) */
   --color-background: oklch(1 0 0);
   --color-foreground: oklch(0.145 0 0);
   --color-muted: oklch(0.97 0 0);
@@ -26,7 +27,39 @@
   --color-card: oklch(1 0 0);
   --color-card-foreground: oklch(0.145 0 0);
   --color-ring: oklch(0.708 0 0);
+
+  /* typography */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Inter var", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+
+  /* radius scale */
+  --radius-sm: 0.25rem;
   --radius: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* elevation */
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.05);
+  --shadow: 0 1px 3px oklch(0 0 0 / 0.08), 0 1px 2px oklch(0 0 0 / 0.04);
+  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.08), 0 2px 4px oklch(0 0 0 / 0.04);
+
+  /* motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+
+  /* status palette (semantic event/session state) */
+  --color-status-active: oklch(0.65 0.18 145);
+  --color-status-active-bg: oklch(0.95 0.05 145);
+  --color-status-pending: oklch(0.72 0.16 75);
+  --color-status-pending-bg: oklch(0.96 0.06 75);
+  --color-status-failed: oklch(0.60 0.22 25);
+  --color-status-failed-bg: oklch(0.95 0.05 25);
+  --color-status-verified: oklch(0.60 0.18 250);
+  --color-status-verified-bg: oklch(0.95 0.05 250);
+  --color-status-archived: oklch(0.55 0.01 250);
+  --color-status-archived-bg: oklch(0.96 0 0);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -46,6 +79,16 @@
     --color-card: oklch(0.205 0 0);
     --color-card-foreground: oklch(0.985 0 0);
     --color-ring: oklch(0.556 0 0);
+    --color-status-active: oklch(0.70 0.18 145);
+    --color-status-active-bg: oklch(0.30 0.08 145);
+    --color-status-pending: oklch(0.75 0.16 75);
+    --color-status-pending-bg: oklch(0.30 0.08 75);
+    --color-status-failed: oklch(0.70 0.22 25);
+    --color-status-failed-bg: oklch(0.30 0.10 25);
+    --color-status-verified: oklch(0.70 0.18 250);
+    --color-status-verified-bg: oklch(0.30 0.08 250);
+    --color-status-archived: oklch(0.65 0.01 250);
+    --color-status-archived-bg: oklch(0.25 0 0);
   }
 }
 
@@ -53,4 +96,18 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
