@@ -52,7 +52,7 @@ export const NewProjectDialog = ({
     setSubmitting(true);
     setError(null);
     try {
-      await apiFetch<unknown>("/projects", {
+      await apiFetch<unknown>("/api/projects", {
         method: "POST",
         body: { name: trimmedName, goal: goal.trim() || undefined },
       });

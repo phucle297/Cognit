@@ -45,11 +45,11 @@ export const StorageUsage = (): JSX.Element => {
 
     void (async () => {
       try {
-        const { sessions } = await apiFetch<{ sessions: Session[] }>("/sessions");
+        const { sessions } = await apiFetch<{ sessions: Session[] }>("/api/sessions");
         const counts = await Promise.all(
           sessions.map((s) =>
             apiFetch<{ events: unknown[] }>(
-              `/events?session_id=${encodeURIComponent(s.id)}`,
+              `/api/events?session_id=${encodeURIComponent(s.id)}`,
             ).then((r) => r.events.length),
           ),
         );

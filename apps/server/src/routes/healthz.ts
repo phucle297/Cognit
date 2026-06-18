@@ -16,6 +16,6 @@ export const healthzHandler: Handler = (c) =>
   c.json(envelope("healthz", { status: "ok" }));
 
 export const registerHealthz = (app: import("hono").Hono): void => {
-  app.get("/healthz", healthzHandler);
-  app.get("/health", healthzHandler);
+  app.get("/api/healthz", healthzHandler);
+  app.get("/api/health", healthzHandler);
 };

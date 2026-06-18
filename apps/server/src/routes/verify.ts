@@ -89,7 +89,7 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
   const { runtime } = deps;
 
   // POST /verify
-  app.post("/verify", async (c) => {
+  app.post("/api/verify", async (c) => {
     let raw: unknown;
     try {
       raw = await c.req.json();
@@ -213,7 +213,7 @@ export const registerVerifyRoutes = (app: Hono, deps: VerifyRouteDeps): void => 
   });
 
   // POST /verify/:id/cancel
-  app.post("/verify/:id/cancel", async (c) => {
+  app.post("/api/verify/:id/cancel", async (c) => {
     const verificationId = c.req.param("id");
     let raw: Record<string, unknown> = {};
     try {

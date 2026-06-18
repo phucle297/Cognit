@@ -117,7 +117,7 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
   const { runtime, projectId } = deps;
 
   // GET /sessions/:id/events?limit=N
-  app.get("/sessions/:id/events", async (c) => {
+  app.get("/api/sessions/:id/events", async (c) => {
     const sessionId = c.req.param("id");
     const limit = Math.min(Number(c.req.query("limit") ?? "100"), 1000);
     const events = await runtime.runPromise(
@@ -131,10 +131,10 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
   });
 
   // GET /events/stream  (SSE) — default replay 1000, heartbeat 15s, retry 5000
-  app.get("/events/stream", sseHandler(runtime, { replayLimit: 1000, projectId }));
+  app.get("/api/events/stream", sseHandler(runtime, { replayLimit: 1000, projectId }));
 
   // GET /events/feed  — project-wide tail (read-only)
-  app.get("/events/feed", async (c) => {
+  app.get("/api/events/feed", async (c) => {
     const limit = Math.min(Number(c.req.query("limit") ?? "50"), 500);
     const events = await runtime.runPromise(
       listRecentAcrossProjectE(projectId, limit) as Effect.Effect<
@@ -156,7 +156,7 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
   //              with `since`; UI uses `cursor` for paging, `since`
   //              for "since this point in time")
   //   limit      1..500, default 100
-  app.get("/events", async (c) => {
+  app.get("/api/events", async (c) => {
     const sessionQ = c.req.query("session");
     const typeQ = c.req.queries("type");
     const actorQ = c.req.query("actor");
@@ -233,7 +233,7 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
   });
 
   // POST /events
-  app.post("/events", async (c) => {
+  app.post("/api/events", async (c) => {
     let body: unknown;
     try {
       body = await c.req.json();

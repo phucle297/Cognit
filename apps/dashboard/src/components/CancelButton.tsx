@@ -55,7 +55,7 @@ export const CancelButton = ({
     if (disabled) return;
     setBusy(true);
     try {
-      await apiFetch(`/verify/${verificationId}/cancel`, {
+      await apiFetch(`/api/verify/${verificationId}/cancel`, {
         method: "POST",
         body: { actor, reason: reason ?? "user_cancelled" },
       });

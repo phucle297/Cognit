@@ -129,7 +129,7 @@ export const registerSessionsMutations = (
   const { runtime, projectId } = deps;
 
   // POST /sessions
-  app.post("/sessions", async (c) => {
+  app.post("/api/sessions", async (c) => {
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {
       return apiErrorResponse(
@@ -174,7 +174,7 @@ export const registerSessionsMutations = (
   });
 
   // POST /sessions/:id/pause
-  app.post("/sessions/:id/pause", async (c) => {
+  app.post("/api/sessions/:id/pause", async (c) => {
     const id = c.req.param("id");
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {
@@ -203,7 +203,7 @@ export const registerSessionsMutations = (
   });
 
   // POST /sessions/:id/close
-  app.post("/sessions/:id/close", async (c) => {
+  app.post("/api/sessions/:id/close", async (c) => {
     const id = c.req.param("id");
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {
@@ -232,7 +232,7 @@ export const registerSessionsMutations = (
   });
 
   // POST /sessions/:id/resume
-  app.post("/sessions/:id/resume", async (c) => {
+  app.post("/api/sessions/:id/resume", async (c) => {
     const id = c.req.param("id");
     const raw = await parseJsonBody(c);
     if (typeof raw === "object" && raw !== null && "__badJson" in raw) {

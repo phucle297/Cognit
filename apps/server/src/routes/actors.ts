@@ -58,7 +58,7 @@ export const registerActorsRoutes = (app: Hono, deps: ActorsRouteDeps): void => 
   const { runtime, projectId } = deps;
 
   // GET /actors
-  app.get("/actors", async (c) => {
+  app.get("/api/actors", async (c) => {
     const type = c.req.query("type");
     const nameContains = c.req.query("name_contains");
     const cursor = c.req.query("cursor");
@@ -104,7 +104,7 @@ export const registerActorsRoutes = (app: Hono, deps: ActorsRouteDeps): void => 
   });
 
   // POST /actors
-  app.post("/actors", async (c) => {
+  app.post("/api/actors", async (c) => {
     let raw: unknown;
     try {
       raw = await c.req.json();

@@ -58,7 +58,7 @@ export const VerificationPage = (): JSX.Element => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session");
 
-  const statePath = sessionId ? `/sessions/${sessionId}/state` : null;
+  const statePath = sessionId ? `/api/sessions/${sessionId}/state` : null;
   const state = useApi<StateResp>(statePath);
 
   const verifications: ReadonlyArray<VerificationListItem> = useMemo(() => {

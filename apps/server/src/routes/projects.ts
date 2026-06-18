@@ -89,7 +89,7 @@ export const registerProjectsRoutes = (app: Hono, deps: ProjectsRouteDeps): void
   const { runtime } = deps;
 
   // GET /projects — list every project in this DB.
-  app.get("/projects", async (c) => {
+  app.get("/api/projects", async (c) => {
     const program = Effect.gen(function* () {
       const conn = yield* DbConnection;
       return yield* Effect.try({
@@ -105,7 +105,7 @@ export const registerProjectsRoutes = (app: Hono, deps: ProjectsRouteDeps): void
   });
 
   // POST /projects — create a project row + append project_created event.
-  app.post("/projects", async (c) => {
+  app.post("/api/projects", async (c) => {
     let body: unknown;
     try {
       body = await c.req.json();

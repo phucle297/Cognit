@@ -51,7 +51,7 @@ export const RerunButton = ({
         actor,
       };
       if (linkedHypothesisId) body["linked_hypothesis_id"] = linkedHypothesisId;
-      const resp = await apiFetch<{ id: string }>("/verify", {
+      const resp = await apiFetch<{ id: string }>("/api/verify", {
         method: "POST",
         body,
       });

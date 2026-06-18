@@ -41,6 +41,8 @@ import {
   SessionPolicyDefault,
   SessionService,
   ConstraintPolicy,
+  Uuid,
+  UuidLive,
 } from "@cognit/db";
 import { EventBus, EventBusLive } from "./bus.js";
 import { registerHealthz } from "./routes/healthz.js";
@@ -84,9 +86,9 @@ const dbPath = `${root}/.cognit/cognit.db`;
 // subscriber list — POST /events published to nobody).
 const appLayer = Layer.provideMerge(
   DbLive(dbPath, SessionPolicyDefault),
-  Layer.merge(EventBusLive, LoggerNoop),
+  Layer.mergeAll(EventBusLive, LoggerNoop, UuidLive),
 ) as Layer.Layer<
-  DbConnection | EventStore | SessionService | ConstraintPolicy | ProjectService | EventBus | Logger,
+  DbConnection | EventStore | SessionService | ConstraintPolicy | ProjectService | EventBus | Logger | Uuid,
   never,
   never
 >;

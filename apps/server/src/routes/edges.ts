@@ -95,7 +95,7 @@ export const registerEdgesRoutes = (app: Hono, deps: EdgesRouteDeps): void => {
 
   // GET /sessions/:id/edges
   // Filters: edge_type, from (entity_type:entity_id), to (same), cursor (ULID event_id), limit (1..500, default 100).
-  app.get("/sessions/:id/edges", async (c) => {
+  app.get("/api/sessions/:id/edges", async (c) => {
     const sessionId = c.req.param("id");
     const edgeType = c.req.query("edge_type");
     const from = c.req.query("from");
@@ -164,7 +164,7 @@ export const registerEdgesRoutes = (app: Hono, deps: EdgesRouteDeps): void => {
   //     client_edge_id?: string,   // idempotency
   //     confidence?: number
   //   }
-  app.post("/sessions/:id/edges", async (c) => {
+  app.post("/api/sessions/:id/edges", async (c) => {
     const sessionId = c.req.param("id");
     let raw: unknown;
     try {

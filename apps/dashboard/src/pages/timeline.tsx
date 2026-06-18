@@ -40,11 +40,11 @@ export const TimelinePage = (): JSX.Element => {
 
   // SSE live state.
   const [paused, setPaused] = useState<boolean>(false);
-  const streamUrl = paused || !sessionId ? null : "/events/stream";
+  const streamUrl = paused || !sessionId ? null : "/api/events/stream";
   const live = useEventSource<EventRowShape>(streamUrl);
 
   // Initial 50 events from the REST endpoint.
-  const initialPath = sessionId ? `/sessions/${sessionId}/events?limit=50` : null;
+  const initialPath = sessionId ? `/api/sessions/${sessionId}/events?limit=50` : null;
   const initial = useApi<EventsResp>(initialPath);
 
   // Merged list. Initial GET returns newest 50 — reverse for

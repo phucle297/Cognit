@@ -69,7 +69,7 @@ export const RecoveryCenterPage = (): JSX.Element => {
     let cancelled = false;
     void (async () => {
       try {
-        const { sessions: list } = await apiFetch<{ sessions: Session[] }>("/sessions");
+        const { sessions: list } = await apiFetch<{ sessions: Session[] }>("/api/sessions");
         if (!cancelled) {
           setSessions(list);
           setLoadingSessions(false);
@@ -97,7 +97,7 @@ export const RecoveryCenterPage = (): JSX.Element => {
     void (async () => {
       try {
         const rec = await apiFetch<RecoveryRecord>(
-          `/sessions/${encodeURIComponent(selectedId)}/recovery`,
+          `/api/sessions/${encodeURIComponent(selectedId)}/recovery`,
         );
         if (!cancelled) {
           setRecovery(rec);

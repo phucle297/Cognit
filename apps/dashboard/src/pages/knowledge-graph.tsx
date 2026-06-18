@@ -22,7 +22,7 @@ import { NodeSidePanel } from "@/components/NodeSidePanel";
 
 const AUTO_CONSTELLATION_THRESHOLD = 200;
 
-const buildPath = (sessionId: string): string => `/sessions/${encodeURIComponent(sessionId)}/graph`;
+const buildPath = (sessionId: string): string => `/api/sessions/${encodeURIComponent(sessionId)}/graph`;
 
 export const KnowledgeGraphPage = (): JSX.Element => {
   const [searchParams] = useSearchParams();

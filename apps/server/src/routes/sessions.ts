@@ -66,7 +66,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   const { runtime, projectId } = deps;
 
   // GET /sessions
-  app.get("/sessions", async (c) => {
+  app.get("/api/sessions", async (c) => {
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
       return yield* service.list({ projectId });
@@ -78,7 +78,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   });
 
   // GET /sessions/:id
-  app.get("/sessions/:id", async (c) => {
+  app.get("/api/sessions/:id", async (c) => {
     const id = c.req.param("id");
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
@@ -104,7 +104,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   });
 
   // GET /sessions/:id/state
-  app.get("/sessions/:id/state", async (c) => {
+  app.get("/api/sessions/:id/state", async (c) => {
     const id = c.req.param("id");
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
@@ -131,7 +131,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   // (matches the reducer's edge table convention). For each verified
   // conclusion with a non-null verification_id we synthesize a virtual
   // verified_by edge if one isn't already in state.
-  app.get("/sessions/:id/graph", async (c) => {
+  app.get("/api/sessions/:id/graph", async (c) => {
     const id = c.req.param("id");
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
@@ -244,7 +244,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   // intentionally NOT emitted. The shape lock is enforced by test
   // #4 (state-graph-edges.test.ts) which asserts the response has
   // exactly these keys and nothing else.
-  app.get("/sessions/:id/recovery", async (c) => {
+  app.get("/api/sessions/:id/recovery", async (c) => {
     const id = c.req.param("id");
     const program = Effect.gen(function* () {
       const service = yield* SessionService;

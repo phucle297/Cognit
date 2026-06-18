@@ -41,8 +41,8 @@ type SessionsResp = {
 };
 
 export const OverviewPage = (): JSX.Element => {
-  const projects = useApi<ProjectsResp>("/projects");
-  const sessions = useApi<SessionsResp>("/sessions");
+  const projects = useApi<ProjectsResp>("/api/projects");
+  const sessions = useApi<SessionsResp>("/api/sessions");
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
 
   const sessionsByProject = useMemo<Map<string, ProjectCardSession[]>>(() => {
