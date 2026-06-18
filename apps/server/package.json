@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsup",
+    "dev": "tsx watch src/index.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest --run --passWithNoTests",
     "test:watch": "vitest",

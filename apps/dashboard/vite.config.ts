@@ -27,10 +27,14 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: "127.0.0.1",
     port: 5173,
     strictPort: false,
+    // Proxy only API paths to the Hono server. Everything else
+    // (index.html, /src/*, /@vite/*, /node_modules/*) is served by
+    // vite itself. The server mounts all routes under /api/*.
     proxy: {
-      "/": {
+      "/api": {
         target: "http://127.0.0.1:6971",
         changeOrigin: false,
       },
