@@ -1,5 +1,5 @@
 /**
- * packages/cli/test/export.test.ts — phase 4 / 6bz.9 (cognit export)
+ * apps/cli/test/export.test.ts — phase 4 / 6bz.9 (cognit export)
  * acceptance test (AC5).
  *
  * AC5 — `cognit export --output bundle.tar.gz [--include-artifacts]`

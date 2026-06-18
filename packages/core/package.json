@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "echo \"core: no build (no emit)\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest --run",
     "test:watch": "vitest",
     "clean": "rm -rf .turbo"
@@ -23,8 +23,7 @@
     "effect": "3.21.3"
   },
   "devDependencies": {
-    "@types/node": "22.10.2",
-    "typescript": "5.7.2",
-    "vitest": "2.1.8"
+    "@types/node": "^25.9.3",
+    "vitest": "^4.1.9"
   }
 }

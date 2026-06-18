@@ -7,7 +7,7 @@
   "include": [
     "src/**/*",
     "test/**/*",
-    "../../packages/cli/src/paths.ts",
-    "../../packages/cli/src/yaml-io.ts"
+    "../../apps/cli/src/paths.ts",
+    "../../apps/cli/src/yaml-io.ts"
   ]
 }

@@ -5,9 +5,9 @@ import { fileURLToPath } from "node:url";
 import { findProjectRoot } from "../paths.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// packages/cli/src/commands/server.ts -> ../../../../apps/server/src/index.ts
-// (HERE=commands, ..=src, ..=cli, ..=packages, ..=repo root)
-const SERVER_ENTRY = path.resolve(HERE, "..", "..", "..", "..", "apps", "server", "src", "index.ts");
+// apps/cli/src/commands/server.ts -> ../../../apps/server/src/index.ts
+// (HERE=commands, ..=src, ..=cli, ..=apps, ..=repo root)
+const SERVER_ENTRY = path.resolve(HERE, "..", "..", "..", "apps", "server", "src", "index.ts");
 
 interface ServerOptions {
   host?: string;

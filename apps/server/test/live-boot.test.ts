@@ -29,7 +29,7 @@ describe("production index.ts live boot", () => {
     await new Promise<void>((resolve, reject) => {
       const init = spawn(
         "npx",
-        ["tsx", "/home/permees/Projects/github-personal/phucle297/Cognit/packages/cli/src/index.ts", "init", "--root", tmpDir, "--project", "live-verify"],
+        ["tsx", "/home/permees/Projects/github-personal/phucle297/Cognit/apps/cli/src/index.ts", "init", "--root", tmpDir, "--project", "live-verify"],
         { cwd: "/home/permees/Projects/github-personal/phucle297/Cognit", env: process.env, stdio: ["ignore", "pipe", "pipe"] },
       );
       let initErr = "";

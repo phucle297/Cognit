@@ -1,5 +1,5 @@
 /**
- * packages/cli/test/phase-4.e2e.test.ts — phase 4 acceptance criteria
+ * apps/cli/test/phase-4.e2e.test.ts — phase 4 acceptance criteria
  * (Cognit-oqd).
  *
  * The full phase 4 plan lands in 12 sub-beads across 4a (verify engine

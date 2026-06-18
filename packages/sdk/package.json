@@ -7,7 +7,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "echo \"sdk: no build yet (Phase 1+)\"",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsgo --noEmit",
     "test": "vitest --run --passWithNoTests",
     "test:watch": "vitest",
     "clean": "rm -rf dist .turbo"
@@ -17,7 +17,7 @@
     "@cognit/db": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "5.7.2",
-    "vitest": "2.1.8"
+    "@types/node": "^25.9.3",
+    "vitest": "^4.1.9"
   }
 }

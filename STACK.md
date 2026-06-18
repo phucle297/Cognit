@@ -119,7 +119,7 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 
 - The `appLayer` MUST be wrapped in `ManagedRuntime.make(appLayer)` (not `Effect.provide(appLayer)` per-handler). With `Effect.provide`, the `EventBusLive` `Ref<subscribers>` is reconstructed on every request → SSE live-delivery is silently broken (subscriber queue is fresh + empty on every publish). `ManagedRuntime` builds the runtime ONCE and reuses it across requests. This is the difference between "SSE works in tests but not in production" and "SSE works everywhere".
 
-**Phase 3 status (Cognit-5vl):** shipped. E2E coverage lives in `packages/cli/test/phase-3.e2e.test.ts` (AC1–3) and `apps/server/test/phase-3.server.e2e.test.ts` (AC4). Test counts: 149 db / 82 cli / 52 core / 15 server (targets 130+ / 60+ / 50+ / 10+).
+**Phase 3 status (Cognit-5vl):** shipped. E2E coverage lives in `apps/cli/test/phase-3.e2e.test.ts` (AC1–3) and `apps/server/test/phase-3.server.e2e.test.ts` (AC4). Test counts: 149 db / 82 cli / 52 core / 15 server (targets 130+ / 60+ / 50+ / 10+).
 
 ---
 

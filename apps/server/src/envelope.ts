@@ -1,7 +1,7 @@
 /**
  * apps/server/src/envelope.ts — v1 JSON envelope.
  *
- * Mirrors `packages/cli/src/output.ts` exactly:
+ * Mirrors `apps/cli/src/output.ts` exactly:
  *   { version: 1, kind: "<command>", data: <payload> }
  *
  * The server and CLI emit the same shape so a single parser works

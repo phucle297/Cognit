@@ -390,7 +390,7 @@ export const parseSseFrames = (
  * Exported so the phase-5 E2E and `sse-bus.test.ts` share one helper.
  */
 export const readUntil = async (
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+  reader: ReadableStreamDefaultReader<Uint8Array<ArrayBufferLike>>,
   decoder: InstanceType<typeof TextDecoder>,
   predicate: (acc: string) => boolean,
   timeoutMs: number,

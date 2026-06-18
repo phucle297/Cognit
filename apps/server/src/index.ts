@@ -59,7 +59,7 @@ import {
   resolveAuthConfig,
   type BindAddress,
 } from "./config.js";
-import { findProjectRoot } from "../../../packages/cli/src/paths.js";
+import { findProjectRoot } from "../../../apps/cli/src/paths.js";
 
 const program = new Command();
 program
@@ -222,11 +222,11 @@ registerActorsRoutes(app, { runtime, projectId });
 // Static files are served before auth (the dashboard is the entry
 // point), and the auth gate above exempts only API routes.
 const dashboardRoot = path.resolve(root, "..", "apps", "dashboard", "dist");
-app.get(
+app.use(
   "*",
   serveStatic({
     root: dashboardRoot,
-  }),
+  }) as unknown as Parameters<typeof app.use>[1],
 );
 
 let server: ReturnType<typeof serve> | undefined;

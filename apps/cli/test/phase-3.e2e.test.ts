@@ -1,5 +1,5 @@
 /**
- * packages/cli/test/phase-3.e2e.test.ts — phase 3 acceptance criteria
+ * apps/cli/test/phase-3.e2e.test.ts — phase 3 acceptance criteria
  * (Cognit-5vl.11).
  *
  * Proves AC1, AC2, AC3 from `plans/phase-3.md` lines 405-433 end-to-end
@@ -392,7 +392,7 @@ describe("phase 3 E2E — AC3: constraint engine", () => {
     const observe = runCli(tmp, ["observe", "blocked", "--session", sessionId]);
     // The violation surfaces as a non-zero exit. The exact stderr
     // text is an implementation detail of the per-command error
-    // formatter (see `packages/cli/src/commands/observation.ts:85-104`)
+    // formatter (see `apps/cli/src/commands/observation.ts:85-104`)
     // — it does not yet have a dedicated `ConstraintViolation` case
     // and falls through to a generic `cognit: <error>` line. The
     // plan's AC3 is proven by (a) non-zero status and (b) no event

@@ -171,7 +171,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
       // simplest proof that the chokepoint is alive on the HTTP
       // path is a typed error from the validation layer below it
       // (UnknownEventType). The full block-rule E2E is at the CLI
-      // level in `packages/cli/test/phase-3.e2e.test.ts` AC3.
+      // level in `apps/cli/test/phase-3.e2e.test.ts` AC3.
       const r = await f("/events", {
         method: "POST",
         headers: { "content-type": "application/json" },

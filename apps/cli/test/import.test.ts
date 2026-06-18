@@ -1,5 +1,5 @@
 /**
- * packages/cli/test/import.test.ts — phase 4 / 6bz.10 (cognit import)
+ * apps/cli/test/import.test.ts — phase 4 / 6bz.10 (cognit import)
  * acceptance test (AC6).
  *
  * AC6 — `cognit import --input bundle.tar.gz

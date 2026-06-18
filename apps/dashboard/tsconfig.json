@@ -6,7 +6,6 @@
     "jsx": "react-jsx",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "types": ["vitest/globals", "@testing-library/jest-dom"],
-    "baseUrl": ".",
     "paths": {
       "@/app/*": ["./src/app/*"],
       "@/pages/*": ["./src/pages/*"],
