@@ -4,10 +4,12 @@
  * Feature-Sliced Design: routes are declared in src/app/ because
  * they are app-wide composition. Page components live in
  * src/pages/ (FSD "pages" layer — one per route).
+ *
+ * Local-only tool — no login page, no auth gate. All routes render
+ * inside <AppShell>, which provides the nav + content outlet.
  */
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/widgets/app-shell";
-import { LoginPage } from "@/features/auth/login-page";
 import { OverviewPage } from "@/pages/overview";
 import { TimelinePage } from "@/pages/timeline";
 import { KnowledgeGraphPage } from "@/pages/knowledge-graph";
@@ -16,14 +18,8 @@ import { VerificationPage } from "@/pages/verification";
 import { RecoveryCenterPage } from "@/pages/recovery-center";
 import { SettingsPage } from "@/pages/settings";
 
-/**
- * Route table. Pages beyond Login render inside <AppShell>, which
- * provides the nav + content outlet. Login renders bare to keep
- * the form focused.
- */
 export const router = createBrowserRouter(
   [
-    { path: "/login", element: <LoginPage /> },
     {
       element: <AppShell />,
       children: [

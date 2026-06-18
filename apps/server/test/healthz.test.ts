@@ -1,8 +1,8 @@
 /**
  * apps/server/test/healthz.test.ts — `GET /healthz`
  *
- * Two cases: 200 with no auth (even when bearer is configured on
- * other routes), and the v1 envelope shape.
+ * The server has no auth. Two cases: 200 status, and the v1
+ * envelope shape.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { makeApp, fetchApp, type TestApp } from "./helpers.js";

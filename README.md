@@ -824,11 +824,10 @@ inbox:
   debounce_ms: 200
   atomic_write_required: true
 
-server:
-  # opt-in bearer auth. Off by default on loopback bind. Required
-  # when --host is non-loopback (e.g. 0.0.0.0) — every /sessions/*
-  # and /events/* route returns 401 without a matching token.
-  api_token: "" # set to a non-empty string to require auth
+# Local-only tool — no `server:` block, no auth, no token.
+# The server binds loopback by default. Docker compose overrides
+# `--host` to `0.0.0.0` inside the user-defined docker network
+# but never publishes the port to the host.
 ```
 
 Edit with `cognit config --edit`. Show with `cognit config --show`.
@@ -859,7 +858,7 @@ Cognit v0.1 is complete when it can:
 - rebuild session state from events (with snapshot acceleration)
 - attach artifacts as evidence
 - show why a decision exists, with `based_on` edges to verified conclusions
-- serve a Hono read API on `127.0.0.1:6971` (`cognit server`) with `GET /sessions/:id/state`, `GET /events/stream` (SSE), `POST /events` (funnelled through `appendEvent` so redaction + constraint still apply), and opt-in bearer auth on non-loopback bind
+- serve a Hono read API on `127.0.0.1:6971` (`cognit server`) with `GET /sessions/:id/state`, `GET /events/stream` (SSE), `POST /events` (funnelled through `appendEvent` so redaction + constraint still apply). Local-only — no auth.
 - tail the event stream from the terminal with `cognit events --follow`, without requiring the API server
 
 **Phase 3 status (Cognit-5vl):** shipped. E2E coverage in `apps/cli/test/phase-3.e2e.test.ts` and `apps/server/test/phase-3.server.e2e.test.ts`. Test counts: 149 db / 82 cli / 52 core / 15 server (targets met: 130+ / 60+ / 50+ / 10+).

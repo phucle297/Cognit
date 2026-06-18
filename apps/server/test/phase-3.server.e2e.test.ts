@@ -5,25 +5,20 @@
  * Proves AC4 from `plans/phase-3.md` lines 426-433 end-to-end
  * against a real Hono server bound to a loopback port. Composes
  * the unit-level tests (healthz, sessions, sse-bus, post-events-
- * redaction, auth-bearer) into one phase-3 acceptance suite so
- * the AC has a single signal that the whole surface is wired
- * correctly.
+ * redaction) into one phase-3 acceptance suite so the AC has a
+ * single signal that the whole surface is wired correctly.
  *
  * AC4 — `cognit server` boots on `127.0.0.1:6971`; `curl /healthz`
- *      returns 200 *without* a token (default, no auth on
- *      loopback); `GET /sessions/:id/state` returns the typed
- *      `SessionStateView`; `GET /events/stream` (SSE) delivers
- *      new events from the inbox watcher within 1s; `POST /events`
+ *      returns 200; `GET /sessions/:id/state` returns the typed
+ *      `SessionStateView`; `GET /events/stream` (SSE) delivers new
+ *      events from the inbox watcher within 1s; `POST /events`
  *      writes via `appendEvent` (redaction + constraint still
- *      enforced). When run with `--host 0.0.0.0` and
- *      `server.api_token` set, requests without the bearer return
- *      401.
+ *      enforced). Local-only tool — no auth.
  */
 import { describe, it, expect, afterEach } from "vitest";
 import {
   bootServer,
   makeApp,
-  makeAppWithAuth,
   fetchApp,
   type TestApp,
   type BootedServer,
@@ -79,11 +74,9 @@ const readUntil = async (
   return acc.join("");
 };
 
-const TOKEN = "phase-3-e2e-secret-token-1234567890";
-
 describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
   // -----------------------------------------------------------------
-  // /healthz — 200 without a token (loopback is the security boundary)
+  // /healthz — 200 (loopback is the security boundary, no auth needed)
   // -----------------------------------------------------------------
   describe("default loopback bind (no auth)", () => {
     let ctx: TestApp;
@@ -91,7 +84,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
       await ctx?.close();
     });
 
-    it("GET /healthz returns 200 without a token", async () => {
+    it("GET /healthz returns 200", async () => {
       ctx = await makeApp();
       const r = await fetchApp(ctx.app)("/healthz");
       expect(r.status).toBe(200);
@@ -224,50 +217,6 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
       try { await reader.cancel(); } catch { /* ignore */ }
       const frames = parseSseFrames(acc);
       expect(frames.some((f) => f.data.includes(unique))).toBe(true);
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // Auth — opt-in bearer on non-loopback bind
-  // -----------------------------------------------------------------
-  describe("non-loopback bind with token set (auth enforced)", () => {
-    let ctx: TestApp;
-    afterEach(async () => {
-      await ctx?.close();
-    });
-
-    it("GET /sessions without bearer returns 401; with bearer returns 200", async () => {
-      ctx = await makeAppWithAuth({ apiToken: TOKEN, isLoopback: false });
-      const f = fetchApp(ctx.app);
-      const noAuth = await f("/sessions");
-      expect(noAuth.status).toBe(401);
-
-      const withAuth = await f("/sessions", {
-        headers: { authorization: `Bearer ${TOKEN}` },
-      });
-      expect(withAuth.status).toBe(200);
-
-      // /healthz is always unauthenticated.
-      const health = await f("/healthz");
-      expect(health.status).toBe(200);
-    });
-  });
-
-  // -----------------------------------------------------------------
-  // Loopback bind with token set — auth remains OFF (the documented
-  // posture: 127.0.0.1 IS the security boundary).
-  // -----------------------------------------------------------------
-  describe("loopback bind with token set (auth remains off)", () => {
-    let ctx: TestApp;
-    afterEach(async () => {
-      await ctx?.close();
-    });
-
-    it("GET /sessions without bearer returns 200", async () => {
-      ctx = await makeAppWithAuth({ apiToken: TOKEN, isLoopback: true });
-      const f = fetchApp(ctx.app);
-      const r = await f("/sessions");
-      expect(r.status).toBe(200);
     });
   });
 });

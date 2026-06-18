@@ -3,7 +3,7 @@
  *
  * FSD: tests the pages/settings page by importing from the
  * AC-required path (src/pages/settings.tsx). Cases:
- *  1. Config tab renders masked api_token (shows "****")
+ *  1. Config tab renders the local bind host preview
  *  2. Storage tab renders sessions count "1" and events count "0"
  *     when /sessions returns 1 session and /events returns empty
  */
@@ -50,7 +50,7 @@ describe("SettingsPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the Config tab with a masked api_token showing ****", async () => {
+  it("renders the Config tab with the local bind host preview", async () => {
     // Config tab does not fetch anything in v0.1 — placeholder
     // SAFE-PREVIEW object is hard-coded inside the component.
     const spy = vi.fn().mockImplementation(() =>
@@ -60,9 +60,9 @@ describe("SettingsPage", () => {
 
     renderSettings();
 
-    // The Config tab is the default tab; the masked token "****"
-    // must be present in the read-only preview.
-    expect(await screen.findByText(/\*\*\*\*/)).toBeInTheDocument();
+    // The Config tab is the default tab; the bind host preview
+    // must be present in the read-only view.
+    expect(await screen.findByTestId("bind-host")).toBeInTheDocument();
   });
 
   it("renders the Storage tab with sessions count 1 and events count 0", async () => {

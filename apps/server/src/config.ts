@@ -1,114 +1,31 @@
 /**
- * apps/server/src/config.ts — server config resolution.
+ * apps/server/src/config.ts — server bind resolution.
  *
- * Token precedence (highest first):
- *   1. `COGNIT_API_TOKEN` env var (escapes a leaked yaml).
- *   2. `--api-token` CLI flag passed to `cognit server`.
- *   3. `auth.api_token` field in `.cognit/cognit.yaml`.
- *
- * If the resolved token is empty/whitespace and the bind host is a
- * non-loopback address, the server starts but `shouldEnforceAuth`
- * returns false — the server prints a warning. The intent is: a
- * non-loopback bind without a token is treated as "developer wanted
- * it open for the local case" rather than silently denying every
- * request.
- *
- * `bind` defaults to `127.0.0.1` (forces loopback bypass). It can
- * come from `auth.bind` in yaml or `--host` from the CLI.
- *
- * `cookieName` defaults to `cognit_session`. It is used both as the
- * cookie name set by `POST /auth/login` and as the lookup key the
- * bearer middleware accepts as a fallback for same-origin SSE
- * clients (EventSource cannot set `Authorization`).
+ * Local-only tool — no auth. This file resolves the bind host and
+ * port the Hono server should listen on. Default bind is `127.0.0.1`
+ * (loopback). Docker compose overrides to `0.0.0.0` so the container
+ * is reachable inside the user-defined docker network, but no port
+ * is ever published to the host — see `docker-compose.yml`.
  */
 export type BindAddress = "127.0.0.1" | "0.0.0.0" | "::1" | "localhost";
 
-export interface AuthConfig {
-  readonly apiToken: string | null;
-  readonly bind: BindAddress;
-  readonly cookieName: string;
-  /**
-   * Whether the session cookie should carry the `Secure` flag.
-   *
-   * - `true`  → set `Secure` (production / TLS terminator in front).
-   * - `false` → omit `Secure` (plain http, e.g. local docker demo).
-   *
-   * Resolution (highest first):
-   *   1. `COGNIT_COOKIE_SECURE` env var ("1"/"0"/"true"/"false")
-   *   2. `auth.cookie_secure` in `.cognit/cognit.yaml`
-   *   3. Default: `true` when bind is non-loopback, `false` when
-   *      loopback. The default tracks the historical behaviour and
-   *      keeps existing deployments working.
-   */
-  readonly cookieSecure: boolean;
-}
-
 export interface ServerConfig {
-  readonly auth: AuthConfig;
-  readonly isLoopback: boolean;
-  readonly enforceAuth: boolean;
+  readonly bind: BindAddress;
 }
-
-const DEFAULT_COOKIE_NAME = "cognit_session";
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
 export const isLoopbackHost = (host: string): boolean =>
-  LOOPBACK_HOSTS.has(host);
-
-const trimOrNull = (s: string | undefined | null): string | null => {
-  if (typeof s !== "string") return null;
-  const t = s.trim();
-  return t.length === 0 ? null : t;
-};
-
-export const resolveAuthConfig = (input: {
-  /** Value of `process.env.COGNIT_API_TOKEN` (already-resolved). */
-  readonly envToken?: string | undefined;
-  /** Value of `--api-token` CLI flag (already-resolved). */
-  readonly cliToken?: string | undefined;
-  /** Value of `auth.api_token` parsed from yaml (already-resolved). */
-  readonly yamlToken?: string | undefined;
-  /** Value of `--host` CLI flag. */
-  readonly cliHost?: string | undefined;
-  /** Value of `auth.bind` parsed from yaml. */
-  readonly yamlBind?: BindAddress | undefined;
-  /** Value of `auth.cookie_name` parsed from yaml. */
-  readonly yamlCookieName?: string | undefined;
-  /** Value of `auth.cookie_secure` parsed from yaml (already-resolved). */
-  readonly yamlCookieSecure?: boolean | undefined;
-  /** Value of `COGNIT_COOKIE_SECURE` env var (already-resolved). */
-  readonly envCookieSecure?: boolean | undefined;
-}): AuthConfig => {
-  const apiToken =
-    trimOrNull(input.envToken) ??
-    trimOrNull(input.cliToken) ??
-    trimOrNull(input.yamlToken) ??
-    null;
-  const bind: BindAddress =
-    input.cliHost !== undefined && isLoopbackHost(input.cliHost)
-      ? (input.cliHost as BindAddress)
-      : input.yamlBind ?? "127.0.0.1";
-  const cookieName = input.yamlCookieName ?? DEFAULT_COOKIE_NAME;
-  // Cookie Secure flag. Env > yaml > bind-derived default. Loopback
-  // binds historically omit Secure (browser only sends Secure cookies
-  // over https); a non-loopback bind defaults to Secure.
-  const cookieSecure =
-    input.envCookieSecure ??
-    input.yamlCookieSecure ??
-    !isLoopbackHost(bind);
-  return { apiToken, bind, cookieName, cookieSecure };
-};
+  host === "127.0.0.1" || host === "::1" || host === "localhost";
 
 /**
- * Decide whether bearer auth should be enforced given the resolved
- * config. Mirrors the production wiring in `apps/server/src/index.ts`.
- *
- *   - `bind` is loopback → no auth (OS-isolated).
- *   - `apiToken` is null/empty → no auth.
- *   - otherwise → require bearer (or same-origin cookie).
+ * Resolve the bind host. CLI `--host` wins; fall back to loopback.
+ * The bind is informational — no auth gate depends on it (auth is
+ * gone in v0.2).
  */
-export const buildServerConfig = (auth: AuthConfig): ServerConfig => {
-  const isLoopback = isLoopbackHost(auth.bind);
-  const enforceAuth = !isLoopback && auth.apiToken !== null;
-  return { auth, isLoopback, enforceAuth };
+export const resolveServerConfig = (input: {
+  readonly cliHost?: string | undefined;
+}): ServerConfig => {
+  const bind: BindAddress = isLoopbackHost(input.cliHost ?? "")
+    ? (input.cliHost as BindAddress)
+    : "127.0.0.1";
+  return { bind };
 };

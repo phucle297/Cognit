@@ -1,9 +1,9 @@
 /**
  * apps/server/src/routes/healthz.ts — `GET /healthz` (and `/health`)
  *
- * Returns `200 OK` with a small JSON body. No auth required even
- * when the bearer is enforced on other routes — the load balancer /
- * orchestrator probe must work regardless of token config.
+ * Returns `200 OK` with a small JSON body. The server has no auth,
+ * so this endpoint is always open — the load balancer / orchestrator
+ * probe must work unconditionally.
  *
  * `plan.xml §api line 437` calls this endpoint `/health`; the
  * existing `/healthz` alias is kept for backward compatibility

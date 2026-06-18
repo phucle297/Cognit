@@ -2,8 +2,8 @@
  * apps/dashboard/src/shared/api/api-client.ts — fetch wrapper.
  *
  * FSD layer: shared. Used by every layer above (pages, widgets,
- * features). All requests are same-origin so the browser
- * automatically attaches the `cognit_session` cookie.
+ * features). All requests are same-origin — no auth, no cookies,
+ * no bearer header.
  *
  * Wire format (mirrors apps/server/src/envelope.ts and
  * apps/server/src/api-error.ts):
@@ -97,7 +97,6 @@ export const apiFetch = async <T>(path: string, init: ApiFetchInit = {}): Promis
   try {
     res = await fetch(resolveUrl(path), {
       ...rest,
-      credentials: "include",
       headers: finalHeaders,
       ...(payload !== undefined ? { body: payload } : {}),
     });

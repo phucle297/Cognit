@@ -1,6 +1,6 @@
 # Phase 6.8: Docker Compose deploy
 
-Subtask of phase 6 dashboard epic (Cognit-8ix). Goal: `docker compose up -d` → login + seeded demo visible on dashboard.
+Subtask of phase 6 dashboard epic (Cognit-8ix). Goal: `docker compose up -d` → seeded demo visible on dashboard. Local-only tool — no login.
 
 ## Layout
 
@@ -8,7 +8,7 @@ Subtask of phase 6 dashboard epic (Cognit-8ix). Goal: `docker compose up -d` →
 docker/
   Dockerfile.server        # multi-stage: pnpm install → tsup build → node24 runtime
   Dockerfile.dashboard     # multi-stage: pnpm install → vite build → nginx:alpine
-  nginx.conf               # :6970 → serve dist, /api/* /auth/* /events/* → :6971
+  nginx.conf               # :6970 → serve dist, /api/* /events/* → :6971
   seed-demo.mjs            # cognit init + seed 1 session + 6 entities
 docker-compose.yml         # 2 services: server, dashboard
 ```
@@ -26,10 +26,11 @@ docker-compose.yml         # 2 services: server, dashboard
 
 Routes that exist on server (no `/api/` prefix):
 - `GET  /healthz` `/health`
-- `GET/POST /auth/login`
 - `GET /sessions/:id/state`, `/sessions`, etc.
 - `GET /events/stream` (SSE)
 - `GET/POST /events`, `/knowledge-graph`, `/decision-graph`, `/verification`, `/settings`, `/storage`, `/recovery`
+
+Local-only tool — no `/auth/login` route; the dashboard opens straight to Overview.
 
 Strategy: serve static files from `/usr/share/nginx/html` (built dist). If file missing, proxy to backend. Backend handles SPA fallback for unknown routes that are API calls. For actual SPA navigation (e.g. `/timeline`), nginx falls through to dist → tries `index.html` via SPA fallback.
 
@@ -147,11 +148,10 @@ volumes:
 1. `docker compose up -d` exits 0, both services healthy.
 2. `curl http://localhost:6970/` returns 200 + `<div id="root">` (SPA shell from dist).
 3. `curl http://localhost:6970/healthz` (via nginx proxy) returns 200.
-4. `curl -i -X POST http://localhost:6970/auth/login -d '{"token":"dev-token"}' -H 'content-type: application/json'` returns 200 + Set-Cookie. (Auth uses token, not username/password — verified at apps/server/src/routes/auth.ts:5,79.)
-5. Dashboard `/` (after login) shows Overview with ≥1 session "Demo: HMR memory leak investigation" + ≥6 events.
-6. `docker compose down -v && docker compose up -d` still seeds (idempotent).
-7. README has "Docker" section above "Installation" with 3-line quickstart.
-8. docs/phase-7-results.md written with `docker compose up -d` output excerpt.
+4. Dashboard `/` shows Overview with ≥1 session "Demo: HMR memory leak investigation" + ≥6 events. (Local-only tool — no login required.)
+5. `docker compose down -v && docker compose up -d` still seeds (idempotent).
+6. README has "Docker" section above "Installation" with 3-line quickstart.
+7. docs/phase-7-results.md written with `docker compose up -d` output excerpt.
 
 ## Out of scope
 

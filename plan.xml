@@ -16,6 +16,7 @@
     <principle>Schema versions are explicit. Old events must remain replayable forever.</principle>
     <principle>Privacy is a default, not a feature — redact on ingest, not on read.</principle>
     <principle>No speculative fields. Add columns when a use case appears, not before.</principle>
+    <principle>Local-only tool — no auth, no login, no token, no cookie. The loopback bind is the security boundary. Docker compose binds 0.0.0.0 but never publishes the port to the host.</principle>
   </principles>
 
   <scope>
@@ -32,7 +33,7 @@
 
   <repository_structure>
     <path>apps/server</path>             <!-- Hono HTTP API; read view + minimal write endpoints -->
-    <path>apps/dashboard</path>          <!-- Vite + React; all 7 pages; read-only against server -->
+    <path>apps/dashboard</path>          <!-- Vite + React; all 7 pages (no login page — local-only); read-only against server -->
     <path>packages/core</path>           <!-- Domain types, Effect schemas, event definitions, reducer, redaction; pure logic, no I/O -->
     <path>packages/db</path>             <!-- SQLite + Drizzle; migrations; implements the event store interface from core -->
     <path>packages/cli</path>            <!-- Commander.js; one binary: cognit -->
@@ -74,6 +75,7 @@
       <section name="actors">defaults per type (human|worker|system), per-actor overrides (name, trust_score)</section>
       <section name="inbox">watch (default true), debounce_ms (default 200), atomic_write_required (default true)</section>
     </sections>
+    <note>No `auth:` or `server:` section. Cognit is local-only — there is no token, no cookie, no auth gate. The server binds loopback by default; docker compose overrides the bind host but never publishes the port.</note>
   </config>
 
   <core_entities>

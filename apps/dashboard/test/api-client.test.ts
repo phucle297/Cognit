@@ -4,7 +4,7 @@
  * Tests the FSD shared/api layer by importing from the
  * AC-required path (src/lib/api-client.ts). Cases:
  *  1. URL prefix (relative → resolved)
- *  2. credentials: "include" sent
+ *  2. default accept header sent (no credentials — local-only, no auth)
  *  3. success envelope unwrapped
  *  4. api_error thrown with code+message+request_id
  *  5. network error throws with request_id
@@ -38,7 +38,7 @@ describe("apiFetch", () => {
     expect(calledWith).toBe("/health");
   });
 
-  it("sends credentials: include and default headers", async () => {
+  it("sends default headers without credentials (local-only, no auth)", async () => {
     const spy = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ version: 1, kind: "x", data: {} }), {
         status: 200,
@@ -48,7 +48,8 @@ describe("apiFetch", () => {
     globalThis.fetch = spy as unknown as typeof fetch;
     await apiFetch("/sessions", { method: "GET" });
     const init = spy.mock.calls[0]?.[1] as RequestInit;
-    expect(init.credentials).toBe("include");
+    // Local-only tool: no cookies, no Authorization header.
+    expect(init.credentials).toBeUndefined();
     const headers = init.headers as Record<string, string>;
     expect(headers["accept"]).toBe("application/json");
   });

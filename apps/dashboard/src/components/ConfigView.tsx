@@ -4,9 +4,9 @@
  * FSD layer: components. v0.1 baseline: the runtime config
  * endpoint is not yet exposed (lands in v0.2), so we render a
  * hard-coded SAFE-PREVIEW object instead of fetching the live
- * `cognit.yaml`. The masked api_token is the only "live" thing
- * the operator cares about here — everything else is documented
- * as a v0.2 follow-up.
+ * `cognit.yaml`. Cognit is local-only — no auth, no token — so
+ * the preview shows only what the operator actually owns:
+ * bind host, redaction patterns, actor defaults.
  */
 import type { JSX } from "react";
 import {
@@ -19,10 +19,7 @@ import {
 
 // TODO v0.2: fetch /admin/config and replace the placeholder below.
 const SAFE_PREVIEW = {
-  auth: {
-    bind: "127.0.0.1:6971",
-    api_token: "ck_live_4f2a9b7e",
-  },
+  bind: "127.0.0.1:6971",
   actors: {
     defaults: ["planner", "verifier", "decider"],
   },
@@ -32,12 +29,6 @@ const SAFE_PREVIEW = {
     },
   },
 } as const;
-
-const maskToken = (token: string | undefined): string => {
-  if (!token || token.length === 0) return "(not set)";
-  const head = token.slice(0, 4);
-  return `${head}****`;
-};
 
 export const ConfigView = (): JSX.Element => (
   <Card>
@@ -52,13 +43,11 @@ export const ConfigView = (): JSX.Element => (
     </CardHeader>
     <CardContent className="space-y-4">
       <section className="space-y-1">
-        <h3 className="text-sm font-semibold">auth</h3>
+        <h3 className="text-sm font-semibold">server</h3>
         <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
           <dt className="text-muted-foreground">bind</dt>
-          <dd className="font-mono">{SAFE_PREVIEW.auth.bind}</dd>
-          <dt className="text-muted-foreground">api_token</dt>
-          <dd className="font-mono" data-testid="api-token">
-            {maskToken(SAFE_PREVIEW.auth.api_token)}
+          <dd className="font-mono" data-testid="bind-host">
+            {SAFE_PREVIEW.bind}
           </dd>
         </dl>
       </section>

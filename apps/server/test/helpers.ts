@@ -1,28 +1,19 @@
 /**
  * apps/server/test/helpers.ts — shared test fixtures.
  *
- * Three helpers, used by the five split test files:
+ * Three helpers, used by the split test files:
  *
- *   - `makeApp()` — bare Hono app, no auth. Mirrors the production
- *     boot path (CORS, healthz, sessions, events routes) but with
- *     no auth gate. Used by healthz, sessions, events, and
- *     redaction tests.
+ *   - `makeApp()` — bare Hono app. Mirrors the production boot path
+ *     (CORS, healthz, sessions, events routes). Local-only — no
+ *     auth gate, no cookie, no token.
  *
- *   - `makeAppWithAuth({apiToken, isLoopback})` — same as `makeApp`
- *     plus the same auth gate middleware as `src/index.ts`:
- *     loopback bypass → /health, /healthz, /auth/login exempt →
- *     requireBearer elsewhere (with cookie fallback). Mirrors the
- *     exact production wiring so divergence is impossible.
+ *   - `bootServer({port: 0})` — starts a real HTTP server on an
+ *     OS-assigned port. Returns the URL (e.g. `http://127.0.0.1:51234`)
+ *     plus a `close` callback. Used by the SSE test, which needs a
+ *     real socket to read the `ReadableStream` body.
  *
- *   - `bootServer({port: 0, apiToken?, isLoopback?})` — starts a
- *     real HTTP server on an OS-assigned port. Returns the URL
- *     (e.g. `http://127.0.0.1:51234`) plus a `close` callback. Used
- *     by the SSE test, which needs a real socket to read the
- *     `ReadableStream` body.
- *
- * Each helper also bootstraps one project + one session in the
- * temp DB so tests can use a known `sessionId` without re-running
- * migrations.
+ * Each helper also bootstraps one project + one session in the temp
+ * DB so tests can use a known `sessionId` without re-running migrations.
  */
 import { Hono } from "hono";
 import { serve, type ServerType } from "@hono/node-server";
@@ -44,15 +35,7 @@ import {
   UuidLive,
 } from "@cognit/db";
 import { EventBus, EventBusLive } from "../src/bus.js";
-import { requireBearer } from "../src/auth.js";
-import {
-  resolveAuthConfig,
-  buildServerConfig,
-  type AuthConfig,
-  type BindAddress,
-} from "../src/config.js";
 import { registerHealthz } from "../src/routes/healthz.js";
-import { registerAuthRoutes } from "../src/routes/auth.js";
 import { registerSessionsRoutes, type ServerRuntime } from "../src/routes/sessions.js";
 import { registerEventsRoutes } from "../src/routes/events.js";
 import { registerProjectsRoutes } from "../src/routes/projects.js";
@@ -165,43 +148,26 @@ const buildRuntime = async (
 };
 
 /**
- * Build a Hono app with the same CORS + routes + auth gate as
- * production. `auth` null = no auth (loopback / open); non-null =
- * full gate.
+ * Build a Hono app mirroring the production boot path: CORS,
+ * healthz, sessions, events, projects, edges, verify, actors. No
+ * auth gate (local-only tool).
  */
 const buildHono = (
   runtime: ServerRuntime,
   projectId: string,
-  auth: AuthConfig | null,
 ): Hono => {
   const app = new Hono();
   app.use("*", requestIdMiddleware);
   app.use("*", async (c, next) => {
     c.header("access-control-allow-origin", "*");
-    c.header("access-control-allow-headers", "content-type, authorization, x-request-id");
+    c.header("access-control-allow-headers", "content-type, x-request-id");
     c.header("access-control-allow-methods", "GET,POST,OPTIONS");
     c.header("access-control-expose-headers", "x-request-id");
     await next();
   });
   app.options("*", (c) => c.body(null, 204));
 
-  // Mirror the production auth gate (plan §5.3.4).
-  const cfg = auth === null ? null : buildServerConfig(auth);
-  if (auth !== null && cfg !== null && cfg.enforceAuth) {
-    app.use("*", async (c, next) => {
-      if (
-        c.req.path === "/health" ||
-        c.req.path === "/healthz" ||
-        c.req.path === "/auth/login"
-      ) {
-        return next();
-      }
-      return requireBearer(auth)(c, next);
-    });
-  }
-
   registerHealthz(app);
-  if (auth !== null) registerAuthRoutes(app, auth);
   registerSessionsRoutes(app, { runtime, projectId });
   registerEventsRoutes(app, { runtime, projectId });
   registerProjectsRoutes(app, { runtime });
@@ -225,45 +191,15 @@ const mkTemp = async (): Promise<{ dir: string; dbPath: string; close: () => Pro
 };
 
 /**
- * Bare Hono app, no auth. Returns the app + a server-side handle
- * (`runtime`, `projectId`, `sessionId`, `dbPath`) plus a `close`
- * that removes the temp DB.
+ * Bare Hono app. Returns the app + a server-side handle (`runtime`,
+ * `projectId`, `sessionId`, `dbPath`) plus a `close` that removes
+ * the temp DB.
  */
 export const makeApp = async (): Promise<TestApp> => {
   const tmp = await mkTemp();
   const { runtime, managed, closeRuntime } = await buildRuntime(tmp.dbPath);
   const { projectId, sessionId } = await bootstrap(managed);
-  const app = buildHono(runtime, projectId, null);
-  return {
-    app,
-    runtime,
-    projectId,
-    sessionId,
-    dbPath: tmp.dbPath,
-    close: async () => {
-      await closeRuntime();
-      await tmp.close();
-    },
-  };
-};
-
-/**
- * Hono app with the production auth gate when the bind is
- * non-loopback AND `apiToken` is non-empty. Mirrors `src/index.ts`.
- */
-export const makeAppWithAuth = async (opts: {
-  apiToken: string;
-  isLoopback: boolean;
-}): Promise<TestApp> => {
-  const tmp = await mkTemp();
-  const { runtime, managed, closeRuntime } = await buildRuntime(tmp.dbPath);
-  const { projectId, sessionId } = await bootstrap(managed);
-  const bind: BindAddress = opts.isLoopback ? "127.0.0.1" : "0.0.0.0";
-  const auth = resolveAuthConfig({
-    yamlToken: opts.apiToken,
-    yamlBind: bind,
-  });
-  const app = buildHono(runtime, projectId, auth);
+  const app = buildHono(runtime, projectId);
   return {
     app,
     runtime,
@@ -295,25 +231,14 @@ export interface BootedServer {
  * `Response.body.getReader()` over a real network round-trip in
  * vitest unless there's a listening socket).
  */
-export const bootServer = async (opts: {
-  port?: number;
-  apiToken?: string;
-  isLoopback?: boolean;
-} = {}): Promise<BootedServer> => {
+export const bootServer = async (
+  opts: { port?: number } = {},
+): Promise<BootedServer> => {
   const port = opts.port ?? 0;
-  const isLoopback = opts.isLoopback ?? true;
-  const apiToken = opts.apiToken;
   const tmp = await mkTemp();
   const { runtime, managed, closeRuntime } = await buildRuntime(tmp.dbPath);
   const { projectId, sessionId } = await bootstrap(managed);
-  const auth =
-    apiToken !== undefined
-      ? resolveAuthConfig({
-          yamlToken: apiToken,
-          yamlBind: isLoopback ? "127.0.0.1" : "0.0.0.0",
-        })
-      : null;
-  const app = buildHono(runtime, projectId, auth);
+  const app = buildHono(runtime, projectId);
 
   return new Promise<BootedServer>((resolve, reject) => {
     let server: ServerType | null = null;

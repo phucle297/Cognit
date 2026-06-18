@@ -109,11 +109,10 @@ This file is the source of truth for _what_ the toolchain is. `plan.xml` `<scope
 - **API**: `127.0.0.1:6971` (default; `--host 0.0.0.0` opens LAN bind)
 - **UI (deferred, phase 4)**: `:6970`
 
-**Auth model (phase 3d):**
+**Auth model (v0.2):**
 
-- **Opt-in bearer only.** Default loopback bind is fully open — no token check. The `127.0.0.1` bind is the security boundary for local-first use.
-- Auth activates ONLY when BOTH `server.api_token` is set in `cognit.yaml` AND the bind is non-loopback (`--host 0.0.0.0` or `server.host: 0.0.0.0`). Without the header → 401; with the correct `Authorization: Bearer <token>` → 200.
-- This covers the future "MCP server bound to LAN" case without burdening local dev. Documented in `plans/phase-3.md` 3d section + `apps/server/test/auth-bearer.test.ts`.
+- **None.** Cognit is a local tool. There is no login UI, no API token, no cookie. The server binds loopback by default; docker compose binds `0.0.0.0` but never publishes the port to the host. The loopback boundary is the only security guarantee.
+- Phase 3d shipped opt-in bearer auth for the "bind to LAN" case; it was removed in v0.2 because the only deploy mode is local. See `plan.xml` §principles.
 
 **Runtime gotcha (must-read for contributors):**
 

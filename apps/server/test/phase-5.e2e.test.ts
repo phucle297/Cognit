@@ -1,7 +1,7 @@
 /**
  * apps/server/test/phase-5.e2e.test.ts — phase 5 E2E.
  *
- * 1 E2E case with 13 assertions. Boots a real HTTP server on
+ * 1 E2E case with 11 assertions. Boots a real HTTP server on
  * port 0 (`bootServer`) so the SSE handler's `ReadableStream` body
  * crosses an actual TCP socket, then drives the full phase 5 surface:
  *
@@ -16,11 +16,10 @@
  *   8.  `GET /sessions/:id/state` shows verification entry.
  *   9.  `POST /verify/:id/cancel` → 200, `kind: verification.cancelled`.
  *   10. `GET /sessions/:id/state` shows state: cancelled on the row.
- *   11. Auth branch (separate boot): non-loopback + token, no bearer → 401.
- *   12. Auth branch: same setup, `Authorization: Bearer <token>` → 200.
- *   13. `GET /health` always 200 (auth on or off); `/healthz` same shape.
+ *   11. `GET /health` and `/healthz` always 200 with the v1 envelope.
  *
- * Real boot, real fetch, real SSE. Reads only — no production edits.
+ * Local-only tool — no auth. Real boot, real fetch, real SSE.
+ * Reads only — no production edits.
  *
  * Strategy for assertion 7 (`linked_hypothesis_id`): the verify
  * route writes the FK on `events.linked_hypothesis_id` to the
@@ -41,20 +40,15 @@ import {
 
 describe("cognit server — phase 5 E2E", () => {
   let server: BootedServer | null = null;
-  let authedServer: BootedServer | null = null;
 
   afterEach(async () => {
     if (server) {
       await server.close();
       server = null;
     }
-    if (authedServer) {
-      await authedServer.close();
-      authedServer = null;
-    }
   });
 
-  it("drives the full phase 5 surface end-to-end (13 assertions)", async () => {
+  it("drives the full phase 5 surface end-to-end (11 assertions)", async () => {
     // 1. boot
     server = await bootServer();
     expect(server.url.startsWith("http://127.0.0.1:")).toBe(true);
@@ -241,50 +235,16 @@ describe("cognit server — phase 5 E2E", () => {
         e.parent_verification_id === verificationId,
     );
     expect(cancelledRow).toBeDefined();
-  }, 30_000);
 
-  it("enforces bearer auth on non-loopback and serves /health regardless", async () => {
-    // Boot an auth-off server for the off-branch /health assertions.
-    const openServer = await bootServer();
-    try {
-      // 11. Auth branch: non-loopback + token, no bearer → 401.
-      authedServer = await bootServer({
-        port: 0,
-        apiToken: "secret-token-e2e",
-        isLoopback: false,
-      });
-      const noAuth = await fetch(
-        `${authedServer.url}/sessions/${authedServer.sessionId}/state`,
-      );
-      expect(noAuth.status).toBe(401);
-
-      // 12. Same setup, with `Authorization: Bearer <token>` → 200.
-      const withAuth = await fetch(
-        `${authedServer.url}/sessions/${authedServer.sessionId}/state`,
-        {
-          headers: { authorization: "Bearer secret-token-e2e" },
-        },
-      );
-      expect(withAuth.status).toBe(200);
-
-      // 13. GET /health always 200 (auth on or off); /healthz same shape.
-      const healthOff = await fetch(`${openServer.url}/health`);
-      expect(healthOff.status).toBe(200);
-      const healthzOff = await fetch(`${openServer.url}/healthz`);
-      expect(healthzOff.status).toBe(200);
-
-      const healthOn = await fetch(`${authedServer.url}/health`);
-      expect(healthOn.status).toBe(200);
-      const healthzOn = await fetch(`${authedServer.url}/healthz`);
-      expect(healthzOn.status).toBe(200);
-
-      // Same shape — both return JSON envelopes with kind/version.
-      const healthJson = (await healthOff.json()) as { kind: string; version: number };
-      expect(typeof healthJson.kind).toBe("string");
-      expect(typeof healthJson.version).toBe("number");
-      expect(healthJson.version).toBe(1);
-    } finally {
-      await openServer.close();
-    }
+    // 11. GET /health and /healthz return the v1 envelope (always
+    // open — there is no auth).
+    const health = await fetch(`${server.url}/health`);
+    expect(health.status).toBe(200);
+    const healthz = await fetch(`${server.url}/healthz`);
+    expect(healthz.status).toBe(200);
+    const healthJson = (await health.json()) as { kind: string; version: number };
+    expect(typeof healthJson.kind).toBe("string");
+    expect(typeof healthJson.version).toBe("number");
+    expect(healthJson.version).toBe(1);
   }, 30_000);
 });

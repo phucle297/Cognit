@@ -2,7 +2,6 @@
 #
 #   docker compose up -d
 #   open http://localhost:6970        # dashboard (nginx + Vite dist)
-#   sign in with token "dev-token"    # see apps/server/src/routes/auth.ts
 #
 # Port policy:
 #   - :6970 host-facing only (dashboard via nginx)
@@ -12,6 +11,10 @@
 # Data persists in the `cognit-data` named volume at /data inside the
 # server container (the server's COGNIT_ROOT). To wipe and re-seed:
 #   docker compose down -v && docker compose up -d
+#
+# Local-only tool — no auth, no API token, no cookie. The server
+# binds 0.0.0.0 inside the docker network but the port is never
+# published to the host.
 
 services:
   server:
@@ -24,7 +27,6 @@ services:
       - "6971"                       # internal docker network only
     environment:
       COGNIT_ROOT: /data
-      COGNIT_API_TOKEN: dev-token    # read by apps/server/src/config.ts
       PORT: "6971"
     volumes:
       - cognit-data:/data

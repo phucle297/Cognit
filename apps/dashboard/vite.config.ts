@@ -11,15 +11,13 @@ import path from "node:path";
  *   src/app/      app shell, providers, router
  *   src/pages/    full-page components (route targets)
  *   src/widgets/  composite UI blocks (AppShell, NavBar)
- *   src/features/ user actions (auth/login, etc.)
  *   src/entities/ domain entities (events, sessions, …)
  *   src/shared/   reusable infra: ui kit, lib helpers, config
  *
  * Same-origin dev: `pnpm dev` runs on :5173, but the proxy
- * below forwards every path to the Hono API on :6971. That keeps
- * `EventSource` and cookie auth working during development
- * (EventSource cannot set Authorization headers, so the
- * dashboard MUST be same-origin with the API).
+ * below forwards every path to the Hono API on :6971. SSE clients
+ * (EventSource) need the API on the same origin so the browser
+ * does not block the stream as a cross-origin request.
  */
 export default defineConfig({
   plugins: [react(), tailwindcss()],

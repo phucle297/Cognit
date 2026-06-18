@@ -209,7 +209,8 @@ describe("OverviewPage", () => {
         String(url).endsWith("/projects") && ((init as RequestInit | undefined)?.method ?? "GET") === "POST",
     ) as [string, RequestInit];
     expect(init.method).toBe("POST");
-    expect(init.credentials).toBe("include");
+    // Local-only tool — no cookies, no credentials header.
+    expect(init.credentials).toBeUndefined();
     const body = JSON.parse(init.body as string);
     expect(body.name).toBe("delta");
     expect(body.goal).toBe("explore deltas");

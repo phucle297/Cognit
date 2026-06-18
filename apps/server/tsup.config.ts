@@ -28,7 +28,6 @@ export default defineConfig({
     "better-sqlite3",
     "hono",
     "@hono/node-server",
-    "@hono/cookie",
     "commander",
     "effect",
     "ulid",
