@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --target node24 --clean --dts",
+    "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest --run --passWithNoTests",
     "test:watch": "vitest",
@@ -17,7 +17,8 @@
     "@hono/node-server": "^2.0.4",
     "commander": "12.1.0",
     "effect": "3.21.3",
-    "hono": "^4.12.25"
+    "hono": "^4.12.25",
+    "ulid": "^2.4.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",

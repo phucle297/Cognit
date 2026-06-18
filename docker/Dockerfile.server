@@ -1,0 +1,76 @@
+# docker/Dockerfile.server — Phase 6.8 server image.
+#
+# Multi-stage build:
+#   base    : node24-alpine + pnpm via corepack
+#   deps    : pnpm install --frozen-lockfile (entire workspace; tsup
+#             needs @/core, @/db, @/verification source + build tooling)
+#   build   : pnpm --filter @cognit/server build → apps/server/dist/
+#   runtime : node24-alpine, ships dist/ + the runtime node_modules subset
+#
+# The runtime image does NOT contain the @/db source or tsx. The
+# tsup bundle has @/core, @/db, @/verification inlined.
+
+ARG NODE_VERSION=24-alpine
+ARG PNPM_VERSION=9.15.0
+
+# ── base ──────────────────────────────────────────────────────────
+FROM node:${NODE_VERSION} AS base
+WORKDIR /app
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+
+# ── deps ──────────────────────────────────────────────────────────
+# better-sqlite3 ships prebuilt binaries via prebuild-install, but
+# pnpm triggers node-gyp first when installing from the workspace.
+# Give it a working toolchain so the native binding builds cleanly.
+FROM base AS deps
+RUN apk add --no-cache python3 make g++ libc6-compat
+COPY pnpm-workspace.yaml pnpm-lock.yaml package.json .npmrc ./
+COPY packages packages
+COPY apps apps
+# The root package.json has a `preinstall` that runs `pkill -f
+# 'turbo.*daemon' || true`. It is meant for local dev (kills a stuck
+# turbo daemon between runs); it serves no purpose in a one-shot
+# docker build where pkill is often missing or returns 1 and trips
+# pnpm's strict lifecycle handling. Patch it out before install.
+RUN sed -i 's|"preinstall": "[^"]*"|"preinstall": ""|' package.json
+RUN pnpm install --frozen-lockfile
+
+# ── build ─────────────────────────────────────────────────────────
+FROM deps AS build
+RUN pnpm --filter @cognit/server build
+
+# ── runtime ───────────────────────────────────────────────────────
+FROM node:${NODE_VERSION} AS runtime
+WORKDIR /app
+
+# Copy the entire pnpm-managed node_modules from the build stage.
+# pnpm installs the workspace's *own* devDeps at the root and
+# symlinks per-package deps into `apps/<name>/node_modules/` (the
+# store lives in `node_modules/.pnpm/`). The runtime needs both
+# trees: the seed script + the server bundle both `import` from
+# packages resolved under apps/server/node_modules.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/apps/server/node_modules ./apps/server/node_modules
+
+# Built server bundle (tsup inlines @cognit/{core,db,verification}).
+COPY --from=build /app/apps/server/dist ./apps/server/dist
+# The bundled @cognit/db's migration runner reads
+# `migrations/0002_payload_v1.1.0.sql` relative to the bundle's
+# import.meta.url. tsup inlines the .ts source but does not copy
+# sibling .sql files, so the runtime needs the .sql at the path the
+# inlined code expects.
+COPY --from=build /app/packages/db/src/schema/migrations ./apps/server/dist/migrations
+
+# Seed script (idempotent: skips if 'Demo: HMR memory leak investigation'
+# already exists). Lives next to apps/server/node_modules so the ESM
+# resolver finds better-sqlite3. Run as part of the server's `command:`
+# in docker-compose.yml.
+COPY docker/seed-demo.mjs ./apps/server/seed-demo.mjs
+
+# Default data dir; mount a volume here for persistence.
+RUN mkdir -p /data
+ENV COGNIT_ROOT=/data
+ENV NODE_ENV=production
+ENV PORT=6971
+EXPOSE 6971
+CMD ["node", "apps/server/dist/index.js", "--host", "0.0.0.0", "--port", "6971", "--root", "/data"]

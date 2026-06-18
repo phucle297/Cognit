@@ -1,6 +1,6 @@
-# Phase 7: Docker Compose deploy
+# Phase 6.8: Docker Compose deploy
 
-Goal: `docker compose up -d` → login + seeded demo visible on dashboard.
+Subtask of phase 6 dashboard epic (Cognit-8ix). Goal: `docker compose up -d` → login + seeded demo visible on dashboard.
 
 ## Layout
 
@@ -114,14 +114,14 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.server
-    ports: ["127.0.0.1:6971:6971"]
+    expose: ["6971"]                    # internal docker network only; NOT to host
     volumes: [cognit-data:/app/.cognit]
     environment:
       COGNIT_PORT: 6971
       COGNIT_BIND: 0.0.0.0
     command: ["sh", "-c", "node docker/seed-demo.mjs && node dist/index.js"]
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6971/api/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6971/healthz"]
       interval: 5s
       retries: 10
 
@@ -129,13 +129,18 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.dashboard
-    ports: ["127.0.0.1:6970:6970"]
+    ports: ["127.0.0.1:6970:6970"]      # only host-facing port
     depends_on:
       server: { condition: service_healthy }
 
 volumes:
   cognit-data:
 ```
+
+**Port policy:**
+- `:6970` — only host-facing port (dashboard via nginx).
+- `:6971` — internal docker network only. Host cannot reach backend directly.
+- Non-docker users (running `pnpm dev:server` + `pnpm dev:dashboard`) still get `:6971` exposed for backward compat. Docker is opt-in deploy mode.
 
 ## Acceptance criteria
 

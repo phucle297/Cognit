@@ -383,6 +383,31 @@ Pages:
 
 ---
 
+## Docker
+
+One-line local deploy. The stack is two services: a tsup-built
+server on an internal docker network, and an nginx front-end that
+serves the Vite dashboard on `:6970`.
+
+```bash
+docker compose up -d
+open http://localhost:6970
+# sign in with token "dev-token"
+```
+
+The server's data persists in the `cognit-data` named volume. To
+wipe and re-seed:
+
+```bash
+docker compose down -v && docker compose up -d
+```
+
+Port policy: `:6970` is the only host-facing port; `:6971` stays
+on the internal docker network. Non-docker users
+(`pnpm dev:server` + `pnpm dev:dashboard`) are unaffected.
+
+---
+
 ## Installation
 
 ```bash

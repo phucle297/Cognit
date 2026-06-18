@@ -1,71 +1,56 @@
-# docker-compose.yml — run the full stack with one command.
+# docker-compose.yml — Phase 6.8 one-line local deploy.
 #
-#   docker compose up              # server + persistent volume
-#   docker compose run --rm cli    # one-shot CLI (pass subcommand as args)
-#   docker compose down            # stop
+#   docker compose up -d
+#   open http://localhost:6970        # dashboard (nginx + Vite dist)
+#   sign in with token "dev-token"    # see apps/server/src/routes/auth.ts
+#
+# Port policy:
+#   - :6970 host-facing only (dashboard via nginx)
+#   - :6971 internal docker network only; not exposed to host
+#   - Non-docker users (pnpm dev:server + pnpm dev:dashboard) unaffected
 #
 # Data persists in the `cognit-data` named volume at /data inside the
-# container (the server's COGNIT_ROOT). To inspect the DB from the
-# host, use `docker compose run --rm cli session list`.
+# server container (the server's COGNIT_ROOT). To wipe and re-seed:
+#   docker compose down -v && docker compose up -d
 
 services:
-  init:
-    # One-shot bootstrap. Runs `cognit init` against the persistent
-    # volume before the server starts, so a fresh `docker compose up`
-    # works without a manual init step. Idempotent: if the project
-    # already exists in the volume, exits 0.
-    build:
-      context: .
-      args:
-        APP_NAME: cli
-    image: cognit:cli
-    volumes:
-      - cognit-data:/data
-    environment:
-      COGNIT_ROOT: /data
-    entrypoint: ["cognit-entrypoint"]
-    command: ["init"]
-    restart: "no"
-
   server:
     build:
       context: .
-      args:
-        APP_NAME: server
+      dockerfile: docker/Dockerfile.server
     image: cognit:server
     container_name: cognit-server
-    ports:
-      - "6971:6971"
+    expose:
+      - "6971"                       # internal docker network only
     environment:
       COGNIT_ROOT: /data
+      COGNIT_API_TOKEN: dev-token    # read by apps/server/src/config.ts
       PORT: "6971"
     volumes:
       - cognit-data:/data
-    depends_on:
-      init:
-        condition: service_completed_successfully
-    restart: unless-stopped
+    # seed-demo.mjs runs first; on re-runs the demo session already
+    # exists so it exits 0 in <50ms.
+    command: ["sh", "-c", "node apps/server/seed-demo.mjs && exec node apps/server/dist/index.js --host 0.0.0.0 --port 6971 --root /data"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6971/healthz"]
-      interval: 10s
+      interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
 
-  cli:
-    # One-shot CLI. Use as: `docker compose run --rm cli <subcommand> [args]`
-    # e.g. `docker compose run --rm cli session create "demo"`
-    #      `docker compose run --rm cli observe "hello"`
+  dashboard:
     build:
       context: .
-      args:
-        APP_NAME: cli
-    image: cognit:cli
-    profiles: ["cli"]   # not started by `up`; use `run --rm` instead
-    volumes:
-      - cognit-data:/data
-    environment:
-      COGNIT_ROOT: /data
-    entrypoint: ["cognit-entrypoint"]
+      dockerfile: docker/Dockerfile.dashboard
+    image: cognit:dashboard
+    container_name: cognit-dashboard
+    ports:
+      - "127.0.0.1:6970:6970"         # only host-facing port
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   cognit-data:
