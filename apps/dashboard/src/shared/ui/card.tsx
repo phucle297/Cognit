@@ -4,14 +4,29 @@
  * FSD layer: shared. shadcn copy. Composable sections so a page
  * can render a header / body / footer inside a single card.
  */
+import { cva, type VariantProps } from "class-variance-authority";
 import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "../lib/cn";
 
-export const Card = forwardRef<HTMLDivElement, HTMLAttributes<HTMLDivElement>>(
-  ({ className, ...props }, ref) => (
+const cardVariants = cva("rounded-lg text-card-foreground", {
+  variants: {
+    variant: {
+      default: "border bg-card shadow-[var(--shadow-sm)]",
+      elevated: "border bg-card shadow-[var(--shadow)]",
+      flat: "border bg-card",
+    },
+  },
+  defaultVariants: { variant: "default" },
+});
+
+export type CardProps = HTMLAttributes<HTMLDivElement> &
+  VariantProps<typeof cardVariants>;
+
+export const Card = forwardRef<HTMLDivElement, CardProps>(
+  ({ className, variant, ...props }, ref) => (
     <div
       ref={ref}
-      className={cn("rounded-lg border bg-card text-card-foreground shadow-sm", className)}
+      className={cn(cardVariants({ variant }), className)}
       {...props}
     />
   ),
