@@ -31,7 +31,15 @@ import type { EventRow, SessionRow, SnapshotRow } from "./schema/rows";
 import { Uuid } from "./ulid";
 import { reduce } from "@cognit/core/reducer";
 import { ConstraintPolicy } from "./constraint-policy";
-import { evalRules, type CandidateEvent } from "./constraint-engine";
+import {
+  CONSTRAINT_ENGINE_ACTOR_NAME,
+  TRANSFORM_TRIGGER_TYPES,
+  evalRules,
+  evalTransformRules,
+  type CandidateEvent,
+  type ConstraintActionDedup,
+  type EmitConstraintEvent,
+} from "./constraint-engine";
 import { emptySessionState, type SessionState } from "@cognit/core/state";
 import { SnapshotService } from "./snapshot-service";
 import { SessionPolicy } from "./session-policy";
@@ -419,12 +427,134 @@ export const SessionServiceLive: Layer.Layer<
      * fans out to subscribers here, exactly once. Bus errors are
      * ignored — the bus is observability, the event log is the
      * system of record. Callers MUST NOT publish in parallel.
+     *
+     * Phase 8 v0.2 (Cognit-8g.3): after a successful append, runs the
+     * post-append constraint transformer when the trigger event type is
+     * in {experiment_completed, verification_failed}. Emitted events
+     * are inserted via `store.append` directly (NOT via a recursive
+     * `service.appendEvent` call) — this keeps the emit path out of
+     * the pre-append rule check AND prevents the public chokepoint
+     * from re-entering the transformer for the emitted event. The
+     * payload flag `__constraint_emitted = true` is the loop guard
+     * carried by every emitted event (also belt-and-braces against
+     * any future code path that calls `evalTransformRules` directly).
      */
     const _appendAndMaybeSnapshot = (
       input: AppendEventInput,
     ): Effect.Effect<SessionAppendEventResult, SessionError> =>
       Effect.gen(function* () {
         const event = yield* store.append(input);
+
+        // Post-append transformer (Cognit-8g.3). Only runs on the
+        // trigger event types; other event types fall through to
+        // the snapshot/bus path unchanged. The transformer re-folds
+        // state via `_show` because the just-appended event is
+        // materialised in the log but not in any cached state.
+        if (
+          TRANSFORM_TRIGGER_TYPES.has(event.type) &&
+          input.type !== "constraint_rule_added" &&
+          input.type !== "constraint_rule_applied"
+        ) {
+          const rules = yield* constraintPolicy.loadRules(event.session_id);
+          if (rules.length > 0) {
+            const post = yield* _show(event.session_id).pipe(
+              Effect.mapError(
+                (e) =>
+                  new DbError({
+                    message: "appendEvent: post-transform state fetch",
+                    cause: e,
+                  }),
+              ),
+            );
+            // Dedup backed by the SQLite table. INSERT OR IGNORE;
+            // `changes()` returns 1 on insert, 0 on duplicate.
+            const dedup: ConstraintActionDedup = {
+              insertIfNew: (key) => {
+                const res = conn.handle.run(
+                  `INSERT OR IGNORE INTO constraint_action_log
+                     (event_id, rule_id, action_type, fired_at)
+                     VALUES (?, ?, ?, ?)`,
+                  [key.eventId, key.ruleId, key.actionType, key.firedAt],
+                );
+                return res.changes > 0;
+              },
+            };
+            // Emit goes straight to the EventStore, NOT through
+            // `service.appendEvent`. This avoids re-entering the
+            // pre-append rule check on emitted events AND keeps the
+            // emit path free of the public chokepoint's contract.
+            // The `__constraint_emitted` payload flag plus the
+            // dedup table together guarantee no infinite recursion.
+            //
+            // The transformer expects `emit: EmitConstraintEvent`
+            // which has error channel `never`. We satisfy that by
+            // catching every EventStore error here and returning a
+            // synthetic `null` row — the transformer treats the
+            // returned row as opaque (it does not inspect the value),
+            // and the outer pipeline logs the swallowed error so the
+            // operator can investigate without losing the original
+            // append.
+            const emit: EmitConstraintEvent = ({ type, payload }) =>
+              store
+                .append({
+                  sessionId: event.session_id,
+                  type,
+                  payload,
+                  actor: {
+                    name: CONSTRAINT_ENGINE_ACTOR_NAME,
+                    type: "system",
+                  },
+                  causationId: event.id,
+                  // EventRow.correlation_id is nullable; the
+                  // chokepoint's input field is non-nullable, so
+                  // forward only when present.
+                  ...(event.correlation_id !== null
+                    ? { correlationId: event.correlation_id }
+                    : {}),
+                })
+                .pipe(
+                  Effect.tapError((e) =>
+                    logger.log(
+                      "warning",
+                      { sessionId: event.session_id, type, error: String(e) },
+                      "constraint transformer: emit insert failed (continuing)",
+                    ),
+                  ),
+                  Effect.orElseSucceed(() => null as unknown as EventRow),
+                ) as unknown as Effect.Effect<unknown, never>;
+            // The transformer's emit path is wrapped to swallow
+            // errors via `Effect.orElseSucceed` (see emit above) so
+            // the transformer's typed error channel is `never`. The
+            // trigger event row is already persisted; a transformer
+            // failure to emit a follow-up mutation is logged inside
+            // `emit` and the append still succeeds.
+            yield* evalTransformRules(
+              {
+                id: event.id,
+                type: event.type,
+                payload: (() => {
+                  try {
+                    return JSON.parse(event.payload_json) as Record<string, unknown>;
+                  } catch {
+                    return {};
+                  }
+                })(),
+              },
+              post.state,
+              rules,
+              dedup,
+              emit,
+              // Sync ULID factory. The transformer only calls
+              // this for `promote_hypothesis` (to synthesise a
+              // theory id); the live `Uuid.make` is a sync
+              // `Effect.sync` under the hood, so we run it
+              // synchronously. If `Uuid.make` ever becomes truly
+              // async, the transformer needs a typed upgrade.
+              () => Effect.runSync(uuid.make()) as string,
+            );
+          }
+        }
+
         const row = yield* trySync(
           () =>
             conn.handle.get<{ c: number }>(
