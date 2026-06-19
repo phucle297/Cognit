@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 2.5d. Auto-snapshot tests (unit + e2e)
+search: Strip auth + login (local app, no auth needed)
 queue: 
-next: 
+next: Cognit-7r.0
