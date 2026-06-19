@@ -1,13 +1,11 @@
 /**
- * apps/dashboard/test/Overview.test.tsx
+ * apps/dashboard/test/Overview.test.tsx — redesigned page tests.
  *
- * FSD: tests the pages/overview page by importing from the
- * AC-required path (src/pages/overview.tsx). Cases:
- *  1. empty state when /projects returns { projects: [] }
- *  2. renders 3 ProjectCard elements when /projects returns 3
- *  3. clicking a ProjectCard calls useNavigate with /timeline?session=<first>
- *  4. opening dialog, typing a name, clicking submit POSTs
- *     { name, goal? } to /projects
+ * Cases:
+ *  1. EmptyState when no sessions
+ *  2. Renders 3 StatCards + DataTable of sessions
+ *  3. Clicking a session goal navigates to /timeline?session=…
+ *  4. Shows the project name as the h2 in the header
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -18,10 +16,7 @@ import { OverviewPage } from "@/pages/overview";
 const mockNavigate = vi.fn();
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
-  return {
-    ...actual,
-    useNavigate: (): typeof mockNavigate => mockNavigate,
-  };
+  return { ...actual, useNavigate: (): typeof mockNavigate => mockNavigate };
 });
 
 const renderOverview = (): ReturnType<typeof render> =>
@@ -31,54 +26,16 @@ const renderOverview = (): ReturnType<typeof render> =>
     </MemoryRouter>,
   );
 
-/**
- * The api-client unwraps the v1 envelope and returns the inner
- * `data` field. Tests mock globalThis.fetch with Response bodies
- * that match that envelope shape.
- */
+const envelope = (data: unknown): string =>
+  JSON.stringify({ version: 1, kind: "test", data });
+
 const jsonResponse = (data: unknown, status = 200): Response =>
-  new Response(JSON.stringify({ version: 1, kind: "test", data }), {
+  new Response(envelope(data), {
     status,
     headers: { "content-type": "application/json" },
   });
 
-const emptyProjectsResp = { projects: [] };
-
-const threeProjectsResp = {
-  projects: [
-    { id: "01proj1", name: "alpha" },
-    { id: "01proj2", name: "beta", goal: "study cognition loops" },
-    { id: "01proj3", name: "gamma" },
-  ],
-};
-
-const sessionsResp = {
-  sessions: [
-    {
-      id: "01sess-a",
-      project_id: "01proj1",
-      goal: "first session for alpha",
-      status: "active",
-      created_at: "2026-06-17T10:00:00.000Z",
-    },
-    {
-      id: "01sess-b",
-      project_id: "01proj1",
-      goal: "second session for alpha",
-      status: "closed",
-      created_at: "2026-06-17T11:00:00.000Z",
-    },
-    {
-      id: "01sess-c",
-      project_id: "01proj2",
-      goal: "beta session",
-      status: "paused",
-      created_at: "2026-06-17T12:00:00.000Z",
-    },
-  ],
-};
-
-describe("OverviewPage", () => {
+describe("OverviewPage (6.8.2.P4)", () => {
   const originalFetch = globalThis.fetch;
   beforeEach(() => {
     mockNavigate.mockReset();
@@ -88,131 +45,101 @@ describe("OverviewPage", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the empty state when /projects returns no projects", async () => {
-    const spy = vi.fn().mockImplementation((url: string) => {
+  it("renders EmptyState when no sessions", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (String(url).endsWith("/projects")) {
-        return Promise.resolve(jsonResponse(emptyProjectsResp));
+        return Promise.resolve(jsonResponse({ projects: [{ id: "01p", name: "demo" }] }));
       }
       if (String(url).endsWith("/sessions")) {
         return Promise.resolve(jsonResponse({ sessions: [] }));
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
-    });
-    globalThis.fetch = spy as unknown as typeof fetch;
+    }) as unknown as typeof fetch;
 
     renderOverview();
 
+    expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
     expect(
-      await screen.findByText(/no projects yet/i),
+      await screen.findByText(/no sessions yet/i),
     ).toBeInTheDocument();
-    expect(
-      await screen.findByText(/create your first project/i),
-    ).toBeInTheDocument();
-    expect(screen.queryAllByTestId("project-card")).toHaveLength(0);
+    expect(screen.getByTestId("overview-stats")).toBeInTheDocument();
   });
 
-  it("renders one ProjectCard per project when /projects returns 3", async () => {
-    const spy = vi.fn().mockImplementation((url: string) => {
+  it("renders 3 StatCards + DataTable of sessions", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (String(url).endsWith("/projects")) {
-        return Promise.resolve(jsonResponse(threeProjectsResp));
+        return Promise.resolve(jsonResponse({ projects: [{ id: "01p", name: "alpha" }] }));
       }
       if (String(url).endsWith("/sessions")) {
-        return Promise.resolve(jsonResponse(sessionsResp));
+        return Promise.resolve(
+          jsonResponse({
+            sessions: [
+              { id: "01s-a", project_id: "01p", goal: "first", status: "active", created_at: "2026-06-17T10:00:00.000Z" },
+              { id: "01s-b", project_id: "01p", goal: "second", status: "paused", created_at: "2026-06-17T11:00:00.000Z" },
+              { id: "01s-c", project_id: "01p", goal: "third", status: "closed", created_at: "2026-06-17T12:00:00.000Z" },
+            ],
+          }),
+        );
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
-    });
-    globalThis.fetch = spy as unknown as typeof fetch;
+    }) as unknown as typeof fetch;
 
     renderOverview();
 
-    const cards = await screen.findAllByTestId("project-card");
-    expect(cards).toHaveLength(3);
+    expect(await screen.findByTestId("overview-page")).toBeInTheDocument();
+    const stats = await screen.findByTestId("overview-stats");
+    expect(stats).toBeInTheDocument();
+    expect(screen.getByText("Sessions")).toBeInTheDocument();
+    expect(screen.getByText("Events this week")).toBeInTheDocument();
+    expect(screen.getByText("Open Decisions")).toBeInTheDocument();
     expect(screen.getByText("alpha")).toBeInTheDocument();
-    expect(screen.getByText("beta")).toBeInTheDocument();
-    expect(screen.getByText("gamma")).toBeInTheDocument();
+    expect(screen.getByText("first")).toBeInTheDocument();
   });
 
-  it("clicking a ProjectCard navigates to /timeline?session=<first-session-id>", async () => {
-    const spy = vi.fn().mockImplementation((url: string) => {
+  it("clicking a session goal navigates to /timeline?session=…", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (String(url).endsWith("/projects")) {
-        return Promise.resolve(jsonResponse(threeProjectsResp));
+        return Promise.resolve(jsonResponse({ projects: [{ id: "01p", name: "alpha" }] }));
       }
       if (String(url).endsWith("/sessions")) {
-        return Promise.resolve(jsonResponse(sessionsResp));
+        return Promise.resolve(
+          jsonResponse({
+            sessions: [
+              { id: "01s-a", project_id: "01p", goal: "first", status: "active", created_at: "2026-06-17T10:00:00.000Z" },
+            ],
+          }),
+        );
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
-    });
-    globalThis.fetch = spy as unknown as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const user = userEvent.setup();
     renderOverview();
 
-    const cards = await screen.findAllByTestId("project-card");
-    // alpha's most recent session (newest created_at) is "01sess-b".
-    const alphaCard = cards.find((c) => c.getAttribute("data-project-id") === "01proj1")!;
-    await user.click(alphaCard);
+    const goal = await screen.findByTestId("overview-session-goal");
+    await user.click(goal);
 
     await waitFor(() =>
-      expect(mockNavigate).toHaveBeenCalledWith("/timeline?session=01sess-b"),
+      expect(mockNavigate).toHaveBeenCalledWith("/timeline?session=01s-a"),
     );
   });
 
-  it("submitting the New project dialog POSTs { name, goal? } to /projects", async () => {
-    const spy = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-      const u = String(url);
-      if (u.endsWith("/projects") && (init?.method ?? "GET") === "POST") {
+  it("shows the project name as the h2 in the header", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/projects")) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              version: 1,
-              kind: "project.created",
-              data: { project: { id: "01proj-new", name: "delta" } },
-            }),
-            { status: 201, headers: { "content-type": "application/json" } },
-          ),
+          jsonResponse({ projects: [{ id: "01p", name: "cognit-demo" }] }),
         );
       }
-      if (u.endsWith("/projects")) {
-        return Promise.resolve(jsonResponse(threeProjectsResp));
+      if (String(url).endsWith("/sessions")) {
+        return Promise.resolve(jsonResponse({ sessions: [] }));
       }
-      if (u.endsWith("/sessions")) {
-        return Promise.resolve(jsonResponse(sessionsResp));
-      }
-      return Promise.reject(new Error(`unexpected fetch: ${u}`));
-    });
-    globalThis.fetch = spy as unknown as typeof fetch;
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    }) as unknown as typeof fetch;
 
-    const user = userEvent.setup();
     renderOverview();
 
-    // Open the dialog via the header button (use the heading to
-    // disambiguate from the empty-state button, which isn't shown
-    // here because we have 3 projects).
-    await user.click(screen.getByRole("button", { name: /new project/i }));
-
-    const nameInput = await screen.findByLabelText(/^name$/i);
-    const goalInput = screen.getByLabelText(/^goal/i);
-    await user.type(nameInput, "delta");
-    await user.type(goalInput, "explore deltas");
-
-    await user.click(screen.getByRole("button", { name: /create project/i }));
-
-    await waitFor(() => {
-      const postCall = spy.mock.calls.find(
-        ([url, init]) =>
-          String(url).endsWith("/projects") && ((init as RequestInit | undefined)?.method ?? "GET") === "POST",
-      );
-      expect(postCall).toBeDefined();
-    });
-    const [, init] = spy.mock.calls.find(
-      ([url, init]) =>
-        String(url).endsWith("/projects") && ((init as RequestInit | undefined)?.method ?? "GET") === "POST",
-    ) as [string, RequestInit];
-    expect(init.method).toBe("POST");
-    // Local-only tool — no cookies, no credentials header.
-    expect(init.credentials).toBeUndefined();
-    const body = JSON.parse(init.body as string);
-    expect(body.name).toBe("delta");
-    expect(body.goal).toBe("explore deltas");
+    const h2 = await screen.findByTestId("overview-project-name");
+    expect(h2).toHaveTextContent("cognit-demo");
   });
 });

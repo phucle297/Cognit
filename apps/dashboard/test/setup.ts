@@ -1,11 +1,35 @@
 /**
  * apps/dashboard/test/setup.ts — vitest global setup.
  *
- * Loads @testing-library/jest-dom matchers and stubs out
+ * Loads @testing-library/jest-dom matchers, polyfills the
+ * browser APIs that jsdom does not implement (ResizeObserver,
+ * Element.prototype.scrollIntoView, etc.), and stubs out
  * EventSource globally so tests that don't use the SSE hook
  * don't need to import it themselves.
  */
 import "@testing-library/jest-dom/vitest";
+
+// jsdom polyfills — xyflow/react + Radix Select rely on
+// browser APIs jsdom 25 does not implement.
+if (typeof globalThis.ResizeObserver === "undefined") {
+  class ResizeObserverStub {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  (globalThis as Record<string, unknown>).ResizeObserver = ResizeObserverStub;
+}
+if (typeof Element !== "undefined") {
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = (): boolean => false;
+  }
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = (): void => undefined;
+  }
+  if (!Element.prototype.releasePointerCapture) {
+    Element.prototype.releasePointerCapture = (): void => undefined;
+  }
+}
 
 type Listener = (ev: Event) => void;
 

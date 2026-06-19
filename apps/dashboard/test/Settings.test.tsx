@@ -1,26 +1,17 @@
 /**
- * apps/dashboard/test/Settings.test.tsx
+ * apps/dashboard/test/Settings.test.tsx — redesigned page tests.
  *
- * FSD: tests the pages/settings page by importing from the
- * AC-required path (src/pages/settings.tsx). Cases:
- *  1. Config tab renders the local bind host preview
- *  2. Storage tab renders sessions count "1" and events count "0"
- *     when /sessions returns 1 session and /events returns empty
+ * Cases:
+ *  1. Renders sectioned Cards (Server, Project, Display)
+ *  2. Save Button is disabled until dirty
+ *  3. Editing Server.bind enables Save
+ *  4. Saved indicator appears after save
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SettingsPage } from "@/pages/settings";
-
-const mockNavigate = vi.fn();
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
-  return {
-    ...actual,
-    useNavigate: (): typeof mockNavigate => mockNavigate,
-  };
-});
 
 const renderSettings = (): ReturnType<typeof render> =>
   render(
@@ -29,81 +20,85 @@ const renderSettings = (): ReturnType<typeof render> =>
     </MemoryRouter>,
   );
 
-/**
- * The api-client unwraps the v1 envelope and returns the inner
- * `data` field. Tests mock globalThis.fetch with Response bodies
- * that match that envelope shape.
- */
-const jsonResponse = (data: unknown, status = 200): Response =>
-  new Response(JSON.stringify({ version: 1, kind: "test", data }), {
-    status,
-    headers: { "content-type": "application/json" },
-  });
+const envelope = (data: unknown): string =>
+  JSON.stringify({ version: 1, kind: "test", data });
 
-describe("SettingsPage", () => {
-  const originalFetch = globalThis.fetch;
+describe("SettingsPage (6.8.2.P4)", () => {
   beforeEach(() => {
-    mockNavigate.mockReset();
+    window.localStorage.clear();
   });
   afterEach(() => {
-    globalThis.fetch = originalFetch;
+    window.localStorage.clear();
     vi.restoreAllMocks();
   });
 
-  it("renders the Config tab with the local bind host preview", async () => {
-    // Config tab does not fetch anything in v0.1 — placeholder
-    // SAFE-PREVIEW object is hard-coded inside the component.
-    const spy = vi.fn().mockImplementation(() =>
-      Promise.reject(new Error("unexpected fetch on Config tab")),
-    );
-    globalThis.fetch = spy as unknown as typeof fetch;
+  it("renders 3 sectioned Cards (Server, Project, Display)", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/projects")) {
+        return Promise.resolve(
+          new Response(envelope({ projects: [{ id: "01p", name: "cognit-demo" }] }), { status: 200 }),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    }) as unknown as typeof fetch;
 
     renderSettings();
-
-    // The Config tab is the default tab; the bind host preview
-    // must be present in the read-only view.
-    expect(await screen.findByTestId("bind-host")).toBeInTheDocument();
+    expect(await screen.findByTestId("settings-server")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-project")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-display")).toBeInTheDocument();
   });
 
-  it("renders the Storage tab with sessions count 1 and events count 0", async () => {
-    const oneSessionResp = {
-      sessions: [
-        {
-          id: "01sess-x",
-          project_id: "01proj-x",
-          goal: "lonely session",
-          status: "active",
-          created_at: "2026-06-17T10:00:00.000Z",
-        },
-      ],
-    };
-    const emptyEventsResp = { events: [] };
+  it("Save Button is disabled until dirty", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/projects")) {
+        return Promise.resolve(new Response(envelope({ projects: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    }) as unknown as typeof fetch;
 
-    const spy = vi.fn().mockImplementation((url: string) => {
-      const u = String(url);
-      if (u.endsWith("/sessions") && !u.includes("/recovery")) {
-        return Promise.resolve(jsonResponse(oneSessionResp));
+    renderSettings();
+    const save = await screen.findByTestId("settings-save");
+    expect(save).toBeDisabled();
+  });
+
+  it("editing Server.bind enables Save", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/projects")) {
+        return Promise.resolve(new Response(envelope({ projects: [] }), { status: 200 }));
       }
-      if (u.includes("/events")) {
-        return Promise.resolve(jsonResponse(emptyEventsResp));
-      }
-      return Promise.reject(new Error(`unexpected fetch: ${u}`));
-    });
-    globalThis.fetch = spy as unknown as typeof fetch;
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    }) as unknown as typeof fetch;
 
     const user = userEvent.setup();
     renderSettings();
+    const bindInput = await screen.findByTestId("settings-server-bind");
+    await user.clear(bindInput);
+    await user.type(bindInput, "0.0.0.0");
 
-    await user.click(screen.getByRole("tab", { name: /storage/i }));
-
-    // Wait for the fetch round-trip: /sessions then /events?session_id=<id>.
     await waitFor(() => {
-      expect(spy).toHaveBeenCalled();
+      expect(screen.getByTestId("settings-save")).not.toBeDisabled();
     });
+  });
 
-    // Sessions count: 1, Events count: 0. Use data-testids to
-    // disambiguate from the artifacts card which also renders a 0.
-    expect(await screen.findByTestId("sessions-count")).toHaveTextContent("1");
-    expect(await screen.findByTestId("events-count")).toHaveTextContent("0");
+  it("Save shows the Saved indicator and persists to localStorage", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).endsWith("/projects")) {
+        return Promise.resolve(new Response(envelope({ projects: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    }) as unknown as typeof fetch;
+
+    const user = userEvent.setup();
+    renderSettings();
+    const bindInput = await screen.findByTestId("settings-server-bind");
+    await user.clear(bindInput);
+    await user.type(bindInput, "10.0.0.1");
+    const save = await screen.findByTestId("settings-save");
+    await user.click(save);
+
+    expect(await screen.findByTestId("settings-saved")).toBeInTheDocument();
+    const stored = window.localStorage.getItem("cognit.settings.v1");
+    expect(stored).not.toBeNull();
+    expect(JSON.parse(stored!).server.bind).toBe("10.0.0.1");
   });
 });
