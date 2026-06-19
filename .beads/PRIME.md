@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Strip auth + login (local app, no auth needed)
+search: 2.5d. Auto-snapshot tests (unit + e2e)
 queue: 
-next: Cognit-8ix.9.4
+next: 
