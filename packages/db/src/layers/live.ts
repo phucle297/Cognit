@@ -10,6 +10,7 @@ import { SessionService, SessionServiceLive } from "../session-service";
 import { SessionPolicy, SessionPolicyDefault } from "../session-policy";
 import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
 import { VerificationQueries, VerificationQueriesLive } from "../verification-queries";
+import { GravityQueries, GravityQueriesLive } from "../gravity";
 import { CognitionService, CognitionServiceLive } from "../cognition-service";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../constraint-policy";
 import { DbSize, DbSizeLive } from "../db-size";
@@ -76,7 +77,8 @@ export const DbLive = (
   | ConstraintPolicy
   | DbSize
   | ArtifactRepo
-  | VerificationQueries,
+  | VerificationQueries
+  | GravityQueries,
   DbError | DbCorrupted,
   never
 > => {
@@ -103,6 +105,9 @@ export const DbLive = (
   const snapshots = Layer.provide(SnapshotServiceLive, Layer.merge(localLeafs, dbConn));
   // VerificationQueries is read-only and only needs DbConnection.
   const verificationQueries = Layer.provide(VerificationQueriesLive, dbConn);
+  // GravityQueries (phase 8) — read-only contributingActors selector
+  // + gravity_fired_at row reader. Only needs DbConnection.
+  const gravityQueries = Layer.provide(GravityQueriesLive, dbConn);
   // ProjectService needs DbConnection + Uuid + Logger.
   const projects = Layer.provide(ProjectServiceLive, Layer.merge(localLeafs, dbConn));
   // DbSize and ArtifactRepo are storage helpers used by the gc CLI
@@ -150,6 +155,7 @@ export const DbLive = (
     dbSize,
     artifactRepo,
     verificationQueries,
+    gravityQueries,
   );
   // Provide the SessionPolicy + dbConn internally so the R channel
   // stays `never`, AND keep their outputs in the result so callers
@@ -168,7 +174,8 @@ export const DbLive = (
     | ConstraintPolicy
     | DbSize
     | ArtifactRepo
-    | VerificationQueries,
+    | VerificationQueries
+    | GravityQueries,
     DbError | DbCorrupted,
     never
   >;

@@ -142,12 +142,30 @@ export const formatRecoveryText = (
     lines.push(`\nlast_known_state: ${goal ? truncate(goal, 80) : "(no goal)"}  ${counts.join("  ")}`);
   }
 
-  // suggested_next_steps
+  // suggested_next_steps — phase 8 (8g.4): each entry has shape
+  // `{id, text, score}`. Render id + score + text per item; show
+  // an empty-state message when the array is empty so the
+  // operator knows the gravity engine produced nothing.
   const steps = Array.isArray(recovery["suggested_next_steps"])
     ? (recovery["suggested_next_steps"] as ReadonlyArray<unknown>)
     : [];
   lines.push(`\nsuggested_next_steps (${steps.length}):`);
-  for (const step of steps.slice(0, 10)) lines.push(`  - ${JSON.stringify(step)}`);
+  if (steps.length === 0) {
+    lines.push("  (no active hypotheses to rank)");
+  } else {
+    for (const step of steps.slice(0, 10)) {
+      if (step !== null && typeof step === "object") {
+        const s = step as Record<string, unknown>;
+        const id = typeof s["id"] === "string" ? (s["id"] as string) : "";
+        const text = typeof s["text"] === "string" ? (s["text"] as string) : "";
+        const score =
+          typeof s["score"] === "number" ? (s["score"] as number).toFixed(3) : "-";
+        lines.push(`  - ${id}  score=${score}  ${truncate(text, 80)}`);
+      } else {
+        lines.push(`  - ${JSON.stringify(step)}`);
+      }
+    }
+  }
 
   return lines.join("\n") + "\n";
 };

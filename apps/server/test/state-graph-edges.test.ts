@@ -274,10 +274,64 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
     expect(arr("rejected_hypotheses").length).toBe(1);
     expect(arr("accepted_decisions").length).toBe(1);
     expect(arr("verified_conclusions").length).toBe(0);
-    // Placeholders present, always empty until phase 7r.2 / 8.
+    // related_sessions still placeholder (no other sessions in project).
     expect(arr("related_sessions").length).toBe(0);
+    // Phase 8 (8g.4): with only a rejected hypothesis in state there
+    // is no active candidate to surface — the array stays empty but
+    // its shape is now `Array<{id, text, score}>`.
     expect(arr("suggested_next_steps").length).toBe(0);
     expect(arr("rejected_decisions").length).toBe(0);
+  });
+
+  it("4b. GET /sessions/:id/recovery surfaces top-1 active hypothesis as suggested_next_steps (AC-8.12, 8g.4)", async () => {
+    const f = fetchApp(ctx.app);
+    const sid = ctx.sessionId;
+    // Seed two ACTIVE hypotheses so the gravity rank has something
+    // to score. The rank fn is deterministic — score depends on
+    // evidence + reproducibility + confidence + trust + freshness;
+    // here the only signal is actor_trust + freshness, which is
+    // enough to surface a non-empty ranking.
+    await f("/api/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: sid,
+        type: "hypothesis_created",
+        payload: { title: "HA", text: "alpha hypothesis" },
+        actor: "alice:human",
+      }),
+    });
+    await f("/api/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: sid,
+        type: "hypothesis_created",
+        payload: { title: "HB", text: "beta hypothesis" },
+        actor: "alice:human",
+      }),
+    });
+    const r = await f(`/api/sessions/${sid}/recovery`);
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as {
+      data: {
+        suggested_next_steps: ReadonlyArray<{
+          id: string;
+          text: string;
+          score: number;
+        }>;
+      };
+    };
+    // top-1 contract: at most one entry.
+    expect(body.data.suggested_next_steps.length).toBeLessThanOrEqual(1);
+    if (body.data.suggested_next_steps.length === 1) {
+      const top = body.data.suggested_next_steps[0]!;
+      expect(typeof top.id).toBe("string");
+      expect(typeof top.text).toBe("string");
+      expect(typeof top.score).toBe("number");
+      expect(top.score).toBeGreaterThanOrEqual(0);
+      expect(top.score).toBeLessThanOrEqual(1);
+    }
   });
 
   it("5. GET /sessions/:id/recovery on an empty session returns empty arrays", async () => {

@@ -28,6 +28,10 @@ const RecoveryCenterPage = lazy(() =>
   import("@/pages/recovery-center").then((m) => ({ default: m.RecoveryCenterPage })),
 );
 
+const RulesPage = lazy(() =>
+  import("@/pages/rules").then((m) => ({ default: m.RulesPage })),
+);
+
 const lazyFallback = (
   <div className="flex flex-col gap-3 p-6" data-testid="route-suspense-fallback">
     <Skeleton className="h-10 w-64" />
@@ -48,6 +52,7 @@ export const router = createBrowserRouter(
         { path: "/decision-graph", element: <DecisionGraphPage /> },
         { path: "/verification", element: <VerificationPage /> },
         { path: "/recovery-center", element: withSuspense(<RecoveryCenterPage />) },
+        { path: "/rules", element: withSuspense(<RulesPage />) },
         { path: "/settings", element: <SettingsPage /> },
         { path: "*", element: <Navigate to="/" replace /> },
       ],

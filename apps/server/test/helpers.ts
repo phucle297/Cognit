@@ -25,6 +25,7 @@ import {
   DbConnection,
   DbLive,
   EventStore,
+  GravityQueries,
   Logger,
   LoggerNoop,
   ProjectService,
@@ -32,6 +33,7 @@ import {
   SessionService,
   SnapshotService,
   ConstraintPolicy,
+  VerificationQueries,
   Uuid,
   UuidLive,
 } from "@cognit/db";
@@ -44,6 +46,7 @@ import { registerEdgesRoutes } from "../src/routes/edges.js";
 import { registerVerifyRoutes } from "../src/routes/verify.js";
 import { registerActorsRoutes } from "../src/routes/actors.js";
 import { registerSearchRoutes } from "../src/routes/search.js";
+import { registerRulesRoutes } from "../src/routes/rules.js";
 import { requestIdMiddleware } from "../src/api-error.js";
 
 /** All Context tags the test runtime provides. Mirrors `src/index.ts`. */
@@ -54,6 +57,8 @@ type TestContext =
   | SnapshotService
   | ProjectService
   | ConstraintPolicy
+  | VerificationQueries
+  | GravityQueries
   | EventBus
   | Logger
   | Uuid;
@@ -181,6 +186,7 @@ const buildHono = (
   registerEdgesRoutes(app, { runtime, projectId });
   registerVerifyRoutes(app, { runtime, projectId });
   registerActorsRoutes(app, { runtime, projectId });
+  registerRulesRoutes(app, { runtime, projectId });
   return app;
 };
 

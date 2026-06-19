@@ -26,5 +26,6 @@ export {
   type RejectedDecision,
   type RejectedHypothesis,
   type RelatedSession,
+  type SuggestedNextStep,
   type VerifiedConclusion,
 } from "./recovery.js";

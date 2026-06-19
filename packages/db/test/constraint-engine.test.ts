@@ -126,6 +126,7 @@ describe("constraint engine", () => {
               created_at: "2026-06-15T00:00:00.000Z",
               last_event_id: "e1",
               last_event_at: "2026-06-15T00:00:00.000Z",
+              gravity_fired_at: 0,
             },
           ],
           [
@@ -144,6 +145,7 @@ describe("constraint engine", () => {
               created_at: "2026-06-15T00:00:00.000Z",
               last_event_id: "e2",
               last_event_at: "2026-06-15T00:00:00.000Z",
+              gravity_fired_at: 0,
             },
           ],
         ]),

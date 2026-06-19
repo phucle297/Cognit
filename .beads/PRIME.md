@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Phase 7 Recovery Engine (v0.2 surface + fuzzy search + CLI + dashboard)
+search: 8g.6 Polish + verification + docs/phase-8-results.md docs phase-8 polish verification
 queue: 
 next: 

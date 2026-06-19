@@ -32,6 +32,7 @@ export * from "./constraint-engine";
 export * from "./constraint-policy";
 export * from "./snapshot-service";
 export * from "./verification-queries";
+export * from "./gravity";
 export * from "./layers/live";
 export * from "./schema/rows";
 export * from "./schema/migrations";

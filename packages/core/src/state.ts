@@ -79,6 +79,19 @@ export interface HypothesisState {
   readonly created_at: string;
   readonly last_event_id: string;
   readonly last_event_at: string;
+  /**
+   * Phase 8 v0.2 — gravity freshness timestamp (epoch SECONDS).
+   * The reducer backfills this with `created_at` in epoch seconds
+   * when the hypothesis is first observed. The constraint engine
+   * (phase 8g.3) updates it on every mutation action. Pure
+   * functions read it through `state.hypotheses` and the gravity
+   * scorer turns it into a half-life decay value.
+   *
+   * Sentinel `0` means "never fired" — the scorer treats this as
+   * stale (freshness = 0) so legacy v0.1 hypotheses do not
+   * over-rank before the column is backfilled.
+   */
+  readonly gravity_fired_at: number;
 }
 
 export interface TheoryState {

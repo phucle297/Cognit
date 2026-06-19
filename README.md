@@ -551,7 +551,7 @@ Suggested next step:
 Investigate module graph retention; strongest active hypothesis: "module listener leak"
 ```
 
-> **Versioning note:** the core `cognit session resume` command ships in Bootstrap (Phase 2) and returns rejected hypotheses, verified conclusions, and accepted decisions out of the box. The `Last known state` line requires the Recovery Engine, which lands in v0.2 (Phase 7). The `Suggested next step` line requires the Gravity Engine, which lands in v0.2 (Phase 8). On v0.1, both lines are omitted; the resume output still works without them.
+> **Versioning note:** the core `cognit session resume` command ships in Bootstrap (Phase 2) and returns rejected hypotheses, verified conclusions, and accepted decisions out of the box. The `Last known state` line requires the Recovery Engine, which lands in v0.2 (Phase 7). The `Suggested next step` line ships in v0.2 (Phase 8, Cognit-8g): the Gravity Engine ranks every active hypothesis by weighted-sum score (evidence + reproducibility + confidence + actor_trust + freshness decay) and surfaces the top-1 as the recovery surface's `suggested_next_steps[0]`. On v0.1, both lines are omitted; the resume output still works without them.
 
 No old chat context is required.
 

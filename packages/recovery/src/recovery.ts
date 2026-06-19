@@ -12,11 +12,11 @@
  *
  * Placeholders wired by future beads:
  *   - related_sessions        — phase 7r.2 (fuzzy search)
- *   - suggested_next_steps     — phase 8 (gravity engine)
  *
- * In this bead both fields are empty arrays. The shape is locked so
- * the route can serialise it without conditional branches; later beads
- * extend the resolver that feeds them.
+ * Phase 8 (8g.4) wires `suggested_next_steps`: the caller passes the
+ * top-1 active hypothesis (id, text, score) computed via
+ * `@cognit/gravity.rankHypotheses` so the recovery package never
+ * imports the gravity engine directly.
  */
 import type {
   HypothesisState,
@@ -61,6 +61,13 @@ export interface BuildRecoveryInput {
   readonly latestVerifications: LatestVerifications;
   /** Placeholder values, filled by future beads. Caller passes `[]` today. */
   readonly relatedSessions?: ReadonlyArray<RelatedSession>;
+  /**
+   * Phase 8 (8g.4): top-N suggested next steps. The route computes
+   * `rankHypotheses(state, cfg, ...)` and passes the result here; the
+   * recovery surface returns `suggestedNextSteps[0]` as a single-entry
+   * array when one exists, otherwise an empty array.
+   */
+  readonly suggestedNextSteps?: ReadonlyArray<SuggestedNextStep>;
 }
 
 /** Placeholder shape — phase 7r.2 populates this via fuzzy search. */
@@ -68,6 +75,19 @@ export interface RelatedSession {
   readonly id: string;
   readonly score: number;
   readonly matched_on: string;
+}
+
+/**
+ * Phase 8 (8g.4) suggested next step. The recovery surface returns
+ * the single highest-ranked active hypothesis (id, text, score)
+ * computed by `@cognit/gravity.rankHypotheses`. The route resolves
+ * the ranked list once per request; the recovery package never
+ * imports the gravity engine itself.
+ */
+export interface SuggestedNextStep {
+  readonly id: string;
+  readonly text: string;
+  readonly score: number;
 }
 
 /** v0.2 recovery envelope — exactly 8 top-level fields. */
@@ -81,7 +101,7 @@ export interface RecoveryV02 {
   /** Keyed by hypothesis id. JSON-serialised as `Record<string, LatestVerification>` for the wire. */
   readonly latest_verification: ReadonlyMap<string, LatestVerification>;
   readonly last_known_state: SessionState;
-  readonly suggested_next_steps: ReadonlyArray<unknown>;
+  readonly suggested_next_steps: ReadonlyArray<SuggestedNextStep>;
 }
 
 export interface VerifiedConclusion {
@@ -186,7 +206,14 @@ export const buildRecovery = (input: BuildRecoveryInput): RecoveryV02 => {
     rejected_decisions,
     latest_verification,
     last_known_state: input.snapshotState ?? input.state,
-    suggested_next_steps: [],
+    // Phase 8 (8g.4): surface the single top-ranked active hypothesis
+    // as the suggested next step. When the caller supplies an empty
+    // ranked list (no active hypotheses, or gravity engine off), we
+    // return an empty array so the wire shape stays a list.
+    suggested_next_steps:
+      input.suggestedNextSteps && input.suggestedNextSteps.length > 0
+        ? [input.suggestedNextSteps[0]!]
+        : [],
   };
 };
 

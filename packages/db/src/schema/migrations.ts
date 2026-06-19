@@ -34,6 +34,8 @@ const loadMigration = (file: string): string =>
   readFileSync(join(here, "migrations", file), "utf8");
 
 const MIGRATION_0002_SQL = loadMigration("0002_payload_v1.1.0.sql");
+const MIGRATION_0003_SQL = loadMigration("0003_gravity_fired_at_v1.2.0.sql");
+const MIGRATION_0004_SQL = loadMigration("0004_constraint_action_log_v1.3.0.sql");
 
 export interface Migration {
   readonly version: string;
@@ -62,6 +64,42 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
           db.exec(MIGRATION_0002_SQL);
         },
         catch: (e) => new DbError({ message: `migration 1.1.0 failed: ${String(e)}`, cause: e }),
+      }),
+  },
+  {
+    version: "1.2.0",
+    up: (db) =>
+      Effect.try({
+        try: () => {
+          // Phase 8 v0.2 — additive column. The schema_version gate
+          // prevents re-running, but we also catch a "duplicate
+          // column" error so a hand-applied DB (e.g. the dev test
+          // harness) does not blow up on a second pass.
+          try {
+            db.exec(MIGRATION_0003_SQL);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (/duplicate column name: gravity_fired_at/i.test(msg)) {
+              return;
+            }
+            throw e;
+          }
+        },
+        catch: (e) => new DbError({ message: `migration 1.2.0 failed: ${String(e)}`, cause: e }),
+      }),
+  },
+  {
+    version: "1.3.0",
+    up: (db) =>
+      Effect.try({
+        try: () => {
+          // Phase 8 v0.2 (Cognit-8g.3) — additive table for the
+          // post-append constraint transformer dedup. CREATE TABLE
+          // IF NOT EXISTS is native to SQLite and idempotent across
+          // re-runs (also covered by the schema_version gate).
+          db.exec(MIGRATION_0004_SQL);
+        },
+        catch: (e) => new DbError({ message: `migration 1.3.0 failed: ${String(e)}`, cause: e }),
       }),
   },
 ];

@@ -1,0 +1,34 @@
+-- 0003_gravity_fired_at_v1.2.0.sql
+--
+-- Phase 8 v0.2 — add a single additive column to the `hypotheses`
+-- table for the gravity engine's freshness decay. The column stores
+-- the wall-clock instant (in epoch SECONDS) when the hypothesis was
+-- last "fired" — initially the creation time, updated by the
+-- constraint engine on every mutation action.
+--
+-- Idempotency: SQLite's `ADD COLUMN` does not natively support
+-- `IF NOT EXISTS`. The migration runner's `schema_version` gate
+-- (migrations.ts) already prevents re-running the .sql file. As a
+-- belt-and-braces measure, the migration up() in TypeScript wraps
+-- the .exec in a try/catch that swallows the "duplicate column"
+-- SqliteError — see migrations.ts. This means the SQL itself
+-- remains canonical and a future schema reset to a fresh DB will
+-- pick it up cleanly.
+--
+-- Default 0 (sentinel = "never fired"); the gravity scorer treats
+-- this as "stale" (freshness = 0). Pre-existing v0.1 hypotheses
+-- therefore score 0 on freshness until a constraint action fires
+-- and updates the column. This is documented behaviour.
+--
+-- Why epoch seconds, not ISO 8601: the scorer is pure JS and
+-- subtracts two timestamps; epoch-seconds are float-friendly and
+-- avoid timezone / string-parse surprises. ISO round-trips are
+-- expensive in tight loops.
+--
+-- Why REAL (not INTEGER): REAL gives us fractional seconds if a
+-- future bead needs sub-second resolution (e.g. for a re-fired
+-- action that lands within the same millisecond as the creation
+-- event). The scorer treats the value as a number, not a Date.
+
+ALTER TABLE hypotheses
+  ADD COLUMN gravity_fired_at REAL NOT NULL DEFAULT 0;
