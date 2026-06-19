@@ -232,6 +232,13 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
     case "hypothesis_created": {
       const title = getString(payload, "title") ?? "";
       const text = getString(payload, "text") ?? "";
+      // Backfill gravity_fired_at to the event's created_at, in epoch
+      // seconds. ISO 8601 -> epoch conversion: divide the millisecond
+      // timestamp by 1000. We tolerate a malformed created_at by
+      // defaulting to 0 (the "never fired" sentinel), which makes the
+      // hypothesis score 0 on freshness — the safe side.
+      const createdMs = Date.parse(event.created_at);
+      const firedAtSec = Number.isFinite(createdMs) ? Math.floor(createdMs / 1000) : 0;
       const h: import("./state.js").HypothesisState = {
         id: event.id,
         title,
@@ -246,6 +253,7 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
         created_at: event.created_at,
         last_event_id: event.id,
         last_event_at: event.created_at,
+        gravity_fired_at: firedAtSec,
       };
       const hypotheses = new Map(state.hypotheses);
       hypotheses.set(event.id, h);

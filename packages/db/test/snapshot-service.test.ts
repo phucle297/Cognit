@@ -403,6 +403,7 @@ describe("SnapshotService", () => {
                 created_at: "2026-01-01T00:00:00.000Z",
                 last_event_id: "01eventxxxxxxxxxxxxxxxxxx1",
                 last_event_at: "2026-01-01T00:00:00.000Z",
+                gravity_fired_at: 0,
               },
             ],
           ]),

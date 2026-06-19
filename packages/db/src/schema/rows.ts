@@ -118,4 +118,11 @@ export interface HypothesisRow {
   text: string;
   status: "active" | "weakened" | "rejected" | "promoted";
   created_at: string;
+  /**
+   * Phase 8 v0.2 — gravity freshness column. Wall-clock instant
+   * (epoch SECONDS) when the hypothesis was last "fired" by a
+   * mutation action. Default 0 (= "never fired", treated as stale
+   * by the gravity scorer). See migration 1.2.0.
+   */
+  gravity_fired_at: number;
 }

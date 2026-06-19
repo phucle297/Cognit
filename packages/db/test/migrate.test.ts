@@ -130,7 +130,7 @@ describe("applyMigrations", () => {
     const handle = makeTestHandle(dbPath);
     try {
       const result = await Effect.runPromise(applyMigrations(handle));
-      expect(result.applied).toEqual(["1.0.0", "1.1.0"]);
+      expect(result.applied).toEqual(["1.0.0", "1.1.0", "1.2.0"]);
 
       const tables = handle.all<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -159,7 +159,7 @@ describe("applyMigrations", () => {
       const version = handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.1.0");
+      expect(version?.version).toBe("1.2.0");
     } finally {
       await Effect.runPromise(handle.close());
     }
@@ -170,7 +170,7 @@ describe("applyMigrations", () => {
     const handle = makeTestHandle(dbPath);
     try {
       const first = await Effect.runPromise(applyMigrations(handle));
-      expect(first.applied).toEqual(["1.0.0", "1.1.0"]);
+      expect(first.applied).toEqual(["1.0.0", "1.1.0", "1.2.0"]);
 
       const second = await Effect.runPromise(applyMigrations(handle));
       expect(second.applied).toEqual([]);
@@ -178,7 +178,7 @@ describe("applyMigrations", () => {
       const version = handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.1.0");
+      expect(version?.version).toBe("1.2.0");
     } finally {
       await Effect.runPromise(handle.close());
     }
@@ -250,6 +250,23 @@ describe("applyMigrations", () => {
     }
   });
 
+  it("hypotheses has gravity_fired_at column (1.2.0) with default 0", async () => {
+    const dbPath = await withTempDb();
+    const handle = makeTestHandle(dbPath);
+    try {
+      await Effect.runPromise(applyMigrations(handle));
+      const cols = handle.all<{ name: string; dflt_value: string | null }>(
+        "PRAGMA table_info(hypotheses)",
+      );
+      const fired = cols.find((c) => c.name === "gravity_fired_at");
+      expect(fired, "gravity_fired_at column").toBeDefined();
+      // SQLite reports the default as the literal source text.
+      expect(fired?.dflt_value).toBe("0");
+    } finally {
+      await Effect.runPromise(handle.close());
+    }
+  });
+
   it("idx_artifacts_archived index exists on artifacts(archived_at)", async () => {
     const dbPath = await withTempDb();
     const handle = makeTestHandle(dbPath);
@@ -271,7 +288,7 @@ describe("applyMigrations", () => {
       const version = conn.handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.1.0");
+      expect(version?.version).toBe("1.2.0");
     } finally {
       await Effect.runPromise(conn.handle.close());
     }
