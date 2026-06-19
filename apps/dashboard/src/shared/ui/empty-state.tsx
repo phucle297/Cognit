@@ -2,10 +2,10 @@
  * apps/dashboard/src/shared/ui/empty-state.tsx — empty list state.
  */
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "../lib/cn";
 
-export interface EmptyStateProps {
+export interface EmptyStateProps extends HTMLAttributes<HTMLDivElement> {
   readonly icon: LucideIcon;
   readonly title: string;
   readonly description?: string;
@@ -19,8 +19,10 @@ export const EmptyState = ({
   description,
   action,
   className,
+  ...rest
 }: EmptyStateProps) => (
   <div
+    {...rest}
     className={cn(
       "flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed bg-card px-6 py-12 text-center",
       className,

@@ -1,43 +1,245 @@
 /**
- * apps/dashboard/src/pages/settings.tsx — Settings (6.6).
+ * apps/dashboard/src/pages/settings.tsx — Settings (6.8.2.P4).
  *
- * FSD layer: pages. Read-only v0.1: Config tab + Storage tab.
- * Re-exports, fuzzy search, and the redaction editor land in v0.2.
+ * FSD layer: pages. Sectioned Cards (Server, Project, Display).
+ * Form inputs aligned. Save Button disabled until dirty.
+ * Project section holds a read-only preview; Server + Display
+ * are editable, kept in local form state and only persisted on
+ * Save.
  */
-import type { JSX } from "react";
-import { ConfigView } from "@/components/ConfigView";
-import { StorageUsage } from "@/components/StorageUsage";
+import { useEffect, useMemo, useState, type JSX } from "react";
+import { Save, Server, FolderTree, Palette } from "lucide-react";
+
+import { Breadcrumb } from "@/shared/ui/breadcrumb";
+import { Button } from "@/shared/ui/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/shared/ui/card";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/shared/ui/tabs";
+import { Input } from "@/shared/ui/input";
+import { useApi } from "@/lib/use-api";
+import { ConfigView } from "@/components/ConfigView";
+import { StorageUsage } from "@/components/StorageUsage";
 
-export const SettingsPage = (): JSX.Element => (
-  <Card>
-    <CardHeader>
-      <CardTitle>Settings</CardTitle>
-    </CardHeader>
-    <CardContent>
-      <Tabs defaultValue="config">
-        <TabsList>
-          <TabsTrigger value="config">Config</TabsTrigger>
-          <TabsTrigger value="storage">Storage</TabsTrigger>
-        </TabsList>
-        <TabsContent value="config">
-          <ConfigView />
-        </TabsContent>
-        <TabsContent value="storage">
-          <StorageUsage />
-        </TabsContent>
-      </Tabs>
-    </CardContent>
-  </Card>
+type ServerSettings = {
+  bind: string;
+  port: number;
+  sseTimeoutMs: number;
+};
+
+type ProjectSettings = {
+  name: string;
+  goal: string;
+};
+
+type DisplaySettings = {
+  theme: "light" | "dark" | "system";
+  pageSize: number;
+};
+
+const DEFAULTS: { server: ServerSettings; project: ProjectSettings; display: DisplaySettings } = {
+  server: { bind: "127.0.0.1", port: 6971, sseTimeoutMs: 86_400_000 },
+  project: { name: "cognit-demo", goal: "Demo: HMR memory leak investigation" },
+  display: { theme: "system", pageSize: 50 },
+};
+
+const STORAGE_KEY = "cognit.settings.v1";
+
+const loadSettings = (): { server: ServerSettings; project: ProjectSettings; display: DisplaySettings } => {
+  if (typeof window === "undefined") return DEFAULTS;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULTS;
+    const parsed = JSON.parse(raw) as Partial<typeof DEFAULTS>;
+    return {
+      server: { ...DEFAULTS.server, ...(parsed.server ?? {}) },
+      project: { ...DEFAULTS.project, ...(parsed.project ?? {}) },
+      display: { ...DEFAULTS.display, ...(parsed.display ?? {}) },
+    };
+  } catch {
+    return DEFAULTS;
+  }
+};
+
+const saveSettings = (s: typeof DEFAULTS): void => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch {
+    // ignore quota / privacy mode failures
+  }
+};
+
+const equal = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+
+export const SettingsPage = (): JSX.Element => {
+  const projects = useApi<{ projects: Array<{ id: string; name: string; goal?: string }> }>("/api/projects");
+
+  const [draft, setDraft] = useState(DEFAULTS);
+  const [saved, setSaved] = useState(DEFAULTS);
+  const [status, setStatus] = useState<"idle" | "saved">("idle");
+
+  useEffect(() => {
+    setDraft(loadSettings());
+    setSaved(loadSettings());
+  }, []);
+
+  useEffect(() => {
+    if (projects.data?.projects[0] && !draft.project.name) {
+      const p = projects.data.projects[0];
+      setDraft((d) => ({ ...d, project: { name: p.name, goal: p.goal ?? "" } }));
+    }
+  }, [projects.data, draft.project.name]);
+
+  const dirty = useMemo(
+    () => !equal(draft, saved),
+    [draft, saved],
+  );
+
+  const onSave = (): void => {
+    saveSettings(draft);
+    setSaved(draft);
+    setStatus("saved");
+    window.setTimeout(() => setStatus("idle"), 1500);
+  };
+
+  return (
+    <div className="flex flex-col gap-4" data-testid="settings-page">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Settings" }]} />
+          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+        </div>
+        <div className="flex items-center gap-2">
+          {status === "saved" ? (
+            <span className="text-xs text-[var(--color-status-active)]" data-testid="settings-saved">
+              Saved
+            </span>
+          ) : null}
+          <Button onClick={onSave} disabled={!dirty} data-testid="settings-save">
+            <Save className="size-4" aria-hidden /> Save
+          </Button>
+        </div>
+      </div>
+
+      <section className="grid gap-4">
+        <Card variant="flat" data-testid="settings-server">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Server className="size-4 text-muted-foreground" aria-hidden /> Server
+            </CardTitle>
+            <CardDescription>Bind host, port, and SSE timeout. Local-only tool — keep bind on 127.0.0.1.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <Field label="Bind host" htmlFor="server-bind">
+              <Input
+                id="server-bind"
+                value={draft.server.bind}
+                onChange={(e) => setDraft({ ...draft, server: { ...draft.server, bind: e.target.value } })}
+                data-testid="settings-server-bind"
+              />
+            </Field>
+            <Field label="Port" htmlFor="server-port">
+              <Input
+                id="server-port"
+                type="number"
+                min={1}
+                max={65535}
+                value={draft.server.port}
+                onChange={(e) =>
+                  setDraft({ ...draft, server: { ...draft.server, port: Number(e.target.value) || 6971 } })
+                }
+                data-testid="settings-server-port"
+              />
+            </Field>
+            <Field label="SSE timeout (ms)" htmlFor="server-sse">
+              <Input
+                id="server-sse"
+                type="number"
+                value={draft.server.sseTimeoutMs}
+                onChange={(e) =>
+                  setDraft({ ...draft, server: { ...draft.server, sseTimeoutMs: Number(e.target.value) || 0 } })
+                }
+                data-testid="settings-server-sse"
+              />
+            </Field>
+          </CardContent>
+        </Card>
+
+        <Card variant="flat" data-testid="settings-project">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <FolderTree className="size-4 text-muted-foreground" aria-hidden /> Project
+            </CardTitle>
+            <CardDescription>Name + default goal. Read-only here — rename via the CLI or the dashboard dialog.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <Field label="Name" htmlFor="project-name">
+              <Input id="project-name" value={draft.project.name} readOnly data-testid="settings-project-name" />
+            </Field>
+            <Field label="Goal" htmlFor="project-goal">
+              <Input id="project-goal" value={draft.project.goal} readOnly data-testid="settings-project-goal" />
+            </Field>
+            <div className="sm:col-span-2">
+              <ConfigView />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card variant="flat" data-testid="settings-display">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Palette className="size-4 text-muted-foreground" aria-hidden /> Display
+            </CardTitle>
+            <CardDescription>Theme + default page size for list views.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 sm:grid-cols-2">
+            <Field label="Theme" htmlFor="display-theme">
+              <select
+                id="display-theme"
+                value={draft.display.theme}
+                onChange={(e) =>
+                  setDraft({ ...draft, display: { ...draft.display, theme: e.target.value as DisplaySettings["theme"] } })
+                }
+                data-testid="settings-display-theme"
+                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              >
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </Field>
+            <Field label="Page size" htmlFor="display-pagesize">
+              <Input
+                id="display-pagesize"
+                type="number"
+                min={10}
+                max={500}
+                value={draft.display.pageSize}
+                onChange={(e) =>
+                  setDraft({ ...draft, display: { ...draft.display, pageSize: Number(e.target.value) || 50 } })
+                }
+                data-testid="settings-display-pagesize"
+              />
+            </Field>
+            <div className="sm:col-span-2">
+              <StorageUsage />
+            </div>
+          </CardContent>
+        </Card>
+      </section>
+    </div>
+  );
+};
+
+const Field = ({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }): JSX.Element => (
+  <div className="flex flex-col gap-1">
+    <label htmlFor={htmlFor} className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      {label}
+    </label>
+    {children}
+  </div>
 );

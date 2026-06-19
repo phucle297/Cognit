@@ -1,199 +1,277 @@
 /**
- * apps/dashboard/src/pages/decision-graph.tsx — Decision Graph page (6.5).
+ * apps/dashboard/src/pages/decision-graph.tsx — Decision Graph (6.8.2.P4).
  *
- * FSD layer: pages. Reads the session state via
- * `GET /sessions/:id/state`, then `GET /sessions/:id/edges?edge_type=based_on|caused`
- * for the two edge kinds the graph needs. Splits decisions into
- * "accepted" and "rejected" sections, then delegates to
- * `<DecisionList>` for the row rendering (based_on / caused links,
- * superseded chain).
+ * Full-bleed xyflow canvas with decision-entity theme. Right
+ * Sheet on node click (title / state / based-on / superseded
+ * chain). Sidebar auto-collapses on mount, restores on unmount.
  *
- * Session id comes from the URL search params (`?session=<ulid>`),
- * matching the Timeline page convention.
- *
- * Wire format:
- *  - SessionState map fields (hypotheses, decisions, conclusions,
- *    verifications, artifacts, theories, experiments) are serialized
- *    as plain objects keyed by entity id (see
- *    `packages/db/src/snapshot-service.ts` `serializeState`). The
- *    pages rehydrate them into arrays of values for rendering.
+ * FSD layer: pages. Reads `?session=<id>` from the URL.
  */
-import { useMemo, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useApi } from "@/lib/use-api";
-import { Card, CardContent, CardHeader, CardTitle } from "@/shared/ui/card";
-import {
-  DecisionList,
-  type DecisionListEdge,
-  type DecisionListItem,
-} from "@/components/DecisionList";
+import { GitBranch } from "lucide-react";
 
-type DecisionLifecycle = "proposed" | "accepted" | "rejected" | "superseded";
+import { useApi } from "@/lib/use-api";
+import { Breadcrumb } from "@/shared/ui/breadcrumb";
+import { DataTable, type DataTableColumn } from "@/shared/ui/data-table";
+import { EmptyState } from "@/shared/ui/empty-state";
+import { ErrorState } from "@/shared/ui/error-state";
+import { Sheet } from "@/shared/ui/sheet";
+import { Skeleton } from "@/shared/ui/skeleton";
+import { StatusPill } from "@/shared/ui/status-pill";
+import type { StatusKey } from "@/shared/config/status";
+import { Card, CardContent } from "@/shared/ui/card";
+
+import { GraphCanvas, type GraphResp, type LayoutMode } from "@/components/GraphCanvas";
+import { GraphControls } from "@/components/GraphControls";
+import { useSidebar } from "@/widgets/sidebar/sidebar-provider";
 
 type DecisionStateShape = {
   readonly id: string;
   readonly text: string;
-  readonly state: DecisionLifecycle;
+  readonly state: "proposed" | "accepted" | "rejected" | "superseded";
   readonly based_on_conclusion_ids: ReadonlyArray<string>;
   readonly superseded_by_decision_id: string | null;
   readonly created_at: string;
-};
-
-type ConclusionStateShape = {
-  readonly id: string;
-  readonly text: string;
-  readonly state: string;
-};
-
-type ExperimentStateShape = {
-  readonly id: string;
-  readonly design: string;
 };
 
 type StateResp = {
   readonly session: { readonly id: string };
   readonly state: {
     readonly decisions: Record<string, DecisionStateShape>;
-    readonly conclusions: Record<string, ConclusionStateShape>;
-    readonly experiments: Record<string, ExperimentStateShape>;
   };
 };
 
-type EdgesResp = {
-  readonly edges: ReadonlyArray<DecisionListEdge>;
+const AUTO_CONSTELLATION_THRESHOLD = 200;
+
+const DECISION_STATUS: Record<DecisionStateShape["state"], StatusKey> = {
+  proposed: "pending",
+  accepted: "verified",
+  rejected: "failed",
+  superseded: "archived",
 };
 
-/**
- * Convert a server-serialized Map field (object keyed by entity id)
- * back into an array of its values. The snapshot service writes
- * Maps as key-sorted plain objects (see
- * `packages/db/src/snapshot-service.ts` `serializeState`), so the
- * wire shape is `Record<string, T>`.
- */
-const flattenMap = <T,>(input: Record<string, T> | undefined | null): T[] => {
-  if (!input) return [];
-  return Object.values(input);
-};
+const flatten = <T,>(m: Record<string, T> | undefined | null): T[] => (m ? Object.values(m) : []);
 
 export const DecisionGraphPage = (): JSX.Element => {
   const [searchParams] = useSearchParams();
-  const sessionId = searchParams.get("session");
+  const sessionId = searchParams.get("session") ?? "";
+  const { setCollapsed } = useSidebar();
+
+  useEffect(() => {
+    setCollapsed(true);
+    return (): void => setCollapsed(false);
+  }, [setCollapsed]);
 
   const statePath = sessionId ? `/api/sessions/${sessionId}/state` : null;
-  const edgesPath = sessionId
-    ? `/api/sessions/${sessionId}/edges?edge_type=based_on|caused`
-    : null;
+  const graphPath = sessionId ? `/api/sessions/${sessionId}/graph` : null;
   const state = useApi<StateResp>(statePath);
-  const edges = useApi<EdgesResp>(edgesPath);
+  const graph = useApi<GraphResp>(graphPath);
 
-  const decisions: ReadonlyArray<DecisionListItem> = useMemo(() => {
-    if (!state.data?.state.decisions) return [];
-    const raw = flattenMap(state.data.state.decisions);
-    return raw.map((d) => ({
-      id: d.id,
-      text: d.text,
-      state: d.state,
-      based_on_conclusion_ids: d.based_on_conclusion_ids ?? [],
-      superseded_by_decision_id: d.superseded_by_decision_id ?? null,
-      created_at: d.created_at,
-    }));
-  }, [state.data]);
+  const [mode, setMode] = useState<LayoutMode | null>(null);
+  const [visibleEdgeTypes, setVisibleEdgeTypes] = useState<Set<string>>(new Set());
+  const [remountKey, setRemountKey] = useState(0);
+  const [selectedNode, setSelectedNode] = useState<GraphResp["nodes"][number] | null>(null);
 
-  const labelMap = useMemo<Record<string, string>>(() => {
-    const map: Record<string, string> = {};
-    if (state.data?.state.conclusions) {
-      for (const c of flattenMap(state.data.state.conclusions)) {
-        map[`conclusion:${c.id}`] = c.text;
-      }
-    }
-    if (state.data?.state.experiments) {
-      for (const e of flattenMap(state.data.state.experiments)) {
-        map[`experiment:${e.id}`] = e.design;
-      }
-    }
-    for (const d of decisions) {
-      map[`decision:${d.id}`] = d.text;
-    }
-    return map;
-  }, [state.data, decisions]);
+  const decisions: ReadonlyArray<DecisionStateShape> = useMemo(
+    () => flatten(state.data?.state.decisions),
+    [state.data],
+  );
 
-  const decisionById = useMemo<Record<string, DecisionListItem>>(() => {
-    const map: Record<string, DecisionListItem> = {};
-    for (const d of decisions) map[d.id] = d;
-    return map;
-  }, [decisions]);
+  useEffect(() => {
+    if (!graph.data) return;
+    if (mode !== null) return;
+    setMode(graph.data.nodes.length > AUTO_CONSTELLATION_THRESHOLD ? "constellation" : "physics");
+  }, [graph.data, mode]);
 
-  const resolveLabel = (entityType: string, entityId: string): string => {
-    const key = `${entityType}:${entityId}`;
-    return labelMap[key] ?? `${entityType}:${entityId}`;
-  };
-  const resolveDecision = (id: string): DecisionListItem | null =>
-    decisionById[id] ?? null;
+  const onNodeClick = useCallback((n: GraphResp["nodes"][number]) => {
+    setSelectedNode(n);
+  }, []);
 
-  const accepted = decisions.filter((d) => d.state === "accepted");
-  // "superseded" decisions are folded into the rejected section so
-  // a chain (A → B → C) renders the older links in a visible row.
-  // Proposals (not yet accepted/rejected) are excluded.
-  const rejected = decisions.filter((d) => d.state === "rejected" || d.state === "superseded");
+  const onZoomReset = useCallback(() => setRemountKey((k) => k + 1), []);
+
+  const effectiveMode: LayoutMode = mode ?? "constellation";
+  const nodeCount = graph.data?.nodes.length ?? 0;
+  const capped = nodeCount > 500;
+  const graphResp: GraphResp = useMemo(
+    () => graph.data ?? { session_id: sessionId, nodes: [], edges: [] },
+    [graph.data, sessionId],
+  );
+
+  const selectedDecision = useMemo<DecisionStateShape | null>(() => {
+    if (!selectedNode) return null;
+    return decisions.find((d) => d.id === selectedNode.entity_id) ?? null;
+  }, [selectedNode, decisions]);
+
+  const tableColumns: ReadonlyArray<DataTableColumn<DecisionStateShape>> = [
+    {
+      key: "text",
+      header: "Decision",
+      render: (d) => <span className="font-medium">{d.text}</span>,
+    },
+    {
+      key: "state",
+      header: "State",
+      width: "10rem",
+      render: (d) => <StatusPill status={DECISION_STATUS[d.state]} />,
+    },
+    {
+      key: "created_at",
+      header: "Created",
+      width: "12rem",
+      render: (d) => <span className="font-mono text-xs text-muted-foreground">{d.created_at.slice(0, 19)}Z</span>,
+    },
+  ];
 
   if (!sessionId) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Decision Graph</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p data-testid="decision-graph-empty-session" className="text-sm text-muted-foreground">
-            Open a session to view its decisions.
-          </p>
-        </CardContent>
-      </Card>
+      <div className="flex flex-col gap-3" data-testid="decision-graph-page">
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Decision Graph" }]} />
+        <EmptyState
+          icon={GitBranch}
+          title="No session selected"
+          description="Open the Decision Graph from a session timeline to inspect its decision tree."
+        />
+      </div>
     );
   }
 
-  const edgeList = edges.data?.edges ?? [];
+  if (state.loading || graph.loading) {
+    return (
+      <div className="flex flex-col gap-3" data-testid="decision-graph-page">
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Decision Graph" }]} />
+        <Skeleton className="h-[60vh] w-full" />
+      </div>
+    );
+  }
+
+  if (state.error || graph.error) {
+    return (
+      <div className="flex flex-col gap-3" data-testid="decision-graph-page">
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Decision Graph" }]} />
+        <ErrorState
+          message={(state.error ?? graph.error)!.message}
+          onRetry={(): void => {
+            state.refetch();
+            graph.refetch();
+          }}
+          data-testid="decision-graph-error"
+        />
+      </div>
+    );
+  }
 
   return (
-    <div data-testid="decision-graph-page" className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Decision Graph</h1>
-      {state.loading && decisions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Loading decisions…</p>
+    <div
+      className="-mx-[var(--space-page-x)] -my-[var(--space-page-y)] flex h-[calc(100vh-3rem)] flex-col"
+      data-testid="decision-graph-page"
+    >
+      <div className="flex items-center justify-between border-b px-[var(--space-page-x)] py-2">
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Decision Graph" }]} />
+        <div className="text-xs text-muted-foreground" data-testid="decision-count">
+          {decisions.length} decision{decisions.length === 1 ? "" : "s"}
+        </div>
+      </div>
+      <div className="relative flex-1">
+        <div className="absolute left-4 top-4 z-10 max-w-xs">
+          <GraphControls
+            mode={effectiveMode}
+            onModeChange={setMode}
+            edges={graphResp.edges}
+            visibleEdgeTypes={visibleEdgeTypes}
+            onVisibleEdgeTypesChange={setVisibleEdgeTypes}
+            onZoomReset={onZoomReset}
+            nodeCount={nodeCount}
+            capped={capped}
+          />
+        </div>
+        {nodeCount === 0 ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <EmptyState
+              icon={GitBranch}
+              title="No decision data"
+              description="This session has no decisions recorded yet."
+              data-testid="decision-empty"
+            />
+          </div>
+        ) : (
+          <GraphCanvas
+            key={`${effectiveMode}-${remountKey}`}
+            data={graphResp}
+            mode={effectiveMode}
+            visibleEdgeTypes={visibleEdgeTypes}
+            onNodeClick={onNodeClick}
+            onFitView={onZoomReset}
+          />
+        )}
+      </div>
+      {decisions.length > 0 ? (
+        <div className="border-t bg-card px-[var(--space-page-x)] py-3">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">All decisions</h3>
+          <Card>
+            <CardContent className="p-0">
+              <DataTable
+                columns={tableColumns}
+                rows={decisions}
+                rowKey={(d) => d.id}
+                onRowClick={(d) =>
+                  setSelectedNode({ id: `decision:${d.id}`, entity_id: d.id, entity_type: "decision", label: d.text })
+                }
+                emptyMessage=""
+              />
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
-      {state.error ? (
-        <p data-testid="decision-graph-error" className="text-sm text-destructive">
-          {state.error.api.message}
-        </p>
-      ) : null}
-
-      <section
-        data-testid="decision-accepted"
-        className="flex flex-col gap-3"
+      <Sheet
+        open={selectedNode !== null}
+        onClose={(): void => setSelectedNode(null)}
+        title={selectedNode?.label ?? "Decision"}
+        description={selectedNode?.entity_type}
+        width="md"
+        data-testid="decision-sheet"
       >
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Accepted ({accepted.length})
-        </h2>
-        <DecisionList
-          decisions={accepted}
-          edges={edgeList}
-          resolveLabel={resolveLabel}
-          resolveDecision={resolveDecision}
-        />
-      </section>
-
-      <section
-        data-testid="decision-rejected"
-        className="flex flex-col gap-3"
-      >
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Rejected ({rejected.length})
-        </h2>
-        <DecisionList
-          decisions={rejected}
-          edges={edgeList}
-          resolveLabel={resolveLabel}
-          resolveDecision={resolveDecision}
-        />
-      </section>
+        {selectedNode ? (
+          <div className="flex flex-col gap-3" data-testid="decision-details">
+            {selectedDecision ? (
+              <>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">State</div>
+                  <div className="mt-1">
+                    <StatusPill status={DECISION_STATUS[selectedDecision.state]} />
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Based on conclusions</div>
+                  <ul className="mt-1 flex flex-col gap-1" data-testid="decision-based-on">
+                    {selectedDecision.based_on_conclusion_ids.length === 0 ? (
+                      <li className="text-xs text-muted-foreground">None recorded</li>
+                    ) : (
+                      selectedDecision.based_on_conclusion_ids.map((c) => (
+                        <li key={c} className="rounded border bg-muted/40 px-2 py-1 font-mono text-xs">
+                          {c}
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Superseded by</div>
+                  <div className="mt-1 font-mono text-xs">
+                    {selectedDecision.superseded_by_decision_id ?? "—"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Created</div>
+                  <div className="mt-1 font-mono text-xs">{selectedDecision.created_at}</div>
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">No decision entity linked to this node.</p>
+            )}
+          </div>
+        ) : null}
+      </Sheet>
     </div>
   );
 };
