@@ -31,6 +31,7 @@ export * from "./cognition-service";
 export * from "./constraint-engine";
 export * from "./constraint-policy";
 export * from "./snapshot-service";
+export * from "./verification-queries";
 export * from "./layers/live";
 export * from "./schema/rows";
 export * from "./schema/migrations";

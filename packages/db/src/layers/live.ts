@@ -9,6 +9,7 @@ import { ProjectService, ProjectServiceLive } from "../project-service";
 import { SessionService, SessionServiceLive } from "../session-service";
 import { SessionPolicy, SessionPolicyDefault } from "../session-policy";
 import { SnapshotService, SnapshotServiceLive } from "../snapshot-service";
+import { VerificationQueries, VerificationQueriesLive } from "../verification-queries";
 import { CognitionService, CognitionServiceLive } from "../cognition-service";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../constraint-policy";
 import { DbSize, DbSizeLive } from "../db-size";
@@ -74,7 +75,8 @@ export const DbLive = (
   | CognitionService
   | ConstraintPolicy
   | DbSize
-  | ArtifactRepo,
+  | ArtifactRepo
+  | VerificationQueries,
   DbError | DbCorrupted,
   never
 > => {
@@ -99,6 +101,8 @@ export const DbLive = (
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, localLeafs), dbConn);
   // SnapshotService needs DbConnection + Uuid + Logger.
   const snapshots = Layer.provide(SnapshotServiceLive, Layer.merge(localLeafs, dbConn));
+  // VerificationQueries is read-only and only needs DbConnection.
+  const verificationQueries = Layer.provide(VerificationQueriesLive, dbConn);
   // ProjectService needs DbConnection + Uuid + Logger.
   const projects = Layer.provide(ProjectServiceLive, Layer.merge(localLeafs, dbConn));
   // DbSize and ArtifactRepo are storage helpers used by the gc CLI
@@ -145,6 +149,7 @@ export const DbLive = (
     constraintPolicy,
     dbSize,
     artifactRepo,
+    verificationQueries,
   );
   // Provide the SessionPolicy + dbConn internally so the R channel
   // stays `never`, AND keep their outputs in the result so callers
@@ -162,7 +167,8 @@ export const DbLive = (
     | CognitionService
     | ConstraintPolicy
     | DbSize
-    | ArtifactRepo,
+    | ArtifactRepo
+    | VerificationQueries,
     DbError | DbCorrupted,
     never
   >;

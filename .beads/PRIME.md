@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Strip auth + login (local app, no auth needed)
+search: Restore pre-existing test rot (dashboard e2e + server)
 queue: 
-next: Cognit-7r.0
+next: Cognit-7r.1

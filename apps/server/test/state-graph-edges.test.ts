@@ -245,7 +245,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
     expect(virtual?.virtual).toBe(true);
   });
 
-  it("4. GET /sessions/:id/recovery returns exactly 3 v0.1 fields, no v0.2 fields", async () => {
+  it("4. GET /sessions/:id/recovery returns the v0.2 8-field surface (plus session_id)", async () => {
     await seedRejectedAndAccepted(ctx);
     const f = fetchApp(ctx.app);
     const r = await f(`/api/sessions/${ctx.sessionId}/recovery`);
@@ -255,22 +255,29 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
       data: Record<string, unknown>;
     };
     expect(body.kind).toBe("session.recovery");
-    // Exact key set — the v0.1 surface contract.
+    // Exact key set — the v0.2 surface contract.
+    // 8 v0.2 fields + session_id = 9 keys total.
     expect(Object.keys(body.data).sort()).toEqual([
       "accepted_decisions",
+      "last_known_state",
+      "latest_verification",
+      "rejected_decisions",
       "rejected_hypotheses",
+      "related_sessions",
       "session_id",
+      "suggested_next_steps",
       "verified_conclusions",
     ]);
-    // v0.2 fields must NOT appear on this version.
-    expect(body.data).not.toHaveProperty("related_sessions");
-    expect(body.data).not.toHaveProperty("suggested_next_steps");
 
     const arr = (k: string): unknown[] =>
       (body.data[k] as ReadonlyArray<unknown>) as unknown[];
     expect(arr("rejected_hypotheses").length).toBe(1);
     expect(arr("accepted_decisions").length).toBe(1);
     expect(arr("verified_conclusions").length).toBe(0);
+    // Placeholders present, always empty until phase 7r.2 / 8.
+    expect(arr("related_sessions").length).toBe(0);
+    expect(arr("suggested_next_steps").length).toBe(0);
+    expect(arr("rejected_decisions").length).toBe(0);
   });
 
   it("5. GET /sessions/:id/recovery on an empty session returns empty arrays", async () => {

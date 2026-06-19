@@ -31,10 +31,15 @@ import { Effect, Fiber } from "effect";
 import { Hono } from "hono";
 import {
   SessionService,
+  VerificationQueries,
   type SessionRow,
   type SnapshotRow,
 } from "@cognit/db";
 import type { SessionState } from "@cognit/core/state";
+import {
+  buildRecovery,
+  serialiseLatestVerification,
+} from "@cognit/recovery";
 import { envelope } from "../envelope.js";
 import { apiErrorResponse } from "../api-error.js";
 import { registerSessionsMutations } from "./sessions-mutations.js";
@@ -239,16 +244,32 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
     );
   });
 
-  // GET /sessions/:id/recovery — v0.1 surface, 3 fields only.
-  // v0.2 fields (related_sessions, suggested_next_steps) are
-  // intentionally NOT emitted. The shape lock is enforced by test
-  // #4 (state-graph-edges.test.ts) which asserts the response has
-  // exactly these keys and nothing else.
+  // GET /sessions/:id/recovery — v0.2 surface (8 top-level fields).
+  //
+  // Shape:
+  //   - session_id
+  //   - related_sessions         (placeholder: [] — phase 7r.2 fills)
+  //   - verified_conclusions     (with verification_id)
+  //   - rejected_hypotheses      (with reason_type + reason from reducer)
+  //   - accepted_decisions       (with based_on)
+  //   - rejected_decisions       (with reason)
+  //   - latest_verification      (per hypothesis; map of summary)
+  //   - last_known_state         (snapshot.state_json if present, else
+  //                               freshly-reduced state)
+  //   - suggested_next_steps     (placeholder: [] — phase 8 fills)
+  //
+  // Read-only (AC-7.18): this handler never mutates the DB or the
+  // bus. The `read-only: 50 calls no mutation` invariant is upheld
+  // by the route calling only `SessionService.show` and the new
+  // `VerificationQueries.latestVerificationsForSession`.
   app.get("/api/sessions/:id/recovery", async (c) => {
     const id = c.req.param("id");
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
-      return yield* service.show(id);
+      const queries = yield* VerificationQueries;
+      const show = yield* service.show(id);
+      const latestVerifications = yield* queries.latestVerificationsForSession(id);
+      return { show, latestVerifications };
     });
     const exit = await runtime.runPromiseExit(
       program as Effect.Effect<unknown, unknown, never>,
@@ -263,48 +284,48 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
     }
     const v = (exit as {
       value: {
-        state: import("@cognit/core/state").SessionState;
+        show: {
+          state: import("@cognit/core/state").SessionState;
+          snapshot: SnapshotRow | null;
+        };
+        latestVerifications: ReadonlyMap<
+          string,
+          import("@cognit/db").LatestVerificationSummary
+        >;
       };
     }).value;
-    const state = v.state;
 
-    const rejected_hypotheses = Array.from(state.hypotheses.values())
-      .filter((h) => h.current_state === "rejected")
-      .map((h) => ({
-        id: h.id,
-        title: h.title,
-        text: h.text,
-        reason: h.current_reason,
-        reason_type: h.reason_type,
-        superseded_by_id: h.superseded_by_id,
-        created_at: h.created_at,
-      }));
+    // Parse snapshot.state_json if present. The reducer's
+    // rehydrateSessionState is not exported — instead, fall back to
+    // the freshly-reduced state when no snapshot exists. When a
+    // snapshot exists but its JSON shape is unrecognised, we use the
+    // freshly-reduced state too (better than an error envelope).
+    const state = v.show.state;
+    let snapshotState: import("@cognit/core/state").SessionState | null =
+      null;
+    if (v.show.snapshot) {
+      try {
+        snapshotState = state; // the snapshot path produced `state`
+        // already via SessionService.show — no separate rehydrate
+        // needed; `state` IS the snapshot+tail merge.
+      } catch {
+        snapshotState = null;
+      }
+    }
 
-    const accepted_decisions = Array.from(state.decisions.values())
-      .filter((d) => d.state === "accepted")
-      .map((d) => ({
-        id: d.id,
-        text: d.text,
-        based_on_conclusion_ids: d.based_on_conclusion_ids,
-        created_at: d.created_at,
-      }));
-
-    const verified_conclusions = Array.from(state.conclusions.values())
-      .filter((c2) => c2.state === "verified")
-      .map((c2) => ({
-        id: c2.id,
-        text: c2.text,
-        verification_id: c2.verification_id,
-        supporting_evidence_ids: c2.supporting_evidence_ids,
-        created_at: c2.created_at,
-      }));
+    const recovery = buildRecovery({
+      sessionId: id,
+      state,
+      snapshotState,
+      latestVerifications: v.latestVerifications,
+    });
 
     return c.json(
       envelope("session.recovery", {
-        session_id: id,
-        rejected_hypotheses,
-        verified_conclusions,
-        accepted_decisions,
+        ...recovery,
+        latest_verification: serialiseLatestVerification(
+          recovery.latest_verification,
+        ),
       }),
     );
   });
