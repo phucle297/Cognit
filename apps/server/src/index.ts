@@ -52,6 +52,7 @@ import { registerProjectsRoutes } from "./routes/projects.js";
 import { registerEdgesRoutes } from "./routes/edges.js";
 import { registerVerifyRoutes } from "./routes/verify.js";
 import { registerActorsRoutes } from "./routes/actors.js";
+import { registerSearchRoutes } from "./routes/search.js";
 import { resolveServerConfig } from "./config.js";
 import { findProjectRoot } from "../../../apps/cli/src/paths.js";
 
@@ -132,6 +133,10 @@ app.use("*", async (c, next) => {
 app.options("*", (c) => c.body(null, 204));
 
 registerHealthz(app);
+// Search registers BEFORE sessions routes: `/api/sessions/:id`
+// would otherwise swallow `/api/sessions/search` as a session with
+// id "search". Static segments win when registered first.
+registerSearchRoutes(app, { runtime, projectId });
 registerSessionsRoutes(app, { runtime, projectId });
 registerEventsRoutes(app, { runtime, projectId });
 registerProjectsRoutes(app, { runtime });

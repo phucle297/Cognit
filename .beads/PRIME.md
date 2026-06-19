@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Restore pre-existing test rot (dashboard e2e + server)
+search: Add fuse.js + GET /api/sessions/search (weighted 5 kinds + filters)
 queue: 
-next: Cognit-7r.1
+next: Cognit-7r.5

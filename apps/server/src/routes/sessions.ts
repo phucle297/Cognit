@@ -43,6 +43,11 @@ import {
 import { envelope } from "../envelope.js";
 import { apiErrorResponse } from "../api-error.js";
 import { registerSessionsMutations } from "./sessions-mutations.js";
+import {
+  indexSession,
+  runSearch,
+  groupBySession,
+} from "./search.js";
 
 /**
  * Tiny runtime facade. The server boot (and tests) build this
@@ -269,7 +274,31 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       const queries = yield* VerificationQueries;
       const show = yield* service.show(id);
       const latestVerifications = yield* queries.latestVerificationsForSession(id);
-      return { show, latestVerifications };
+      // Build the fuzzy index across every session in the project so
+      // we can fill `related_sessions`. The same engine powers
+      // /api/sessions/search; here we run it once with a synthetic
+      // query derived from this session's own content.
+      const allSessions = yield* service.list({ projectId });
+      const flatIndex: Array<ReturnType<typeof indexSession>[number]> = [];
+      for (const s of allSessions) {
+        if (s.id === id) continue; // skip self
+        const sShow = yield* service.show(s.id);
+        for (const entry of indexSession(
+          s.id,
+          s.project_id,
+          s.status,
+          sShow.state,
+        )) {
+          flatIndex.push(entry);
+        }
+      }
+      const queryText = buildRelatedQuery(show.state);
+      const ranked = runSearch(flatIndex, queryText, {
+        limit: 10,
+        offset: 0,
+      });
+      const relatedSessions = groupBySession(ranked, queryText);
+      return { show, latestVerifications, relatedSessions };
     });
     const exit = await runtime.runPromiseExit(
       program as Effect.Effect<unknown, unknown, never>,
@@ -292,6 +321,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
           string,
           import("@cognit/db").LatestVerificationSummary
         >;
+        relatedSessions: ReadonlyArray<import("./search.js").RelatedSessionMatch>;
       };
     }).value;
 
@@ -318,6 +348,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       state,
       snapshotState,
       latestVerifications: v.latestVerifications,
+      relatedSessions: v.relatedSessions,
     });
 
     return c.json(
@@ -334,4 +365,21 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   // sibling module to keep this file readable. Both modules share
   // the same Hono app — `app.route` accumulates handlers.
   registerSessionsMutations(app, deps);
+};
+
+/**
+ * Build the synthetic query used to find related sessions. Fuse
+ * tokenises poorly across long composites, so we hand it the single
+ * most distinctive phrase: the goal if non-empty, otherwise the
+ * first finding's text. When both are empty we fall back to a
+ * generic token so the index still produces results.
+ */
+const buildRelatedQuery = (state: import("@cognit/core/state").SessionState): string => {
+  const goal = state.goal ?? "";
+  if (goal.trim().length > 0) return goal;
+  const firstFinding = state.findings.values().next().value;
+  if (firstFinding && firstFinding.text.trim().length > 0) {
+    return firstFinding.text;
+  }
+  return "session";
 };

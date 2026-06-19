@@ -42,6 +42,7 @@ import { registerProjectsRoutes } from "../src/routes/projects.js";
 import { registerEdgesRoutes } from "../src/routes/edges.js";
 import { registerVerifyRoutes } from "../src/routes/verify.js";
 import { registerActorsRoutes } from "../src/routes/actors.js";
+import { registerSearchRoutes } from "../src/routes/search.js";
 import { requestIdMiddleware } from "../src/api-error.js";
 
 /** All Context tags the test runtime provides. Mirrors `src/index.ts`. */
@@ -168,6 +169,10 @@ const buildHono = (
   app.options("*", (c) => c.body(null, 204));
 
   registerHealthz(app);
+  // Search must register BEFORE the sessions routes: `/api/sessions/:id`
+  // would otherwise swallow `/api/sessions/search` as a session with
+  // id "search" and 404. Static segments win when registered first.
+  registerSearchRoutes(app, { runtime, projectId });
   registerSessionsRoutes(app, { runtime, projectId });
   registerEventsRoutes(app, { runtime, projectId });
   registerProjectsRoutes(app, { runtime });

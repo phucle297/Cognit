@@ -19,6 +19,7 @@
     "@hono/node-server": "^2.0.5",
     "commander": "^15.0.0",
     "effect": "3.21.3",
+    "fuse.js": "^7.0.0",
     "hono": "^4.12.26",
     "ulid": "^3.0.2"
   },
