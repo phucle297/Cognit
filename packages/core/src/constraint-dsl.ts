@@ -173,7 +173,38 @@ export const BlockAction = Schema.Struct({
   kind: Schema.Literal("block"),
 });
 
-export const Action = BlockAction; // v1: closed at 1
+/**
+ * v2 mutation actions — fired post-append on `experiment_completed`
+ * and `verification_failed` events. Each emits ONE canonical event
+ * with `actor_id = "system:constraint-engine"`. Schema-only here;
+ * engine wiring is 8g.3.
+ */
+export const RejectHypothesisAction = Schema.Struct({
+  kind: Schema.Literal("reject_hypothesis"),
+  reason: Schema.String.pipe(Schema.minLength(1)),
+  reason_type: Schema.Literal("evidence", "superseded", "constraint"),
+});
+
+export const WeakenHypothesisAction = Schema.Struct({
+  kind: Schema.Literal("weaken_hypothesis"),
+});
+
+export const PromoteHypothesisAction = Schema.Struct({
+  kind: Schema.Literal("promote_hypothesis"),
+});
+
+export const CreateFindingAction = Schema.Struct({
+  kind: Schema.Literal("create_finding"),
+  text: Schema.String.pipe(Schema.minLength(1)),
+});
+
+export const Action = Schema.Union(
+  BlockAction,
+  RejectHypothesisAction,
+  WeakenHypothesisAction,
+  PromoteHypothesisAction,
+  CreateFindingAction,
+);
 export type Action = Schema.Schema.Type<typeof Action>;
 
 // ---------------------------------------------------------------------------

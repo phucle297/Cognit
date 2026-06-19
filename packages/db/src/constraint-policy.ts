@@ -14,9 +14,10 @@
  * trade-off for a 13-predicate closed vocabulary.
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 import type { EngineRule } from "./constraint-engine.js";
 import { decodePredicate } from "./constraint-engine.js";
+import { Action } from "@cognit/core";
 import { DbError } from "./errors.js";
 import { EventStore } from "./context.js";
 
@@ -85,9 +86,10 @@ export const ConstraintPolicyLive: Layer.Layer<ConstraintPolicy, never, EventSto
                 }),
               );
             }
-            // v1 only has one action shape (`block`); reject any other
-            // kind so a future v2 (tag/redact) bumps a closed-version
-            // check here, not a silent coercion to block.
+            // v2 action union: `block`, `reject_hypothesis`,
+            // `weaken_hypothesis`, `promote_hypothesis`, `create_finding`.
+            // Each kind routes through the v1 Action Effect-Schema union;
+            // unknown kinds fail loudly here, not silently coerced.
             let parsedAction: unknown;
             try {
               parsedAction = JSON.parse(action);
@@ -98,21 +100,20 @@ export const ConstraintPolicyLive: Layer.Layer<ConstraintPolicy, never, EventSto
                 }),
               );
             }
-            const actionKind =
-              parsedAction && typeof parsedAction === "object" && (parsedAction as { kind?: unknown }).kind === "block"
-                ? "block"
-                : null;
-            if (actionKind !== "block") {
+            let validatedAction: EngineRule["then"];
+            try {
+              validatedAction = Schema.decodeUnknownSync(Action)(parsedAction) as EngineRule["then"];
+            } catch (e) {
               return yield* Effect.fail(
                 new DbError({
-                  message: `ConstraintPolicy.loadRules: unknown action kind on event ${ev.id} (v1 supports only 'block')`,
+                  message: `ConstraintPolicy.loadRules: invalid action on event ${ev.id}: ${(e as Error).message}`,
                 }),
               );
             }
             out.push({
               rule_id: ruleId,
               when: decoded,
-              then: { kind: actionKind } as { kind: "block" },
+              then: validatedAction,
               reason,
             });
           }
