@@ -12,6 +12,8 @@ import { findProjectRoot, projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
 import { writeCurrentSession, clearCurrentSession } from "../current-session.js";
+import { resolveServerUrl, serverFetch, ServerHttpError } from "../server-http.js";
+import { formatRecoveryBlock } from "./recovery.js";
 import { getOutputMode, emit } from "../output.js";
 
 interface SessionCreateOptions {
@@ -27,6 +29,8 @@ interface SessionListOptions {
 interface SessionResumeOptions {
   fork?: boolean;
   actor?: string;
+  search?: string;
+  serverUrl?: string;
 }
 
 interface SessionActorOnly {
@@ -372,6 +376,8 @@ export function registerSession(program: Command): void {
     .description("resume a session (default forks; pass --fork=false to reopen)")
     .option("--fork <bool>", "fork into a new session (default: true)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
+    .option("--search <query>", "fuzzy-match open sessions by goal and pick most recent")
+    .option("--server-url <url>", "server base URL for --search and recovery (default: $COGNIT_SERVER_URL or http://127.0.0.1:6971)")
     .action(async (ref: string, opts: SessionResumeOptions) => {
       const root = requireProjectRoot();
       const project = await loadProject(root);
@@ -381,16 +387,68 @@ export function registerSession(program: Command): void {
       if (opts.fork !== undefined) {
         fork = !["false", "0", "no"].includes(String(opts.fork).toLowerCase());
       }
+      // Resolve the target session. When --search is given, hit the
+      // fuzzy search endpoint and pick the most-recent active session
+      // from the ranked results. AC-7.14: multiple ambiguous hits
+      // (same goal text) print a warning to stderr but still proceed
+      // with the most-recent by created_at.
+      let targetRef = ref;
+      if (opts.search !== undefined && opts.search.length > 0) {
+        const base = resolveServerUrl({ serverUrl: opts.serverUrl });
+        const qs = new URLSearchParams({ q: opts.search, status: "active" });
+        const env = (await serverFetch(base, `/api/sessions/search?${qs.toString()}`)) as
+          | { data?: { results?: ReadonlyArray<{ session_id: string; kind: string }> } }
+          | null;
+        const data = env?.data ?? {};
+        const hits = Array.isArray(data.results) ? data.results : [];
+        if (hits.length === 0) {
+          process.stderr.write(`cognit: no matching session\n`);
+          process.exitCode = 1;
+          return;
+        }
+        // Group by session_id keeping the lowest-ranked (best) entry,
+        // then fetch each candidate's created_at via SessionService so
+        // we can pick the most recent.
+        const bySession = new Map<string, { sessionId: string; kind: string }>();
+        for (const h of hits) {
+          if (!bySession.has(h.session_id)) bySession.set(h.session_id, { sessionId: h.session_id, kind: h.kind });
+        }
+        const candidates = Array.from(bySession.values());
+        const program = Effect.gen(function* () {
+          const service = yield* SessionService;
+          const rows: Array<SessionRow> = [];
+          for (const c of candidates) {
+            const r = yield* service.show(c.sessionId);
+            rows.push(r.session);
+          }
+          return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
+        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const sorted = (await Effect.runPromise(withAppLayer(root, program) as any)) as ReadonlyArray<SessionRow>;
+        if (sorted.length === 0) {
+          process.stderr.write(`cognit: no matching session\n`);
+          process.exitCode = 1;
+          return;
+        }
+        if (sorted.length > 1) {
+          process.stderr.write(
+            `cognit: warning — ${sorted.length} sessions match --search "${opts.search}"; resuming the most recent.\n`,
+          );
+        }
+        const mostRecent = sorted[0]!;
+        targetRef = mostRecent.id;
+      }
       // We need the row, not just an id, to pass idOrGoal through the
       // service. But the service's `resume` handles that for us, so
       // we can pass the ref as-is.
+      let resumedId = targetRef;
       await runCommand(
         root,
         Effect.gen(function* () {
           const service = yield* SessionService;
           const r = yield* service.resume({
             projectId: project.id,
-            idOrGoal: ref,
+            idOrGoal: targetRef,
             fork,
             actor,
           });
@@ -399,6 +457,7 @@ export function registerSession(program: Command): void {
           process.stdout.write(`forked:     ${r.forked ? "yes (new session)" : "no (reopened)"}\n`);
           process.stdout.write(`status:     ${r.session.status}\n`);
           process.stdout.write(`goal:       ${r.session.goal}\n`);
+          resumedId = r.session.id;
           // Phase 3b: resume updates the sticky pointer to the new
           // (possibly forked) session id. Same try/catch semantics as
           // create: pointer is convenience, not contract.
@@ -411,6 +470,30 @@ export function registerSession(program: Command): void {
           }
         }),
       );
+      // AC-7.13: print a 3-field minimum recovery block after every
+      // successful resume. Best-effort: a server outage should not
+      // turn a successful resume into a non-zero exit.
+      try {
+        const base = resolveServerUrl({ serverUrl: opts.serverUrl });
+        const env = (await serverFetch(
+          base,
+          `/api/sessions/${encodeURIComponent(resumedId)}/recovery`,
+        )) as { data?: Record<string, unknown> } | null;
+        const data = env?.data;
+        if (data !== undefined && data !== null) {
+          process.stdout.write(formatRecoveryBlock(data));
+        }
+      } catch (e) {
+        if (e instanceof ServerHttpError) {
+          process.stderr.write(
+            `cognit: warning — could not fetch recovery block: ${e.status} ${e.url}\n`,
+          );
+        } else {
+          process.stderr.write(
+            `cognit: warning — could not fetch recovery block: ${(e as Error).message ?? String(e)}\n`,
+          );
+        }
+      }
     });
 
   session
