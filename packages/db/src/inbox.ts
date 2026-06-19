@@ -4,9 +4,18 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { Logger } from "./context";
 import { InboxError } from "./errors";
-import type { AppendEventInput } from "./event-store";
+import { moveToError } from "./inbox-sidecar";
+import { PAYLOAD_SCHEMAS_BY_VERSION } from "./event-schema";
 import { ActorType } from "./actor";
 import { SessionService, type SessionAppendEventInput } from "./session-service";
+import {
+  ConstraintViolation,
+  DbError,
+  SessionClosed,
+  UnknownEventType,
+  UnknownSession,
+  ValidationFailure,
+} from "./errors";
 
 type LoggerService = Context.Tag.Service<typeof Logger>;
 type SessionServiceT = Context.Tag.Service<typeof SessionService>;
@@ -19,6 +28,83 @@ type SessionServiceT = Context.Tag.Service<typeof SessionService>;
  */
 const decodeActorType = (s: string): Either.Either<ActorType, unknown> =>
   Schema.decodeUnknownEither(ActorType)(s);
+
+/**
+ * ULID regex (Crockford base32, 26 chars). Used both for the envelope
+ * `session_id` field and for the filename pattern
+ * `<session-id>-<ulid>.json`. Per plan.xml:670 and plan.xml:692.
+ *
+ * Unanchored: `Schema.pattern` and `RegExp.test` both anchor the
+ * pattern to the whole string, so explicit `^…$` would be a no-op
+ * (and would break composition when splicing the pattern into the
+ * filename regex).
+ */
+const ULID_RE = /[0-9A-HJKMNP-TV-Z]{26}/;
+
+/**
+ * Inbox file naming convention: `<session-id>-<event-ulid>.json`.
+ * The session id is the parent; the trailing ulid is the event id
+ * the producer chose. Reject any file that does not match — the
+ * producer forgot the atomic-write dance.
+ *
+ * Note: `ULID_RE.source` includes `^…$` anchors. We strip them and
+ * rebuild without the inner `$` so the two ULID parts can be
+ * composed.
+ */
+const INBOX_FILENAME_RE = new RegExp(
+  `^[0-9A-HJKMNP-TV-Z]{26}-[0-9A-HJKMNP-TV-Z]{26}\\.json$`,
+);
+
+/**
+ * Envelope schema. Required fields per plan.xml:692. `version` is a
+ * literal union of the two versions the schema registry knows
+ * (`packages/db/src/event-schema.ts`); unknown versions fail at the
+ * envelope-decode step. `payload` is intentionally `Schema.Unknown`
+ * because per-payload validation runs against the version+type keyed
+ * map below.
+ */
+const EnvelopeSchema = Schema.Struct({
+  type: Schema.String.pipe(Schema.minLength(1)),
+  version: Schema.Literal("1.0.0", "1.1.0"),
+  session_id: Schema.String.pipe(Schema.pattern(ULID_RE)),
+  actor_name: Schema.String.pipe(Schema.minLength(1)),
+  actor_type: ActorType,
+  payload: Schema.Unknown,
+  id: Schema.optional(Schema.String),
+  source: Schema.optional(
+    Schema.Struct({
+      tool: Schema.String,
+      command: Schema.String,
+      filePath: Schema.optional(Schema.String),
+    }),
+  ),
+  artifactRefs: Schema.optional(Schema.Array(Schema.String)),
+  causationId: Schema.optional(Schema.String),
+  correlationId: Schema.optional(Schema.String),
+  confidence: Schema.optional(Schema.Number),
+  parentVerificationId: Schema.optional(Schema.String),
+  linkedHypothesisId: Schema.optional(Schema.String),
+});
+
+/**
+ * Cached compiled payload Schemas, keyed by `"<version>:<type>"`. The
+ * schema registry is module-static, so a single lookup table is enough
+ * — no per-file cost. The cache is populated lazily on first decode.
+ */
+const payloadSchemaCache = new Map<string, Schema.Schema<any, any, never>>();
+
+const lookupPayloadSchema = (
+  version: string,
+  type: string,
+): Schema.Schema<any, any, never> | undefined => {
+  const key = `${version}:${type}`;
+  const cached = payloadSchemaCache.get(key);
+  if (cached) return cached;
+  const byVersion = PAYLOAD_SCHEMAS_BY_VERSION[version];
+  const schema = byVersion?.[type] as Schema.Schema<any, any, never> | undefined;
+  if (schema) payloadSchemaCache.set(key, schema);
+  return schema;
+};
 
 /**
  * Watch a directory for `.json` files (atomically renamed from `.tmp`).
@@ -38,20 +124,6 @@ export interface InboxWatcherConfig {
   readonly errorDir: string;
   readonly debounceMs: number;
 }
-
-/** Move a file. Errors are logged, not thrown — best-effort. */
-const moveFile = (from: string, to: string, logger: LoggerService, label: string) =>
-  Effect.gen(function* () {
-    yield* Effect.tryPromise({
-      try: () => fs.rename(from, to),
-      catch: (e) => new InboxError({ file: from, message: `move ${label}`, cause: e }),
-    }).pipe(
-      Effect.tapError((e) =>
-        logger.log("error", { file: from, error: String(e.cause) }, `inbox: ${label} failed`),
-      ),
-      Effect.ignore,
-    );
-  });
 
 export const makeInboxWatcher = (config: InboxWatcherConfig) =>
   Effect.gen(function* () {
@@ -76,6 +148,18 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
      * Pure processing step: read file, parse, attempt append, move to
      * success or error dir. This is what unit tests exercise.
      *
+     * Decode order (each step maps to a sidecar category on failure):
+     *   1. JSON.parse                    → invalid_json
+     *   2. Envelope Schema decode        → schema_validation_failure (envelope)
+     *   3. Filename regex (ULID pair)    → unknown_session_id
+     *   4. Payload Schema decode         → schema_validation_failure (payload)
+     *   5. actor_type literal decode     → invalid_actor_type (redundant w/ step 2)
+     *   6. appendEvent typed error map   → category from the typed error
+     *
+     * Step 5 is redundant in practice (envelope decode already
+     * constrains `actor_type` to the literal union), but kept as a
+     * defensive belt-and-braces against schema-registry drift.
+     *
      * Publish moved to `SessionService.appendEvent` (the chokepoint)
      * in phase 5.1 — file-based inbox writes go through the same
      * path as POST /events, so the publish happens there.
@@ -85,7 +169,6 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
     ): Effect.Effect<void, never, SessionService | Logger> =>
       Effect.gen(function* () {
         const base = path.basename(filePath);
-        let text: string;
         const readResult = yield* Effect.tryPromise({
           try: () => fs.readFile(filePath, "utf8"),
           catch: (e) => new InboxError({ file: filePath, message: "read", cause: e }),
@@ -98,51 +181,91 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           );
           return;
         }
-        text = readResult.right;
+        const text = readResult.right;
+
+        // Step 1: JSON.parse
         let parsed: unknown;
         try {
           parsed = JSON.parse(text);
         } catch (e) {
           yield* logger.log("error", { file: filePath, error: String(e) }, "inbox: invalid json");
-          yield* moveFile(filePath, path.join(config.errorDir, base), logger, "move-to-error");
+          yield* moveToError(
+            filePath,
+            base,
+            config.errorDir,
+            "invalid_json",
+            String(e),
+            logger,
+          );
           return;
         }
-        if (!parsed || typeof parsed !== "object") {
-          yield* logger.log("error", { file: filePath }, "inbox: not an object");
-          yield* moveFile(filePath, path.join(config.errorDir, base), logger, "move-to-error");
+
+        // Step 2: envelope schema decode. Coerces `parsed` to the
+        // typed envelope shape used below; failure maps to
+        // `schema_validation_failure` with a category-prefixed
+        // reason.
+        const envelopeResult = Schema.decodeUnknownEither(EnvelopeSchema)(parsed);
+        if (Either.isLeft(envelopeResult)) {
+          const reason = `envelope: ${String(envelopeResult.left)}`;
+          yield* logger.log("error", { file: filePath, reason }, "inbox: envelope decode failed");
+          yield* moveToError(filePath, base, config.errorDir, "schema_validation_failure", reason, logger);
           return;
         }
-        const p = parsed as {
-          id?: string;
-          type?: string;
-          session_id?: string;
-          actor_name?: string;
-          actor_type?: string;
-          payload?: unknown;
-          source?: AppendEventInput["source"];
-          artifactRefs?: ReadonlyArray<string>;
-          causationId?: string;
-          correlationId?: string;
-          confidence?: number;
-          parentVerificationId?: string;
-          linkedHypothesisId?: string;
-        };
-        if (!p.type || !p.session_id || !p.actor_name || !p.actor_type || p.payload === undefined) {
-          yield* logger.log("error", { file: filePath }, "inbox: missing required fields");
-          yield* moveFile(filePath, path.join(config.errorDir, base), logger, "move-to-error");
+        const p = envelopeResult.right;
+
+        // Step 3: filename ULID pair. Filenames that don't match
+        // `<session>-<event-ulid>.json` are rejected so producers
+        // can't sneak around the atomic-write protocol by writing
+        // `badname.json` directly.
+        if (!INBOX_FILENAME_RE.test(base)) {
+          const reason = `filename does not match <session-ulid>-<event-ulid>.json: ${base}`;
+          yield* logger.log("error", { file: filePath, reason }, "inbox: bad filename");
+          yield* moveToError(filePath, base, config.errorDir, "unknown_session_id", reason, logger);
           return;
         }
+
+        // Step 4: payload schema decode keyed on (version, type).
+        const payloadSchema = lookupPayloadSchema(p.version, p.type);
+        if (payloadSchema) {
+          const decoded = Schema.decodeUnknownEither(payloadSchema)(p.payload);
+          if (Either.isLeft(decoded)) {
+            const reason = `payload: ${String(decoded.left)}`;
+            yield* logger.log("error", { file: filePath, reason }, "inbox: payload decode failed");
+            yield* moveToError(
+              filePath,
+              base,
+              config.errorDir,
+              "schema_validation_failure",
+              reason,
+              logger,
+            );
+            return;
+          }
+        }
+
+        // Step 5: actor_type decode. Redundant with the envelope
+        // schema (which already constrains the literal) but kept
+        // as a defensive guard.
         const actorTypeResult = decodeActorType(p.actor_type);
         if (Either.isLeft(actorTypeResult)) {
+          const reason = String(actorTypeResult.left);
           yield* logger.log(
             "error",
             { file: filePath, actor_type: p.actor_type },
             "inbox: invalid actor_type",
           );
-          yield* moveFile(filePath, path.join(config.errorDir, base), logger, "move-to-error");
+          yield* moveToError(
+            filePath,
+            base,
+            config.errorDir,
+            "invalid_actor_type",
+            reason,
+            logger,
+          );
           return;
         }
         const actorType = actorTypeResult.right;
+
         // Build the input for SessionService.appendEvent. The explicit
         // `id` from the inbox JSON is forwarded so duplicate-rename
         // reprocessing is idempotent at the event-store layer.
@@ -155,7 +278,17 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           sessionId: p.session_id,
           actor: { name: p.actor_name, type: actorType },
           ...(p.id !== undefined ? { id: p.id } : {}),
-          ...(p.source !== undefined ? { source: p.source } : {}),
+          ...(p.source !== undefined
+            ? {
+                source: {
+                  tool: p.source.tool,
+                  command: p.source.command,
+                  ...(p.source.filePath !== undefined
+                    ? { filePath: p.source.filePath }
+                    : {}),
+                },
+              }
+            : {}),
           ...(p.artifactRefs !== undefined ? { artifactRefs: p.artifactRefs } : {}),
           ...(p.causationId !== undefined ? { causationId: p.causationId } : {}),
           ...(p.correlationId !== undefined ? { correlationId: p.correlationId } : {}),
@@ -167,14 +300,24 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
             ? { linkedHypothesisId: p.linkedHypothesisId }
             : {}),
         };
+
+        // Step 6: appendEvent with typed-error → category mapping.
+        // The typed error channel is `SessionError` (DbError |
+        // SessionClosed | UnknownEventType | ValidationFailure |
+        // UnknownSession | ConstraintViolation). `DuplicateEventId`
+        // is caught inside `EventStore.append` and re-fetched before
+        // it can bubble up, so the inbox never sees it directly —
+        // the idempotency check there is the source of truth.
         const appendResult = yield* sessions.appendEvent(sessionInput).pipe(Effect.either);
         if (Either.isLeft(appendResult)) {
+          const e = appendResult.left;
+          const { category, reason } = mapAppendError(e);
           yield* logger.log(
             "error",
-            { file: filePath, error: String(appendResult.left) },
-            "inbox: append failed",
+            { file: filePath, error: reason },
+            `inbox: append failed (${category})`,
           );
-          yield* moveFile(filePath, path.join(config.errorDir, base), logger, "move-to-error");
+          yield* moveToError(filePath, base, config.errorDir, category, reason, logger);
           return;
         }
         const result = appendResult.right;
@@ -186,16 +329,71 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
         // Publish chokepoint lives in SessionService.appendEvent
         // (phase 5.1). The inbox watcher goes through the same path
         // as POST /events, so no second publish here.
-        yield* moveFile(
-          filePath,
-          path.join(config.processedDir, `${result.event.id}.json`),
-          logger,
-          "move-to-processed",
-        );
+        yield* Effect.tryPromise({
+          try: () =>
+            fs.rename(filePath, path.join(config.processedDir, `${result.event.id}.json`)),
+          catch: (renameErr) =>
+            new InboxError({
+              file: filePath,
+              message: "move-to-processed",
+              cause: renameErr,
+            }),
+        }).pipe(Effect.ignoreLogged);
       });
 
     return { processFile };
   });
+
+/**
+ * Map a typed `SessionError` from `SessionService.appendEvent` to a
+ * sidecar category + human-readable reason. The four spec-listed
+ * categories (`invalid_json`, `unknown_session_id`,
+ * `schema_validation_failure`, `actor_not_registered`) are covered;
+ * the internal categories (`invalid_actor_type`, `invalid_envelope`)
+ * never reach this path because the watcher rejects them earlier.
+ */
+const mapAppendError = (
+  e:
+    | DbError
+    | SessionClosed
+    | UnknownEventType
+    | ValidationFailure
+    | UnknownSession
+    | ConstraintViolation,
+): { category: import("./inbox-sidecar").InboxFailureCategory; reason: string } => {
+  switch (e._tag) {
+    case "UnknownSession":
+      return {
+        category: "unknown_session_id",
+        reason: `session not found: ${e.sessionId}`,
+      };
+    case "ValidationFailure":
+      return {
+        category: "schema_validation_failure",
+        reason: `${e.type}@${e.version}: ${e.issues}`,
+      };
+    case "UnknownEventType":
+      return {
+        category: "schema_validation_failure",
+        reason: `unknown event type: ${e.type}`,
+      };
+    case "ConstraintViolation":
+      return {
+        category: "actor_not_registered",
+        reason: `rule ${e.ruleId} blocked: ${e.reason}`,
+      };
+    case "SessionClosed":
+      return {
+        category: "unknown_session_id",
+        reason: `session closed: ${e.sessionId}`,
+      };
+    case "DbError":
+      return {
+        category: "actor_not_registered",
+        reason: `db: ${e.message}`,
+      };
+  }
+};
 
 /**
  * Pure chokidar `ignored` predicate. Exported for test coverage.

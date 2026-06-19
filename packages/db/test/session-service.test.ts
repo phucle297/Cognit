@@ -20,7 +20,7 @@ import {
   SnapshotServiceLive,
   UuidTest,
 } from "../src";
-import { EventStoreLive } from "../src/event-store";
+import { EventStoreDefault } from "../src/event-store";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy";
 
 /**
@@ -44,7 +44,7 @@ const makeTestLayer = (
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
   const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   // eventStore consumes DbConnection once; dbConn is merged back in below.
-  const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
+  const eventStore = Layer.provide(Layer.provide(EventStoreDefault, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   // constraintPolicy depends on EventStore.
@@ -657,8 +657,10 @@ describe("SessionService.show (reducer view)", () => {
           [created.session.id],
         );
         expect(snap).toBeDefined();
-        // session_created + session_closed = 2 events
-        expect(snap?.event_count).toBe(2);
+        // session_created + session_closed + actor_registered (audit
+        // row emitted by `ensureActor` on first auto-registration,
+        // Phase 9.1 AC 9.1.4) = 3 events
+        expect(snap?.event_count).toBe(3);
 
         const row = conn.handle.get<{ last_snapshot_event_id: string | null }>(
           "SELECT last_snapshot_event_id FROM sessions WHERE id = ?",
@@ -705,7 +707,9 @@ describe("SessionService.show (reducer view)", () => {
         });
         const r = yield* service.takeSnapshot(created.session.id);
         expect(r.taken).toBe(true);
-        expect(r.snapshot.event_count).toBe(1); // session_created only
+        // session_created + actor_registered (audit row from first
+        // auto-registration, Phase 9.1 AC 9.1.4)
+        expect(r.snapshot.event_count).toBe(2);
       }),
     );
   });
@@ -743,8 +747,12 @@ describe("SessionService.show (reducer view)", () => {
           actor: ACTOR,
         });
         const first = yield* service.takeSnapshot(created.session.id);
-        expect(first.snapshot.event_count).toBe(1);
-        // Append more events
+        // session_created + actor_registered = 2 events at first snapshot.
+        expect(first.snapshot.event_count).toBe(2);
+        // Append more events. Each auto-registration emits an
+        // actor_registered audit row (Phase 9.1 AC 9.1.4); the test
+        // actor is already registered so no new audit row is emitted
+        // here, just the observation_recorded rows.
         yield* store.append({
           type: "observation_recorded",
           payload: { text: "a" },
@@ -759,7 +767,8 @@ describe("SessionService.show (reducer view)", () => {
         });
         const second = yield* service.takeSnapshot(created.session.id);
         expect(second.taken).toBe(true);
-        expect(second.snapshot.event_count).toBe(3);
+        // 2 (first snap) + 2 (new observations) = 4 events at second snap.
+        expect(second.snapshot.event_count).toBe(4);
         expect(second.snapshot.id).not.toBe(first.snapshot.id);
       }),
     );
@@ -865,8 +874,13 @@ describe("SessionService.appendEvent (auto-snapshot)", () => {
           actor: ACTOR,
         });
         const sid = created.session.id;
-        // everyN=3: 1st append (after session_created = 2 events) should
-        // not trigger; 2nd (3 events) crosses the 3 threshold.
+        // everyN=3: phase 9.1 emits actor_registered on first
+        // auto-registration. After session.created (1 row) +
+        // actor_registered (1 row) = 2 events. The first appendEvent
+        // adds observation_recorded + (no new actor_registered —
+        // same actor) = 3 events, which crosses everyN=3 and triggers
+        // a snapshot. Subsequent appends at intervals of 1 row each
+        // cross everyN again on the 3rd one.
         const r1 = yield* service.appendEvent({
           sessionId: sid,
           type: "observation_recorded",
@@ -886,7 +900,7 @@ describe("SessionService.appendEvent (auto-snapshot)", () => {
           actor: ACTOR,
         });
         const snap = conn.handle.get<{ event_count: number; event_id: string }>(
-          "SELECT event_count, event_id FROM snapshots WHERE session_id = ?",
+          "SELECT event_count, event_id FROM snapshots WHERE session_id = ? ORDER BY event_count DESC LIMIT 1",
           [sid],
         );
         const snapCount = conn.handle.get<{ n: number }>(
@@ -897,9 +911,14 @@ describe("SessionService.appendEvent (auto-snapshot)", () => {
       }),
       Layer.succeed(SessionPolicy)({ everyN: 3, forkOnResume: true }),
     );
-    expect(r.r1.snapshotTaken).toBe(false);
-    expect(r.r2.snapshotTaken).toBe(true);
-    expect(r.r3.snapshotTaken).toBe(false); // 4 - 3 < 3, no new snap
+    // After session.created + actor_registered = 2 rows, the first
+    // append (observation_recorded) brings the count to 3 = everyN →
+    // snapshotTaken=true on r1.
+    expect(r.r1.snapshotTaken).toBe(true);
+    // r2: 4 events, 4 - 3 < 3, no new snap.
+    expect(r.r2.snapshotTaken).toBe(false);
+    // r3: 5 events, 5 - 3 < 3, no new snap.
+    expect(r.r3.snapshotTaken).toBe(false);
     expect(r.snapCount?.n).toBe(1);
     expect(r.snap?.event_count).toBe(3);
   });

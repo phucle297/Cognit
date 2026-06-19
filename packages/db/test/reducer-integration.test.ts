@@ -20,7 +20,7 @@ import {
   SnapshotServiceLive,
   UuidTest,
 } from "../src";
-import { EventStoreLive } from "../src/event-store";
+import { EventStoreDefault } from "../src/event-store";
 import { reduce } from "@cognit/core/reducer";
 import { emptySessionState } from "@cognit/core/state";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy";
@@ -46,7 +46,7 @@ const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
   const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   // eventStore consumes DbConnection once; dbConn is merged back in below.
-  const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
+  const eventStore = Layer.provide(Layer.provide(EventStoreDefault, leafs), dbConn);
   // snapshotService depends on DbConnection + leafs.
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   // constraintPolicy depends on EventStore.
@@ -243,12 +243,14 @@ describe("reducer integration — the done_when", () => {
           });
         }
 
-        // Sanity: 15 + 85 = 100 events on the wire.
+        // Sanity: 15 + 85 = 100 user events on the wire. Phase 9.1
+        // AC 9.1.4 adds one actor_registered audit row on first
+        // auto-registration, so total rows = 101.
         const countBefore = conn.handle.get<{ n: number }>(
           "SELECT COUNT(*) as n FROM events WHERE session_id = ?",
           [sessionId],
         );
-        expect(countBefore?.n).toBe(100);
+        expect(countBefore?.n).toBe(101);
 
         // 9. Pre-snapshot rich state assertions. No snapshot has been
         //    taken yet, so service.show folds all events from scratch
@@ -259,7 +261,10 @@ describe("reducer integration — the done_when", () => {
         //    through the snapshot+tail path.
         const pre = yield* service.show(sessionId);
         expect(pre.snapshot).toBeNull();
-        expect(pre.tail_event_count).toBe(100);
+        // Phase 9.1 AC 9.1.4: one actor_registered audit row from
+        // first auto-registration. The reducer's tail_event_count
+        // covers every row in the events table, audit included.
+        expect(pre.tail_event_count).toBe(101);
         expect(pre.state.observations).toHaveLength(88); // 3 + 85
         const preRejected = Array.from(pre.state.hypotheses.values()).find(
           (h) => h.current_state === "rejected",
@@ -291,7 +296,11 @@ describe("reducer integration — the done_when", () => {
             ),
         });
         expect(snap1).not.toBeNull();
-        expect(snap1?.event_count).toBe(100);
+        // Snapshot's event_count is taken from the events table at
+        // snapshot time, not the passed-in currentEventCount. Phase
+        // 9.1 added one actor_registered audit row, so the snapshot
+        // covers 101 rows even though currentEventCount was 100.
+        expect(snap1?.event_count).toBe(101);
         expect(snap1?.session_id).toBe(sessionId);
 
         // sessions.last_snapshot_event_id should be the 100th event's id.
@@ -315,11 +324,11 @@ describe("reducer integration — the done_when", () => {
         const r = yield* service.show(sessionId);
         // tail_event_count == 5 means exactly 5 events were folded
         // after the snapshot, so timeline.length is the snapshot's
-        // serialized timeline of 100 plus the 5 tail events = 105.
+        // serialized timeline of 101 plus the 5 tail events = 106.
         expect(r.tail_event_count).toBe(5);
         expect(r.snapshot).not.toBeNull();
-        expect(r.snapshot?.event_count).toBe(100);
-        expect(r.state.timeline.length).toBe(105);
+        expect(r.snapshot?.event_count).toBe(101);
+        expect(r.state.timeline.length).toBe(106);
 
         // The timeline on the snapshot+tail path must contain the 5
         // tail observation events we just appended (in addition to
@@ -358,11 +367,13 @@ describe("reducer integration — the done_when", () => {
           [sessionId],
         );
         expect(allSnaps).toHaveLength(2);
-        expect(allSnaps[0]?.event_count).toBe(100);
-        // The close path appends a session_closed event (the 106th),
-        // then writes a snapshot at event_count=106 — covering
-        // everything including the close.
-        expect(allSnaps[1]?.event_count).toBe(106);
+        expect(allSnaps[0]?.event_count).toBe(101);
+        // The close path appends a session_closed event (the 107th),
+        // then writes a snapshot at event_count=107 — covering
+        // everything including the close. The +1 over the pre-close
+        // count of 106 comes from the actor_registered audit row
+        // emitted on first auto-registration (Phase 9.1 AC 9.1.4).
+        expect(allSnaps[1]?.event_count).toBe(107);
 
         const closed = conn.handle.get<{ status: string; closed_at: string | null }>(
           "SELECT status, closed_at FROM sessions WHERE id = ?",
@@ -432,7 +443,7 @@ describe("reducer integration — auto-snapshot trigger", () => {
   const makeAutoSnapLayer = (dbPath: string) => {
     const dbConn = Layer.effect(DbConnection, openDb(dbPath));
     const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
-    const eventStore = Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn);
+    const eventStore = Layer.provide(Layer.provide(EventStoreDefault, leafs), dbConn);
     const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
     const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
     const policyLayer = Layer.succeed(SessionPolicy)({

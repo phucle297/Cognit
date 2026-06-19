@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 8g.6 Polish + verification + docs/phase-8-results.md docs phase-8 polish verification
+search: 9.1 Inbox hardening (ULID + Effect-Schema + sidecar + actor defaults)
 queue: 
-next: 
+next: Cognit-b7q

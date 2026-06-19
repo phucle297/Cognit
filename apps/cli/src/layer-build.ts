@@ -1,5 +1,8 @@
 import { Effect, Layer } from "effect";
 import {
+  ActorDefaults,
+  ActorDefaultsBuiltIn,
+  actorDefaultsLayer,
   ArtifactRepo,
   DbConnection,
   DbError,
@@ -52,6 +55,7 @@ export type AppServices =
   | DbSize
   | ArtifactRepo
   | Uuid
+  | ActorDefaults
   | EventBus;
 
 /**
@@ -82,10 +86,14 @@ export const buildAppLayer = (
   root: string,
   policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
   redactionConfig: Layer.Layer<RedactionConfig> = RedactionConfigDefault,
+  actorDefaults: Layer.Layer<ActorDefaults> = actorDefaultsLayer(ActorDefaultsBuiltIn),
 ): AppLayer => Layer.provideMerge(
   Layer.merge(
-    DbLive(root + "/.cognit/cognit.db", policy, redactionConfig),
-    LoggerNoop,
+    Layer.merge(
+      DbLive(root + "/.cognit/cognit.db", policy, redactionConfig),
+      LoggerNoop,
+    ),
+    actorDefaults,
   ),
   EventBusNoop,
 ) as AppLayer;
@@ -148,6 +156,17 @@ export const withAppLayerAndConfig = async <A, E, R>(
   const redactionCfg: Layer.Layer<RedactionConfig> = Layer.succeed(RedactionConfig)({
     userPatterns: config.redaction.patterns,
   });
+  // Per-type actor trust defaults from cognit.yaml →
+  // actors.defaults.<type>. Falls back to built-ins when the key is
+  // absent (the config schema guarantees the values via
+  // `optionalWith(..., { default: () => ... })`).
+  const actorDefaults: Layer.Layer<ActorDefaults> = actorDefaultsLayer({
+    human: config.actors.defaults.human,
+    worker: config.actors.defaults.worker,
+    system: config.actors.defaults.system,
+  });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return eff.pipe(Effect.provide(buildAppLayer(root, policy, redactionCfg))) as any;
+  return eff.pipe(
+    Effect.provide(buildAppLayer(root, policy, redactionCfg, actorDefaults)),
+  ) as any;
 };

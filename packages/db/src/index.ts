@@ -23,6 +23,8 @@ export * from "./bus";
 export * from "./bus-noop";
 export * from "./bus-live";
 export * from "./inbox";
+export * from "./inbox-sidecar";
+export * from "./actor-defaults";
 export * from "./connection";
 export * from "./project-service";
 export * from "./session-service";

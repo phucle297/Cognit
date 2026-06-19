@@ -14,6 +14,7 @@ import { redactEvent } from "./redaction";
 import type { EventRow } from "./schema/rows";
 import { Uuid } from "./ulid";
 import type { ActorType } from "./actor";
+import { ActorDefaults, ActorDefaultsBuiltIn, actorDefaultsLayer } from "./actor-defaults";
 
 export interface AppendEventInput {
   readonly id?: string;
@@ -71,21 +72,34 @@ export interface ListEventsResult {
 
 export type { EventRow } from "./schema/rows";
 
-const DEFAULT_TRUST_BY_TYPE: Readonly<Record<ActorType, number>> = {
-  human: 0.9,
-  worker: 0.6,
-  system: 1.0,
-};
-
 type DbConnService = Context.Tag.Service<typeof DbConnection>;
 type UuidService = Context.Tag.Service<typeof Uuid>;
 type LoggerService = Context.Tag.Service<typeof Logger>;
+type ActorDefaultsService = Context.Tag.Service<typeof ActorDefaults>;
 
 const nowIso = (): string => new Date().toISOString();
 
+export interface EnsureActorResult {
+  readonly id: string;
+  readonly isNew: boolean;
+  readonly trust: number;
+  readonly name: string;
+  readonly type: ActorType;
+}
+
 /**
  * Ensure an actor with the given name exists. If not, register it with
- * the default trust_score from `defaultTrustByType`. Updates last_seen_at.
+ * the default trust_score from `ActorDefaults` (sourced from
+ * `cognit.yaml → actors.defaults.<type>`). Updates `last_seen_at`.
+ *
+ * Trust-0 sentinel (plan.xml:678): when an actor row already exists
+ * with `trust_score = 0` (manually set via `cognit actor trust set 0`),
+ * the next registration touch overwrites the trust back to the type
+ * default. Non-zero explicit trusts are preserved — the guard
+ * `AND trust_score = 0` makes this opt-in per row.
+ *
+ * Returns the actor row plus an `isNew` flag so the caller can emit
+ * an `actor_registered` audit event on first registration.
  *
  * All SQLite calls are wrapped in `trySync` so any driver throw becomes a
  * typed `DbError` in the Effect error channel. This is critical: the
@@ -95,13 +109,17 @@ const nowIso = (): string => new Date().toISOString();
 const ensureActor = (
   conn: DbConnService,
   uuid: UuidService,
+  defaults: ActorDefaultsService,
   name: string,
   type: ActorType,
-): Effect.Effect<string, DbError> =>
+): Effect.Effect<EnsureActorResult, DbError> =>
   Effect.gen(function* () {
     const h = conn.handle;
     const existing = yield* trySync(
-      () => h.get<{ id: string }>("SELECT id FROM actors WHERE name = ?", [name]),
+      () => h.get<{ id: string; trust_score: number }>(
+        "SELECT id, trust_score FROM actors WHERE name = ?",
+        [name],
+      ),
       (e) => new DbError({ message: "ensureActor: select", cause: e }),
     );
     if (existing) {
@@ -109,10 +127,27 @@ const ensureActor = (
         () => h.run("UPDATE actors SET last_seen_at = ? WHERE id = ?", [nowIso(), existing.id]),
         (e) => new DbError({ message: "ensureActor: update last_seen_at", cause: e }),
       );
-      return existing.id;
+      // Trust-0 sentinel: overwrite an explicit zero back to the type
+      // default. Non-zero trusts (including user-set values > 0) are
+      // preserved by the WHERE-clause guard.
+      yield* trySync(
+        () =>
+          h.run(
+            "UPDATE actors SET trust_score = ? WHERE id = ? AND trust_score = 0",
+            [defaults[type], existing.id],
+          ),
+        (e) => new DbError({ message: "ensureActor: trust-0 sentinel", cause: e }),
+      );
+      return {
+        id: existing.id,
+        isNew: false,
+        trust: defaults[type],
+        name,
+        type,
+      };
     }
     const id = yield* uuid.make();
-    const trust = DEFAULT_TRUST_BY_TYPE[type];
+    const trust = defaults[type];
     yield* trySync(
       () =>
         h.run(
@@ -122,7 +157,7 @@ const ensureActor = (
         ),
       (e) => new DbError({ message: "ensureActor: insert", cause: e }),
     );
-    return id;
+    return { id, isNew: true, trust, name, type };
   });
 
 /**
@@ -176,7 +211,7 @@ const fetchEvent = (conn: DbConnService, id: string): EventRow | undefined =>
 export const EventStoreLive: Layer.Layer<
   EventStore,
   never,
-  DbConnection | Redactor | Uuid | Logger
+  DbConnection | Redactor | Uuid | Logger | ActorDefaults
 > = Layer.effect(
   EventStore,
   Effect.gen(function* () {
@@ -184,6 +219,7 @@ export const EventStoreLive: Layer.Layer<
     const redactor = yield* Redactor;
     const uuid = yield* Uuid;
     const logger: LoggerService = yield* Logger;
+    const actorDefaults = yield* ActorDefaults;
 
     return {
       append: (input) =>
@@ -252,7 +288,63 @@ export const EventStoreLive: Layer.Layer<
                 return existing;
               }
 
-              const actorId = yield* ensureActor(conn, uuid, input.actor.name, input.actor.type);
+              const actor = yield* ensureActor(
+                conn,
+                uuid,
+                actorDefaults,
+                input.actor.name,
+                input.actor.type,
+              );
+
+              // Capture created_at once and reuse for the main event and
+              // every side-effect row (actor_registered, redaction_applied,
+              // constraint_rule_applied) so the audit rows cannot sort
+              // after the main row.
+              const createdAt = nowIso();
+
+              // Emit `actor_registered` on first registration so the
+              // event stream reflects trust changes. Uses the same
+              // `createdAt` as the main event so the audit row sorts
+              // at the same instant. Inserted via the same tx; if the
+              // main insert rolls back, this does too.
+              if (actor.isNew) {
+                const regId = yield* uuid.make();
+                yield* trySync(
+                  () =>
+                    insertEvent(conn, {
+                      id: regId,
+                      project_id: session.project_id,
+                      session_id: input.sessionId,
+                      actor_id: actor.id,
+                      type: "actor_registered",
+                      version: CURRENT_VERSION,
+                      payload_json: JSON.stringify({
+                        actor_type: actor.type,
+                        actor_name: actor.name,
+                        trust_score: actor.trust,
+                      }),
+                      source_json: null,
+                      artifact_refs_json: null,
+                      // Causation id is null: the main event row doesn't
+                      // exist yet at this point in the tx, so a non-null
+                      // reference would fail the FK constraint. The
+                      // main insert below is the canonical "caused" row;
+                      // the actor_registered row stands alone as an
+                      // audit entry.
+                      causation_id: null,
+                      correlation_id: input.correlationId ?? null,
+                      confidence: null,
+                      parent_verification_id: null,
+                      linked_hypothesis_id: null,
+                      stdout_excerpt: null,
+                      exit_code: null,
+                      duration_ms: null,
+                      created_artifact_id: null,
+                      created_at: createdAt,
+                    }),
+                  (e) => new DbError({ message: "append: insert actor_registered", cause: e }),
+                );
+              }
 
               // Apply redaction. Redaction must be inside the tx so that
               // the redaction_applied event is atomic with the main row.
@@ -273,14 +365,13 @@ export const EventStoreLive: Layer.Layer<
               // Capture created_at once and reuse for the main event and
               // every redaction_applied hit so the side-effect rows
               // cannot sort after the main row.
-              const createdAt = nowIso();
               const inserted = yield* trySync(
                 () =>
                   insertEvent(conn, {
                     id: eventId,
                     project_id: session.project_id,
                     session_id: input.sessionId,
-                    actor_id: actorId,
+                    actor_id: actor.id,
                     type: input.type,
                     version: CURRENT_VERSION,
                     payload_json: JSON.stringify(redactedPayload),
@@ -341,7 +432,7 @@ export const EventStoreLive: Layer.Layer<
                       id: redactionId,
                       project_id: session.project_id,
                       session_id: input.sessionId,
-                      actor_id: actorId,
+                      actor_id: actor.id,
                       type: "redaction_applied",
                       version: CURRENT_VERSION,
                       payload_json: JSON.stringify({
@@ -382,7 +473,7 @@ export const EventStoreLive: Layer.Layer<
                       id: auditId,
                       project_id: session.project_id,
                       session_id: input.sessionId,
-                      actor_id: actorId,
+                      actor_id: actor.id,
                       type: "constraint_rule_applied",
                       version: CURRENT_VERSION,
                       payload_json: JSON.stringify({
@@ -459,3 +550,19 @@ export const EventStoreLive: Layer.Layer<
     };
   }),
 );
+
+/**
+ * `EventStoreLive` bundled with a default `ActorDefaults` layer so
+ * tests and CLI commands that don't care about per-project trust
+ * configuration get the built-in defaults automatically. Production
+ * callers should compose `EventStoreLive` with a config-derived
+ * `ActorDefaults` layer instead (see `apps/cli/src/layer-build.ts`).
+ *
+ * Uses `Layer.provideMerge` (not `Layer.merge`) so the inner
+ * `ActorDefaults` requirement is satisfied by the default layer.
+ */
+export const EventStoreDefault: Layer.Layer<
+  EventStore | ActorDefaults,
+  never,
+  DbConnection | Redactor | Uuid | Logger
+> = Layer.provideMerge(EventStoreLive, actorDefaultsLayer(ActorDefaultsBuiltIn));

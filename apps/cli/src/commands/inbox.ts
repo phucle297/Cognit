@@ -1,6 +1,15 @@
 import { Command } from "commander";
 import { Effect, Layer } from "effect";
-import { drainInbox, runInboxWatcher, SessionPolicy, sessionPolicyFromConfig } from "@cognit/db";
+import {
+  ActorDefaults,
+  ActorDefaultsBuiltIn,
+  actorDefaultsLayer,
+  drainInbox,
+  RedactionConfigDefault,
+  runInboxWatcher,
+  SessionPolicy,
+  sessionPolicyFromConfig,
+} from "@cognit/db";
 import { findProjectRoot, projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { buildAppLayer } from "../layer-build.js";
@@ -21,12 +30,21 @@ const requireProjectRoot = (): string => {
   return root;
 };
 
-const buildInboxConfig = (root: string) => ({
-  inboxDir: projectPaths(root).inbox,
-  processedDir: `${projectPaths(root).dir}/processed`,
-  errorDir: projectPaths(root).inboxError,
-  debounceMs: 200,
-});
+/**
+ * Read `cognit.yaml` once and derive the inbox watcher config. The
+ * `debounceMs` value is sourced from `inbox.debounce_ms` (defaults to
+ * 200 per the config schema) so the watcher respects whatever the
+ * user configured rather than a hardcoded CLI constant.
+ */
+const buildInboxConfigFromYaml = async (root: string) => {
+  const config = await readConfig(projectPaths(root).config);
+  return {
+    inboxDir: projectPaths(root).inbox,
+    processedDir: `${projectPaths(root).dir}/processed`,
+    errorDir: projectPaths(root).inboxError,
+    debounceMs: config.inbox.debounce_ms,
+  };
+};
 
 /**
  * Read `cognit.yaml` once and derive the `SessionPolicy` layer (for
@@ -40,13 +58,29 @@ const loadSessionPolicy = async (root: string): Promise<Layer.Layer<SessionPolic
   return Layer.succeed(SessionPolicy)(shape);
 };
 
+/**
+ * Read `cognit.yaml` once and derive the `ActorDefaults` layer. The
+ * DB layer (`ensureActor`) reads defaults off the R channel rather
+ * than a hardcoded literal — Phase 9.1 closes AC 9.1.3. Built-ins
+ * are the fallback if the config omits the relevant keys.
+ */
+const loadActorDefaults = async (root: string): Promise<Layer.Layer<ActorDefaults>> => {
+  const config = await readConfig(projectPaths(root).config);
+  return actorDefaultsLayer({
+    human: config.actors.defaults.human ?? ActorDefaultsBuiltIn.human,
+    worker: config.actors.defaults.worker ?? ActorDefaultsBuiltIn.worker,
+    system: config.actors.defaults.system ?? ActorDefaultsBuiltIn.system,
+  });
+};
+
 const runInboxCommand = <A, E, R>(
   root: string,
   policy: Layer.Layer<SessionPolicy>,
+  actorDefaults: Layer.Layer<ActorDefaults>,
   eff: Effect.Effect<A, E, R>,
 ): Promise<A> => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const provided = Effect.provide(eff, buildAppLayer(root, policy)) as any as Effect.Effect<
+  const provided = Effect.provide(eff, buildAppLayer(root, policy, RedactionConfigDefault, actorDefaults)) as any as Effect.Effect<
     A,
     E,
     never
@@ -80,11 +114,13 @@ export function registerInbox(program: Command): void {
         return;
       }
       const policy = await loadSessionPolicy(root);
-      const config = buildInboxConfig(root);
+      const actorDefaults = await loadActorDefaults(root);
+      const config = await buildInboxConfigFromYaml(root);
       if (opts.process) {
         const result = await runInboxCommand(
           root,
           policy,
+          actorDefaults,
           Effect.gen(function* () {
             return yield* drainInbox(config);
           }),
@@ -104,6 +140,7 @@ export function registerInbox(program: Command): void {
         await runInboxCommand(
           root,
           policy,
+          actorDefaults,
           Effect.gen(function* () {
             const watcher = yield* runInboxWatcher(config);
             // Long-running. Block forever; SIGTERM/SIGINT kill the

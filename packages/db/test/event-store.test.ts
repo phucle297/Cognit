@@ -14,7 +14,7 @@ import {
   RedactorLiveWithDefault,
   UuidTest,
 } from "../src";
-import { EventStoreLive } from "../src/event-store";
+import { EventStoreDefault } from "../src/event-store";
 
 /**
  * Build a Layer that has DbConnection + EventStore + Redactor + Uuid.
@@ -31,7 +31,7 @@ const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
   const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   return Layer.merge(
-    Layer.provide(Layer.provide(EventStoreLive, leafs), dbConn),
+    Layer.provide(Layer.provide(EventStoreDefault, leafs), dbConn),
     Layer.merge(dbConn, LoggerNoop),
   ) as Layer.Layer<EventStore | DbConnection | Logger, never, never>;
 };
@@ -373,6 +373,10 @@ describe("EventStore", () => {
             actor: { name: "a", type: "human" },
           });
         }
+        // Phase 9.1 AC 9.1.4: first auto-registration of the actor
+        // "a" emits an actor_registered audit row inside the same
+        // tx as the first observation. Total = 1 audit + 5 obs = 6
+        // events.
         const page1 = yield* store.list({ sessionId, limit: 3 });
         expect(page1.events.length).toBe(3);
         expect(page1.nextCursor).toBeDefined();
@@ -381,15 +385,14 @@ describe("EventStore", () => {
           limit: 3,
           afterEventId: page1.nextCursor!,
         });
-        expect(page2.events.length).toBe(2);
+        expect(page2.events.length).toBe(3);
         const all = [...page1.events, ...page2.events];
-        expect(all.map((e) => JSON.parse(e.payload_json).text)).toEqual([
-          "obs-0",
-          "obs-1",
-          "obs-2",
-          "obs-3",
-          "obs-4",
-        ]);
+        // Filter out the audit row (no `text` field) so the
+        // observation ordering can be asserted directly.
+        const textEvents = all
+          .map((e) => JSON.parse(e.payload_json).text as string | undefined)
+          .filter((t): t is string => typeof t === "string");
+        expect(textEvents).toEqual(["obs-0", "obs-1", "obs-2", "obs-3", "obs-4"]);
       }),
     );
   });
