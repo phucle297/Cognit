@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Phase 7 Recovery Engine (v0.2 surface + fuzzy search + CLI + dashboard)
+search: 8g.0 Spec lock + audit (weights, decay fn, dedup schema, migration sign-off) audit phase-8 spec
 queue: 
-next: 
+next: Cognit-8g.2
