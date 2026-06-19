@@ -30,6 +30,7 @@ import {
   ProjectService,
   SessionPolicyDefault,
   SessionService,
+  SnapshotService,
   ConstraintPolicy,
   Uuid,
   UuidLive,
@@ -50,6 +51,7 @@ type TestContext =
   | DbConnection
   | EventStore
   | SessionService
+  | SnapshotService
   | ProjectService
   | ConstraintPolicy
   | EventBus
