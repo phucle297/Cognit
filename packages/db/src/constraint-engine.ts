@@ -18,7 +18,7 @@
  */
 
 import { Schema } from "effect";
-import { Predicate, type Predicate as PredicateT, type RuleSpec } from "@cognit/core";
+import { Predicate, type Action, type Predicate as PredicateT, type RuleSpec } from "@cognit/core";
 import type { SessionState } from "@cognit/core";
 
 /**
@@ -39,7 +39,7 @@ export interface CandidateEvent {
 export interface EngineRule {
   readonly rule_id: string;
   readonly when: PredicateT;
-  readonly then: { readonly kind: "block" };
+  readonly then: Action;
   readonly reason: string;
 }
 
@@ -63,12 +63,13 @@ export function decodePredicate(conditionJson: string): PredicateT {
 
 /**
  * Validate a rule spec. Returns the canonicalised EngineRule.
+ * The action is preserved as-supplied; the engine treats any non-block
+ * kind as "match but don't block" (mutation actions are dispatched
+ * post-append in 8g.3).
  */
 export function compileRule(spec: RuleSpec, fallbackId: string): EngineRule {
-  if (!spec.rule_id || spec.rule_id.length === 0) {
-    return { rule_id: fallbackId, when: spec.when, then: { kind: "block" }, reason: spec.reason };
-  }
-  return { rule_id: spec.rule_id, when: spec.when, then: { kind: "block" }, reason: spec.reason };
+  const rule_id = !spec.rule_id || spec.rule_id.length === 0 ? fallbackId : spec.rule_id;
+  return { rule_id, when: spec.when, then: spec.then, reason: spec.reason };
 }
 
 /**
