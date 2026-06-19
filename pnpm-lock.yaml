@@ -154,6 +154,9 @@ importers:
       '@cognit/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@cognit/gravity':
+        specifier: workspace:*
+        version: link:../../packages/gravity
       '@cognit/recovery':
         specifier: workspace:*
         version: link:../../packages/recovery

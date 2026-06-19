@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 8g.3 Wire post-append transformer + (event_id, rule_id, action_type) dedup + skip-constraint-emitted constraint db loop-guard phase-8
+search: 8g.6 Polish + verification + docs/phase-8-results.md docs phase-8 polish verification
 queue: 
-next: Cognit-8g.4
+next: 

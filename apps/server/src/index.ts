@@ -53,6 +53,7 @@ import { registerEdgesRoutes } from "./routes/edges.js";
 import { registerVerifyRoutes } from "./routes/verify.js";
 import { registerActorsRoutes } from "./routes/actors.js";
 import { registerSearchRoutes } from "./routes/search.js";
+import { registerRulesRoutes } from "./routes/rules.js";
 import { resolveServerConfig } from "./config.js";
 import { findProjectRoot } from "../../../apps/cli/src/paths.js";
 
@@ -143,6 +144,7 @@ registerProjectsRoutes(app, { runtime });
 registerEdgesRoutes(app, { runtime, projectId });
 registerVerifyRoutes(app, { runtime, projectId });
 registerActorsRoutes(app, { runtime, projectId });
+registerRulesRoutes(app, { runtime, projectId });
 
 // Same-origin dashboard (phase 6): serve `apps/dashboard/dist` from
 // the same port. `serveStatic` resolves lazily per-request; if the

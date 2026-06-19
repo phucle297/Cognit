@@ -473,6 +473,11 @@ export function registerSession(program: Command): void {
       // AC-7.13: print a 3-field minimum recovery block after every
       // successful resume. Best-effort: a server outage should not
       // turn a successful resume into a non-zero exit.
+      //
+      // AC-8.12 / AC-8.14 (phase 8 — 8g.4): if `suggested_next_steps`
+      // is populated (recovery surface filled top-1 active hypothesis),
+      // print one extra "Suggested next step:" line BEFORE the recovery
+      // block so it leads the human's eye. Suppress when empty.
       try {
         const base = resolveServerUrl({ serverUrl: opts.serverUrl });
         const env = (await serverFetch(
@@ -481,6 +486,22 @@ export function registerSession(program: Command): void {
         )) as { data?: Record<string, unknown> } | null;
         const data = env?.data;
         if (data !== undefined && data !== null) {
+          const steps = Array.isArray(data["suggested_next_steps"])
+            ? (data["suggested_next_steps"] as ReadonlyArray<unknown>)
+            : [];
+          const top = steps[0];
+          if (top !== undefined && top !== null && typeof top === "object") {
+            const t = top as Record<string, unknown>;
+            const id = typeof t["id"] === "string" ? (t["id"] as string) : "";
+            const text = typeof t["text"] === "string" ? (t["text"] as string) : "";
+            const score =
+              typeof t["score"] === "number" ? (t["score"] as number).toFixed(3) : "-";
+            if (id || text) {
+              process.stdout.write(
+                `Suggested next step: ${text}  (gravity: ${score}, id: ${id})\n`,
+              );
+            }
+          }
           process.stdout.write(formatRecoveryBlock(data));
         }
       } catch (e) {

@@ -107,7 +107,7 @@ type RecoveryRecord = {
   >;
   /** Full SessionState blob — rendered as pretty JSON. */
   last_known_state: unknown;
-  suggested_next_steps: Array<{ id: string; text: string } | string>;
+  suggested_next_steps: Array<{ id: string; text: string; score: number }>;
 };
 
 type OpKind = "dry_run" | "export" | "snapshot";
@@ -670,7 +670,24 @@ const LastKnownStateCard = ({
   );
 };
 
-/** Inline display for the placeholder `suggested_next_steps` (phase 8 will populate). */
+/**
+ * Suggested Next Steps card — phase 8 (8g.5).
+ *
+ * Renders each ranked active hypothesis as (id, text, score) with a
+ * color-graded score badge:
+ *   score >= 0.7 → high   (success)
+ *   score >= 0.4 → mid    (warning)
+ *   score <  0.4 → low    (neutral)
+ *
+ * Empty state copy: "No active hypotheses. Add one to get
+ * gravity-ranked suggestions." (no phase 8 wording per AC).
+ */
+const scoreBucket = (score: number): { variant: "verified" | "pending" | "neutral"; label: string } => {
+  if (score >= 0.7) return { variant: "verified", label: "high" };
+  if (score >= 0.4) return { variant: "pending", label: "mid" };
+  return { variant: "neutral", label: "low" };
+};
+
 const SuggestedNextStepsCard = ({
   items,
 }: {
@@ -689,17 +706,30 @@ const SuggestedNextStepsCard = ({
           <EmptyState
             icon={Sparkles}
             title="Empty"
-            description="No suggestions yet. Populated by the gravity engine (phase 8)."
+            description="No active hypotheses. Add one to get gravity-ranked suggestions."
             className="py-6"
             data-testid="recovery-suggested-empty"
           />
         ) : (
-          <ul className="flex flex-col gap-1 text-sm">
-            {items.map((step, i) => (
-              <li key={i} className="rounded border p-2">
-                {typeof step === "string" ? step : step.text}
-              </li>
-            ))}
+          <ul className="flex flex-col gap-2 text-sm" data-testid="recovery-suggested-list">
+            {items.map((step) => {
+              const b = scoreBucket(step.score);
+              return (
+                <li
+                  key={step.id}
+                  className="flex items-start justify-between gap-2 rounded border p-2"
+                  data-testid={`recovery-suggested-item-${step.id}`}
+                >
+                  <div className="flex min-w-0 flex-col">
+                    <span className="truncate font-medium">{step.text}</span>
+                    <span className="truncate text-xs text-muted-foreground">{step.id}</span>
+                  </div>
+                  <Badge variant={b.variant} data-testid={`recovery-suggested-score-${step.id}`}>
+                    {b.label} {step.score.toFixed(3)}
+                  </Badge>
+                </li>
+              );
+            })}
           </ul>
         )}
       </CardContent>

@@ -431,6 +431,53 @@ describe("RecoveryCenterPage v0.2", () => {
     expect(await screen.findByTestId("recovery-suggested-empty")).toBeInTheDocument();
   });
 
+  it("renders populated suggested_next_steps with score badge (8g.5)", async () => {
+    const sessionsResp = {
+      sessions: [
+        {
+          id: "01sess-rec",
+          project_id: "01p",
+          goal: "recovery test",
+          status: "active",
+          created_at: "2026-06-17T10:00:00.000Z",
+        },
+      ],
+    };
+    const recoveryResp = {
+      ...fullRecovery("01sess-rec"),
+      suggested_next_steps: [
+        { id: "01hyp-top", text: "Investigate retry budget", score: 0.812 },
+      ],
+    };
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      const u = String(url);
+      if (u.endsWith("/sessions")) {
+        return Promise.resolve(new Response(envelope(sessionsResp), { status: 200 }));
+      }
+      if (u.includes("/recovery")) {
+        return Promise.resolve(new Response(envelope(recoveryResp), { status: 200 }));
+      }
+      return Promise.reject(new Error(`unexpected: ${u}`));
+    }) as unknown as typeof fetch;
+
+    const user = userEvent.setup();
+    renderRecovery();
+
+    const trigger = await screen.findByTestId("recovery-session-trigger");
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    await user.keyboard("{ArrowDown}");
+    await user.keyboard("{Enter}");
+
+    const item = await screen.findByTestId("recovery-suggested-item-01hyp-top");
+    expect(item).toBeInTheDocument();
+    expect(item.textContent ?? "").toContain("Investigate retry budget");
+    expect(item.textContent ?? "").toContain("01hyp-top");
+    const badge = await screen.findByTestId("recovery-suggested-score-01hyp-top");
+    expect(badge.textContent ?? "").toContain("high");
+    expect(badge.textContent ?? "").toContain("0.812");
+  });
+
   it("search input renders + Enter triggers /api/sessions/search", async () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       const u = String(url);

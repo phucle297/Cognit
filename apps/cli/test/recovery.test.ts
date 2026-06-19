@@ -94,7 +94,13 @@ const sampleRecovery: Record<string, unknown> = {
     decisions: { size: 2 },
     conclusions: { size: 1 },
   },
-  suggested_next_steps: [],
+  suggested_next_steps: [
+    {
+      id: "01HZZS11100000000000000000",
+      text: "Retry verification on alpha hypothesis",
+      score: 0.612,
+    },
+  ],
 };
 
 describe("recovery command formatters", () => {
@@ -121,7 +127,35 @@ describe("recovery command formatters", () => {
     expect(text).toContain("rejected_decisions (1)");
     expect(text).toContain("latest_verification (1)");
     expect(text).toContain("last_known_state:");
+    expect(text).toContain("suggested_next_steps (1)");
+    // Phase 8 (8g.4): each step renders id + score + text.
+    expect(text).toContain("01HZZS11100000000000000000");
+    expect(text).toContain("score=0.612");
+    expect(text).toContain("Retry verification on alpha hypothesis");
+  });
+
+  it("formatRecoveryText shows empty-state copy when no active hypotheses (8g.4)", () => {
+    const text = formatRecoveryText({
+      session_id: ID_SESSION,
+      related_sessions: [],
+      verified_conclusions: [],
+      rejected_hypotheses: [],
+      accepted_decisions: [],
+      rejected_decisions: [],
+      latest_verification: {},
+      last_known_state: {
+        session_id: ID_SESSION,
+        goal: "",
+        observations: [],
+        findings: [],
+        hypotheses: { size: 0 },
+        decisions: { size: 0 },
+        conclusions: { size: 0 },
+      },
+      suggested_next_steps: [],
+    });
     expect(text).toContain("suggested_next_steps (0)");
+    expect(text).toContain("(no active hypotheses to rank)");
   });
 
   it("formatRecoveryText handles empty arrays without crashing", () => {

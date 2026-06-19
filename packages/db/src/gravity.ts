@@ -41,6 +41,18 @@ export interface GravityQueriesShape {
   readonly contributingActors: (
     hypothesisId: string,
   ) => Effect.Effect<ReadonlyArray<ContributingActor>, DbError>;
+  /**
+   * Batch read of `hypotheses.gravity_fired_at` for every hypothesis
+   * row in the given session. Returns a map from hypothesis id →
+   * epoch seconds (REAL column; `0` = never fired).
+   *
+   * Used by the gravity rank endpoint and the recovery surface so
+   * the scorer can compute freshness without round-tripping per
+   * hypothesis. Read-only.
+   */
+  readonly gravityFiredAtForSession: (
+    sessionId: string,
+  ) => Effect.Effect<ReadonlyMap<string, number>, DbError>;
 }
 
 export class GravityQueries extends Context.Tag("@cognit/db/GravityQueries")<
@@ -84,6 +96,29 @@ export const GravityQueriesLive: Layer.Layer<GravityQueries, never, DbConnection
         }));
       });
 
-    return GravityQueries.of({ contributingActors });
+    const gravityFiredAtForSession = (
+      sessionId: string,
+    ): Effect.Effect<ReadonlyMap<string, number>, DbError> =>
+      Effect.gen(function* () {
+        const rows = yield* trySync(
+          () =>
+            conn.handle.all<{ id: string; gravity_fired_at: number }>(
+              `SELECT id, gravity_fired_at
+                 FROM hypotheses
+                WHERE session_id = ?`,
+              [sessionId],
+            ),
+          (e) =>
+            new DbError({
+              message: "gravityFiredAtForSession: query",
+              cause: e,
+            }),
+        );
+        const out = new Map<string, number>();
+        for (const r of rows) out.set(r.id, r.gravity_fired_at);
+        return out;
+      });
+
+    return GravityQueries.of({ contributingActors, gravityFiredAtForSession });
   }),
 );

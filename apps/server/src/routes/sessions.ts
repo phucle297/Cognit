@@ -30,6 +30,7 @@
 import { Effect, Fiber } from "effect";
 import { Hono } from "hono";
 import {
+  GravityQueries,
   SessionService,
   VerificationQueries,
   type SessionRow,
@@ -43,6 +44,11 @@ import {
 import { envelope } from "../envelope.js";
 import { apiErrorResponse } from "../api-error.js";
 import { registerSessionsMutations } from "./sessions-mutations.js";
+import { registerSessionsGravityRoute } from "./sessions-gravity.js";
+import {
+  rankActiveHypothesesFromState,
+  DEFAULT_GRAVITY_CFG,
+} from "../gravity-inputs.js";
 import {
   indexSession,
   runSearch,
@@ -272,8 +278,21 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
       const queries = yield* VerificationQueries;
+      const gravityQ = yield* GravityQueries;
       const show = yield* service.show(id);
       const latestVerifications = yield* queries.latestVerificationsForSession(id);
+      // Phase 8 (8g.4): resolve gravity inputs for active hypotheses
+      // so the recovery surface can surface the top-1 suggested next
+      // step. Read-only — no mutation, no event-log writes.
+      const firedAt = yield* gravityQ.gravityFiredAtForSession(id);
+      const actorsByHyp = new Map<string, ReadonlyArray<
+        import("@cognit/db").ContributingActor
+      >>();
+      for (const h of show.state.hypotheses.values()) {
+        if (h.current_state !== "active") continue;
+        const actors = yield* gravityQ.contributingActors(h.id);
+        actorsByHyp.set(h.id, actors);
+      }
       // Build the fuzzy index across every session in the project so
       // we can fill `related_sessions`. The same engine powers
       // /api/sessions/search; here we run it once with a synthetic
@@ -298,7 +317,7 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
         offset: 0,
       });
       const relatedSessions = groupBySession(ranked, queryText);
-      return { show, latestVerifications, relatedSessions };
+      return { show, latestVerifications, relatedSessions, firedAt, actorsByHyp };
     });
     const exit = await runtime.runPromiseExit(
       program as Effect.Effect<unknown, unknown, never>,
@@ -322,6 +341,10 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
           import("@cognit/db").LatestVerificationSummary
         >;
         relatedSessions: ReadonlyArray<import("./search.js").RelatedSessionMatch>;
+        firedAt: ReadonlyMap<string, number>;
+        actorsByHyp: ReadonlyMap<string, ReadonlyArray<
+          import("@cognit/db").ContributingActor
+        >>;
       };
     }).value;
 
@@ -349,6 +372,13 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       snapshotState,
       latestVerifications: v.latestVerifications,
       relatedSessions: v.relatedSessions,
+      suggestedNextSteps: rankActiveHypothesesFromState(
+        state,
+        DEFAULT_GRAVITY_CFG,
+        v.actorsByHyp,
+        v.firedAt,
+        Math.floor(Date.now() / 1000),
+      ).map((r) => ({ id: r.id, text: r.text, score: r.score })),
     });
 
     return c.json(
@@ -365,6 +395,9 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   // sibling module to keep this file readable. Both modules share
   // the same Hono app — `app.route` accumulates handlers.
   registerSessionsMutations(app, deps);
+  // Phase 8 (8g.4): GET /api/sessions/:id/gravity — ranked active
+  // hypotheses. Read-only.
+  registerSessionsGravityRoute(app, deps);
 };
 
 /**

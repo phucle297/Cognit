@@ -18,6 +18,9 @@
 export {
   scoreHypothesis,
   freshness,
+  freshnessForHypothesis,
+  meanActorTrust,
+  ageDaysFromFiredAt,
   defaultFreshnessHalfLifeDays,
   defaultGravityWeights,
   rankHypotheses,
