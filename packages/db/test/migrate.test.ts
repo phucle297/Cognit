@@ -130,7 +130,7 @@ describe("applyMigrations", () => {
     const handle = makeTestHandle(dbPath);
     try {
       const result = await Effect.runPromise(applyMigrations(handle));
-      expect(result.applied).toEqual(["1.0.0", "1.1.0", "1.2.0"]);
+      expect(result.applied).toEqual(["1.0.0", "1.1.0", "1.2.0", "1.3.0"]);
 
       const tables = handle.all<{ name: string }>(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -139,10 +139,12 @@ describe("applyMigrations", () => {
       // 9 from tables.ts + 1 (sqlite_sequence not present, but schema_version is among them)
       // tables.ts defines: projects, sessions, actors, events, snapshots, artifacts,
       // edges, constraint_rules, schema_version, hypotheses, inbox_processed
+      // plus constraint_action_log added by the 1.3.0 migration (Cognit-8g.3).
       expect(names).toEqual(
         [
           "actors",
           "artifacts",
+          "constraint_action_log",
           "constraint_rules",
           "edges",
           "events",
@@ -154,12 +156,12 @@ describe("applyMigrations", () => {
           "snapshots",
         ].sort(),
       );
-      expect(names.length).toBe(11);
+      expect(names.length).toBe(12);
 
       const version = handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.2.0");
+      expect(version?.version).toBe("1.3.0");
     } finally {
       await Effect.runPromise(handle.close());
     }
@@ -170,7 +172,7 @@ describe("applyMigrations", () => {
     const handle = makeTestHandle(dbPath);
     try {
       const first = await Effect.runPromise(applyMigrations(handle));
-      expect(first.applied).toEqual(["1.0.0", "1.1.0", "1.2.0"]);
+      expect(first.applied).toEqual(["1.0.0", "1.1.0", "1.2.0", "1.3.0"]);
 
       const second = await Effect.runPromise(applyMigrations(handle));
       expect(second.applied).toEqual([]);
@@ -178,7 +180,7 @@ describe("applyMigrations", () => {
       const version = handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.2.0");
+      expect(version?.version).toBe("1.3.0");
     } finally {
       await Effect.runPromise(handle.close());
     }
@@ -288,7 +290,7 @@ describe("applyMigrations", () => {
       const version = conn.handle.get<{ version: string }>(
         "SELECT version FROM schema_version WHERE id = 1",
       );
-      expect(version?.version).toBe("1.2.0");
+      expect(version?.version).toBe("1.3.0");
     } finally {
       await Effect.runPromise(conn.handle.close());
     }
