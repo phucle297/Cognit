@@ -103,7 +103,7 @@ const runInboxCommand = <A, E, R>(
 export function registerInbox(program: Command): void {
   program
     .command("inbox")
-    .description("watch or process the local inbox (.cognit/inbox/)")
+    .description("watch or process the local inbox (.cognit/inbox/) — see docs/hooks/README.md for hook setup")
     .option("--watch", "start a long-running chokidar watcher")
     .option("--process", "drain the inbox queue once and exit")
     .action(async (opts: InboxOptions) => {
