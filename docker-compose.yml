@@ -34,7 +34,7 @@ services:
     # exists so it exits 0 in <50ms.
     command: ["sh", "-c", "node apps/server/seed-demo.mjs && exec node apps/server/dist/index.js --host 0.0.0.0 --port 6971 --root /data"]
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6971/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6971/api/healthz"]
       interval: 5s
       timeout: 3s
       retries: 10
