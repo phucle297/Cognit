@@ -53,7 +53,7 @@ describe("cognit server — SSE bus", () => {
     server = await bootServer();
     // POST 3 events first so the replay has something to emit.
     for (let i = 0; i < 3; i++) {
-      const r = await fetch(`${server.url}/events`, {
+      const r = await fetch(`${server.url}/api/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -66,7 +66,7 @@ describe("cognit server — SSE bus", () => {
       expect(r.status).toBe(201);
     }
     // Now connect the stream consumer.
-    const r = await fetch(`${server.url}/events/stream`);
+    const r = await fetch(`${server.url}/api/events/stream`);
     expect(r.status).toBe(200);
     expect(r.headers.get("content-type")).toContain("text/event-stream");
     const reader = r.body!.getReader();
@@ -98,14 +98,14 @@ describe("cognit server — SSE bus", () => {
   it("delivers a freshly-posted event within 1s of POST", async () => {
     server = await bootServer();
     // Open the stream first so we have a live subscriber.
-    const r = await fetch(`${server.url}/events/stream`);
+    const r = await fetch(`${server.url}/api/events/stream`);
     expect(r.status).toBe(200);
     const reader = r.body!.getReader();
     const decoder = new TextDecoder();
 
     // Post the event
     const unique = `live-${Date.now()}`;
-    const post = await fetch(`${server.url}/events`, {
+    const post = await fetch(`${server.url}/api/events`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -136,7 +136,7 @@ describe("cognit server — SSE bus", () => {
     server = await bootServer();
     // Post a uniquely identifiable event so we can find its frame.
     const marker = `id-marker-${Date.now()}`;
-    const post = await fetch(`${server.url}/events`, {
+    const post = await fetch(`${server.url}/api/events`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -155,7 +155,7 @@ describe("cognit server — SSE bus", () => {
 
     // Open the stream; we already have a backlog so the marker is in
     // the replay tail.
-    const r = await fetch(`${server.url}/events/stream`);
+    const r = await fetch(`${server.url}/api/events/stream`);
     expect(r.status).toBe(200);
     const reader = r.body!.getReader();
     const decoder = new TextDecoder();
@@ -177,7 +177,7 @@ describe("cognit server — SSE bus", () => {
     // POST 3 uniquely tagged events in order.
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const r = await fetch(`${server.url}/events`, {
+      const r = await fetch(`${server.url}/api/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -193,7 +193,7 @@ describe("cognit server — SSE bus", () => {
     const cursor = ids[0]!; // reconnect using the FIRST id as cursor
     // ids[1] and ids[2] should be replayed; ids[0] should NOT.
 
-    const r = await fetch(`${server.url}/events/stream`, {
+    const r = await fetch(`${server.url}/api/events/stream`, {
       headers: { "last-event-id": cursor },
     });
     expect(r.status).toBe(200);
@@ -262,7 +262,7 @@ describe("cognit server — SSE bus", () => {
         managed.runFork(eff as unknown as Effect.Effect<A, never, Ctx>) as Fiber.RuntimeFiber<A, E>,
     };
     const app = new Hono();
-    app.get("/events/stream", sseHandler(runtime, { projectId, heartbeatMs: 50, replayLimit: 5 }));
+    app.get("/api/events/stream", sseHandler(runtime, { projectId, heartbeatMs: 50, replayLimit: 5 }));
     const listener = await new Promise<{ url: string; close: () => Promise<void> }>((resolve, reject) => {
       let s: ServerType | null = null;
       s = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 }, (info) => {
@@ -279,7 +279,7 @@ describe("cognit server — SSE bus", () => {
     });
 
     try {
-      const r = await fetch(`${listener.url}/events/stream`);
+      const r = await fetch(`${listener.url}/api/events/stream`);
       expect(r.status).toBe(200);
       const reader = r.body!.getReader();
       const decoder = new TextDecoder();

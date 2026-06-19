@@ -40,7 +40,7 @@ const seedVerifiedChain = async (
   const f = fetchApp(ctx.app);
   const sid = ctx.sessionId;
 
-  const r1 = await f("/events", {
+  const r1 = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -55,7 +55,7 @@ const seedVerifiedChain = async (
     data: { event: { id: string } };
   }).data.event.id;
 
-  const r2 = await f("/events", {
+  const r2 = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -74,7 +74,7 @@ const seedVerifiedChain = async (
     data: { event: { id: string } };
   }).data.event.id;
 
-  await f("/events", {
+  await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -85,7 +85,7 @@ const seedVerifiedChain = async (
     }),
   });
 
-  const r3 = await f("/events", {
+  const r3 = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -100,7 +100,7 @@ const seedVerifiedChain = async (
     data: { event: { id: string } };
   }).data.event.id;
 
-  const r4 = await f("/events", {
+  const r4 = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -128,7 +128,7 @@ const seedRejectedAndAccepted = async (ctx: TestApp): Promise<void> => {
   const f = fetchApp(ctx.app);
   const sid = ctx.sessionId;
 
-  const r1 = await f("/events", {
+  const r1 = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -140,7 +140,7 @@ const seedRejectedAndAccepted = async (ctx: TestApp): Promise<void> => {
   });
   expect(r1.status).toBe(201);
 
-  await f("/events", {
+  await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -151,7 +151,7 @@ const seedRejectedAndAccepted = async (ctx: TestApp): Promise<void> => {
     }),
   });
 
-  const r3 = await f("/events", {
+  const r3 = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -163,7 +163,7 @@ const seedRejectedAndAccepted = async (ctx: TestApp): Promise<void> => {
   });
   expect(r3.status).toBe(201);
 
-  await f("/events", {
+  await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -186,7 +186,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
 
   it("1. GET /sessions/:id/state returns kind session.state", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}/state`);
+    const r = await f(`/api/sessions/${ctx.sessionId}/state`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as { kind: string; data: { session: { id: string } } };
     expect(body.kind).toBe("session.state");
@@ -195,14 +195,14 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
 
   it("2. GET /sessions/:id/state on an unknown id returns 404", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/sessions/01nosuchsessxxxxxxxxxxx/state");
+    const r = await f("/api/sessions/01nosuchsessxxxxxxxxxxx/state");
     expect(r.status).toBe(404);
   });
 
   it("3. GET /sessions/:id/graph returns nodes + edges with synthesized verified_by", async () => {
     const { hypothesisId, verificationId, conclusionId } = await seedVerifiedChain(ctx);
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}/graph`);
+    const r = await f(`/api/sessions/${ctx.sessionId}/graph`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -248,7 +248,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
   it("4. GET /sessions/:id/recovery returns exactly 3 v0.1 fields, no v0.2 fields", async () => {
     await seedRejectedAndAccepted(ctx);
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}/recovery`);
+    const r = await f(`/api/sessions/${ctx.sessionId}/recovery`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -275,7 +275,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
 
   it("5. GET /sessions/:id/recovery on an empty session returns empty arrays", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}/recovery`);
+    const r = await f(`/api/sessions/${ctx.sessionId}/recovery`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -294,7 +294,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
     // Seed two edges via the chokepoint so we know what's in state.
     const f = fetchApp(ctx.app);
     const sid = ctx.sessionId;
-    const r1 = await f(`/sessions/${sid}/edges`, {
+    const r1 = await f(`/api/sessions/${sid}/edges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -305,7 +305,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
       }),
     });
     expect(r1.status).toBe(201);
-    const r2 = await f(`/sessions/${sid}/edges`, {
+    const r2 = await f(`/api/sessions/${sid}/edges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -317,7 +317,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
     });
     expect(r2.status).toBe(201);
 
-    const all = await f(`/sessions/${sid}/edges`);
+    const all = await f(`/api/sessions/${sid}/edges`);
     expect(all.status).toBe(200);
     const allBody = (await all.json()) as {
       kind: string;
@@ -326,7 +326,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
     expect(allBody.kind).toBe("session.edges");
     expect(allBody.data.edges.length).toBe(2);
 
-    const onlySupports = await f(`/sessions/${sid}/edges?edge_type=supports`);
+    const onlySupports = await f(`/api/sessions/${sid}/edges?edge_type=supports`);
     const onlySupportsBody = (await onlySupports.json()) as {
       data: { edges: ReadonlyArray<{ edge_type: string }> };
     };
@@ -337,7 +337,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
   it("7. POST /sessions/:id/edges with a valid catalog type emits edge_created", async () => {
     const f = fetchApp(ctx.app);
     const sid = ctx.sessionId;
-    const r = await f(`/sessions/${sid}/edges`, {
+    const r = await f(`/api/sessions/${sid}/edges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -361,7 +361,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
     expect(body.data.replay).toBe(false);
 
     // The event log should now contain an edge_created row with our client_edge_id.
-    const events = await f(`/sessions/${sid}/events?limit=200`);
+    const events = await f(`/api/sessions/${sid}/events?limit=200`);
     const eventsBody = (await events.json()) as {
       data: { events: ReadonlyArray<{ id: string; type: string }> };
     };
@@ -372,7 +372,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
 
     // Idempotency: replaying the same client_edge_id returns 200 with replay:true
     // and does NOT create a second edge.
-    const replay = await f(`/sessions/${sid}/edges`, {
+    const replay = await f(`/api/sessions/${sid}/edges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -390,7 +390,7 @@ describe("cognit server — state, graph, recovery, edges (phase 5.5)", () => {
 
   it("8. POST /sessions/:id/edges with unknown edge_type returns 400", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}/edges`, {
+    const r = await f(`/api/sessions/${ctx.sessionId}/edges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

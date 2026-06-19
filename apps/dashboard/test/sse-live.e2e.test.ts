@@ -37,7 +37,7 @@ describe("cognit dashboard — sse-live e2e", () => {
 
   it("a. GET /events/stream returns 200 with text/event-stream", async () => {
     server = await bootServer({ isLoopback: true });
-    const res = await fetch(`${server.url}/events/stream`);
+    const res = await fetch(`${server.url}/api/events/stream`);
     expect(res.status).toBe(200);
     const ct = res.headers.get("content-type") ?? "";
     expect(ct).toContain("text/event-stream");
@@ -47,7 +47,7 @@ describe("cognit dashboard — sse-live e2e", () => {
 
   it("b. First SSE frame is a heartbeat within 1000ms", async () => {
     server = await bootServer({ isLoopback: true });
-    const res = await fetch(`${server.url}/events/stream`);
+    const res = await fetch(`${server.url}/api/events/stream`);
     expect(res.status).toBe(200);
 
     const reader = res.body!.getReader();
@@ -86,7 +86,7 @@ describe("cognit dashboard — sse-live e2e", () => {
     // Open the stream FIRST, then post. The bus subscriber list is
     // populated when the stream handler subscribes; posting before
     // the stream opens would race the subscriber registration.
-    const streamRes = await fetch(`${server.url}/events/stream`);
+    const streamRes = await fetch(`${server.url}/api/events/stream`);
     expect(streamRes.status).toBe(200);
 
     const reader = streamRes.body!.getReader();
@@ -101,7 +101,7 @@ describe("cognit dashboard — sse-live e2e", () => {
         (s) => s.includes(marker),
         1500,
       );
-      const postPromise = fetch(`${server.url}/events`, {
+      const postPromise = fetch(`${server.url}/api/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

@@ -25,7 +25,7 @@ describe("cognit server — /actors routes (phase 5.6)", () => {
     const f = fetchApp(ctx.app);
     // The bootstrap POST /events uses "alice:human" → alice is
     // auto-registered by ensureActor with default trust_score 0.9.
-    const r = await f("/actors");
+    const r = await f("/api/actors");
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -40,7 +40,7 @@ describe("cognit server — /actors routes (phase 5.6)", () => {
 
   it("2. POST /actors with a valid body returns 201 + emits actor_registered", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/actors", {
+    const r = await f("/api/actors", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -62,7 +62,7 @@ describe("cognit server — /actors routes (phase 5.6)", () => {
     expect(body.data.event_id).not.toBeNull();
 
     // The actor_registered event should be visible in the session log.
-    const events = await f(`/sessions/${ctx.sessionId}/events?limit=200`);
+    const events = await f(`/api/sessions/${ctx.sessionId}/events?limit=200`);
     const eventsBody = (await events.json()) as {
       data: { events: ReadonlyArray<{ id: string; type: string }> };
     };
@@ -74,7 +74,7 @@ describe("cognit server — /actors routes (phase 5.6)", () => {
 
   it("3. POST /actors with an invalid type returns 400", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/actors", {
+    const r = await f("/api/actors", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -88,7 +88,7 @@ describe("cognit server — /actors routes (phase 5.6)", () => {
   it("4. POST /actors with a duplicate name returns 409", async () => {
     const f = fetchApp(ctx.app);
     // First call inserts.
-    const first = await f("/actors", {
+    const first = await f("/api/actors", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -99,7 +99,7 @@ describe("cognit server — /actors routes (phase 5.6)", () => {
     expect(first.status).toBe(201);
 
     // Second call duplicates.
-    const dup = await f("/actors", {
+    const dup = await f("/api/actors", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

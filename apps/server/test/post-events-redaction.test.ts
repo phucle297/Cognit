@@ -26,7 +26,7 @@ describe("cognit server — POST /events triggers redaction_applied", () => {
 
   it("posts a PEM-block payload and emits a redaction_applied side-event", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/events", {
+    const r = await f("/api/events", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -51,7 +51,7 @@ describe("cognit server — POST /events triggers redaction_applied", () => {
     expect(payloadText).toContain("[REDACTED:pem_block]");
 
     // Now GET /sessions/:id/events and assert BOTH events present.
-    const er = await f(`/sessions/${ctx.sessionId}/events`);
+    const er = await f(`/api/sessions/${ctx.sessionId}/events`);
     expect(er.status).toBe(200);
     const ebody = (await er.json()) as {
       kind: string;

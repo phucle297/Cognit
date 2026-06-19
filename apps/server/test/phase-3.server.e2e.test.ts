@@ -86,7 +86,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
 
     it("GET /healthz returns 200", async () => {
       ctx = await makeApp();
-      const r = await fetchApp(ctx.app)("/healthz");
+      const r = await fetchApp(ctx.app)("/api/healthz");
       expect(r.status).toBe(200);
       const body = (await r.json()) as { version: number; kind: string; data: { status: string } };
       expect(body.version).toBe(1);
@@ -96,7 +96,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
 
     it("GET /sessions/:id/state returns the typed SessionStateView", async () => {
       ctx = await makeApp();
-      const r = await fetchApp(ctx.app)(`/sessions/${ctx.sessionId}/state`);
+      const r = await fetchApp(ctx.app)(`/api/sessions/${ctx.sessionId}/state`);
       expect(r.status).toBe(200);
       const body = (await r.json()) as {
         version: number;
@@ -125,7 +125,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
     it("redaction boundary fires on a PEM-block payload (redaction_applied in same tx)", async () => {
       ctx = await makeApp();
       const f = fetchApp(ctx.app);
-      const r = await f("/events", {
+      const r = await f("/api/events", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -145,7 +145,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
 
       // Both the main event and the redaction_applied side-event
       // are visible via the events listing route.
-      const er = await f(`/sessions/${ctx.sessionId}/events`);
+      const er = await f(`/api/sessions/${ctx.sessionId}/events`);
       const ebody = (await er.json()) as {
         data: { events: ReadonlyArray<{ type: string }> };
       };
@@ -165,7 +165,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
       // path is a typed error from the validation layer below it
       // (UnknownEventType). The full block-rule E2E is at the CLI
       // level in `apps/cli/test/phase-3.e2e.test.ts` AC3.
-      const r = await f("/events", {
+      const r = await f("/api/events", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -193,7 +193,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
     it("delivers a freshly-posted event within 1s", async () => {
       server = await bootServer();
       // Open the stream first so we have a live subscriber.
-      const r = await fetch(`${server.url}/events/stream`);
+      const r = await fetch(`${server.url}/api/events/stream`);
       expect(r.status).toBe(200);
       expect(r.headers.get("content-type")).toContain("text/event-stream");
       const reader = r.body!.getReader();
@@ -201,7 +201,7 @@ describe("phase 3 E2E — AC4: cognit server on 127.0.0.1:6971", () => {
 
       // Post the event.
       const unique = `live-${Date.now()}`;
-      const post = await fetch(`${server.url}/events`, {
+      const post = await fetch(`${server.url}/api/events`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({

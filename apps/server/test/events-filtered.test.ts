@@ -21,7 +21,7 @@ const seed = async (ctx: TestApp): Promise<void> => {
   const sid = ctx.sessionId;
 
   // hypothesis_created by alice
-  const h = await f("/events", {
+  const h = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -34,7 +34,7 @@ const seed = async (ctx: TestApp): Promise<void> => {
   expect(h.status).toBe(201);
 
   // decision_proposed by bob (auto-registered via ensureActor)
-  const d = await f("/events", {
+  const d = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -47,7 +47,7 @@ const seed = async (ctx: TestApp): Promise<void> => {
   expect(d.status).toBe(201);
 
   // observation_recorded by alice (third event)
-  const o = await f("/events", {
+  const o = await f("/api/events", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
@@ -72,7 +72,7 @@ describe("cognit server — GET /events filtered + paginated (phase 5.7)", () =>
   it("1. ?session=<id>&limit=N returns most recent N for the session", async () => {
     await seed(ctx);
     const f = fetchApp(ctx.app);
-    const r = await f(`/events?session=${ctx.sessionId}&limit=2`);
+    const r = await f(`/api/events?session=${ctx.sessionId}&limit=2`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -90,7 +90,7 @@ describe("cognit server — GET /events filtered + paginated (phase 5.7)", () =>
   it("2. ?type=hypothesis_created filters to that type (repeated expands)", async () => {
     await seed(ctx);
     const f = fetchApp(ctx.app);
-    const r = await f(`/events?type=hypothesis_created&type=decision_proposed`);
+    const r = await f(`/api/events?type=hypothesis_created&type=decision_proposed`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       data: { events: ReadonlyArray<{ type: string }> };
@@ -106,7 +106,7 @@ describe("cognit server — GET /events filtered + paginated (phase 5.7)", () =>
   it("3. ?actor=alice filters by actor name", async () => {
     await seed(ctx);
     const f = fetchApp(ctx.app);
-    const r = await f(`/events?actor=alice&limit=200`);
+    const r = await f(`/api/events?actor=alice&limit=200`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       data: { events: ReadonlyArray<{ type: string }> };
@@ -124,13 +124,13 @@ describe("cognit server — GET /events filtered + paginated (phase 5.7)", () =>
     const f = fetchApp(ctx.app);
 
     // Fetch all events, take the 2nd id as the `since` boundary.
-    const all = await f(`/events?limit=200`);
+    const all = await f(`/api/events?limit=200`);
     const allBody = (await all.json()) as {
       data: { events: ReadonlyArray<{ id: string }> };
     };
     const sinceId = allBody.data.events[1]!.id;
 
-    const r = await f(`/events?since=${sinceId}&limit=200`);
+    const r = await f(`/api/events?since=${sinceId}&limit=200`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       data: { events: ReadonlyArray<{ id: string }> };
@@ -146,7 +146,7 @@ describe("cognit server — GET /events filtered + paginated (phase 5.7)", () =>
   it("5. Combined ?session=&type=&actor=&since=&limit= intersects all clauses", async () => {
     await seed(ctx);
     const f = fetchApp(ctx.app);
-    const all = await f(`/events?limit=200`);
+    const all = await f(`/api/events?limit=200`);
     const allBody = (await all.json()) as {
       data: { events: ReadonlyArray<{ id: string }> };
     };
@@ -155,7 +155,7 @@ describe("cognit server — GET /events filtered + paginated (phase 5.7)", () =>
     const sinceId = allBody.data.events[0]!.id;
 
     const r = await f(
-      `/events?session=${ctx.sessionId}&type=hypothesis_created&actor=alice&since=${sinceId}&limit=10`,
+      `/api/events?session=${ctx.sessionId}&type=hypothesis_created&actor=alice&since=${sinceId}&limit=10`,
     );
     expect(r.status).toBe(200);
     const body = (await r.json()) as {

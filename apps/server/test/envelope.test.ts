@@ -25,7 +25,7 @@ describe("cognit server — v1 envelope contract (phase 5.7)", () => {
 
   it("1. Success response: { version: 1, kind, data }, no request_id", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/sessions");
+    const r = await f("/api/sessions");
     expect(r.status).toBe(200);
     const body = (await r.json()) as Record<string, unknown>;
     expect(body.version).toBe(1);
@@ -37,7 +37,7 @@ describe("cognit server — v1 envelope contract (phase 5.7)", () => {
   it("2. 4xx response: api_error shape with kind/code/message/request_id", async () => {
     const f = fetchApp(ctx.app);
     // POST /events with missing session_id triggers bad_request.
-    const r = await f("/events", {
+    const r = await f("/api/events", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ type: "x", payload: {}, actor: "a:b" }),
@@ -60,7 +60,7 @@ describe("cognit server — v1 envelope contract (phase 5.7)", () => {
     // a validation_failed error. Internally this used to include a
     // raw `cause` field with the Effect Cause<string>; the v1 envelope
     // strips it.
-    const r = await f(`/sessions/${ctx.sessionId}/edges`, {
+    const r = await f(`/api/sessions/${ctx.sessionId}/edges`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

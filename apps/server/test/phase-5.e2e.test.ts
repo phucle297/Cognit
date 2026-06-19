@@ -63,7 +63,7 @@ describe("cognit server — phase 5 E2E", () => {
       payload: { text: "phase5-e2e-obs" },
       actor: "alice:human",
     };
-    const postObs = await fetch(`${server.url}/events`, {
+    const postObs = await fetch(`${server.url}/api/events`, {
       method: "POST",
       headers,
       body: JSON.stringify(obsBody),
@@ -78,7 +78,7 @@ describe("cognit server — phase 5 E2E", () => {
     expect(observationEventId.length).toBeGreaterThan(10);
 
     // 3. GET /sessions/:id/events contains the observation
-    const eventsRes = await fetch(`${server.url}/sessions/${sessionId}/events?limit=200`);
+    const eventsRes = await fetch(`${server.url}/api/sessions/${sessionId}/events?limit=200`);
     expect(eventsRes.status).toBe(200);
     const eventsJson = (await eventsRes.json()) as {
       data: { events: ReadonlyArray<{ id: string; type: string }> };
@@ -89,7 +89,7 @@ describe("cognit server — phase 5 E2E", () => {
     expect(foundObs).toBeDefined();
 
     // 4. GET /sessions/:id/state → kind: session.state, includes goal
-    const stateRes = await fetch(`${server.url}/sessions/${sessionId}/state`);
+    const stateRes = await fetch(`${server.url}/api/sessions/${sessionId}/state`);
     expect(stateRes.status).toBe(200);
     const stateJson = (await stateRes.json()) as {
       kind: string;
@@ -99,7 +99,7 @@ describe("cognit server — phase 5 E2E", () => {
     expect(stateJson.data.state.goal).toBe("server test");
 
     // 5. GET /events/stream → 200, content-type text/event-stream
-    const streamRes = await fetch(`${server.url}/events/stream`);
+    const streamRes = await fetch(`${server.url}/api/events/stream`);
     expect(streamRes.status).toBe(200);
     expect(streamRes.headers.get("content-type")).toContain("text/event-stream");
 
@@ -139,7 +139,7 @@ describe("cognit server — phase 5 E2E", () => {
       db.close();
     }
 
-    const verifyPost = await fetch(`${server.url}/verify`, {
+    const verifyPost = await fetch(`${server.url}/api/verify`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -174,7 +174,7 @@ describe("cognit server — phase 5 E2E", () => {
     // does not echo linked_hypothesis_id back, so we re-query the
     // event log to assert the FK was recorded.
     const eventsForVerify = (await (
-      await fetch(`${server.url}/sessions/${sessionId}/events?limit=200`)
+      await fetch(`${server.url}/api/sessions/${sessionId}/events?limit=200`)
     ).json()) as {
       data: { events: ReadonlyArray<{ id: string; type: string; linked_hypothesis_id: string | null }> };
     };
@@ -188,7 +188,7 @@ describe("cognit server — phase 5 E2E", () => {
     // serializes a Map as `{}` so we re-query the events list to
     // confirm the verification_started row is recorded with the
     // expected id.
-    const stateRes2 = await fetch(`${server.url}/sessions/${sessionId}/state`);
+    const stateRes2 = await fetch(`${server.url}/api/sessions/${sessionId}/state`);
     expect(stateRes2.status).toBe(200);
     const verifyRow = eventsForVerify.data.events.find(
       (e) => e.id === verificationId,
@@ -197,7 +197,7 @@ describe("cognit server — phase 5 E2E", () => {
 
     // 9. POST /verify/:id/cancel → 200, kind: verification.cancelled
     const cancelRes = await fetch(
-      `${server.url}/verify/${verificationId}/cancel`,
+      `${server.url}/api/verify/${verificationId}/cancel`,
       {
         method: "POST",
         headers,
@@ -219,7 +219,7 @@ describe("cognit server — phase 5 E2E", () => {
     // The events list shows verification_cancelled with
     // parent_verification_id = verificationId.
     const eventsAfterCancel = (await (
-      await fetch(`${server.url}/sessions/${sessionId}/events?limit=200`)
+      await fetch(`${server.url}/api/sessions/${sessionId}/events?limit=200`)
     ).json()) as {
       data: {
         events: ReadonlyArray<{
@@ -238,9 +238,9 @@ describe("cognit server — phase 5 E2E", () => {
 
     // 11. GET /health and /healthz return the v1 envelope (always
     // open — there is no auth).
-    const health = await fetch(`${server.url}/health`);
+    const health = await fetch(`${server.url}/api/health`);
     expect(health.status).toBe(200);
-    const healthz = await fetch(`${server.url}/healthz`);
+    const healthz = await fetch(`${server.url}/api/healthz`);
     expect(healthz.status).toBe(200);
     const healthJson = (await health.json()) as { kind: string; version: number };
     expect(typeof healthJson.kind).toBe("string");

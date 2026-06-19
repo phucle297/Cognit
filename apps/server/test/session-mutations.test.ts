@@ -25,7 +25,7 @@ describe("cognit server — session mutations", () => {
 
   it("POST /sessions creates a session and returns 201", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/sessions", {
+    const r = await f("/api/sessions", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ goal: "investigate the dashboard", actor }),
@@ -46,7 +46,7 @@ describe("cognit server — session mutations", () => {
     const f = fetchApp(ctx.app);
     // Create via the bootstrap session id (active by default).
     const id = ctx.sessionId;
-    const r = await f(`/sessions/${id}/pause`, {
+    const r = await f(`/api/sessions/${id}/pause`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }),
@@ -64,13 +64,13 @@ describe("cognit server — session mutations", () => {
     const f = fetchApp(ctx.app);
     const id = ctx.sessionId;
     // First pause, then close.
-    const pause = await f(`/sessions/${id}/pause`, {
+    const pause = await f(`/api/sessions/${id}/pause`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }),
     });
     expect(pause.status).toBe(200);
-    const close = await f(`/sessions/${id}/close`, {
+    const close = await f(`/api/sessions/${id}/close`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }),
@@ -90,14 +90,14 @@ describe("cognit server — session mutations", () => {
     const parentId = ctx.sessionId;
     // Pause the parent first; resume of an active session is not
     // the common case and the service may return the same row.
-    const pause = await f(`/sessions/${parentId}/pause`, {
+    const pause = await f(`/api/sessions/${parentId}/pause`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }),
     });
     expect(pause.status).toBe(200);
 
-    const resume = await f(`/sessions/${parentId}/resume`, {
+    const resume = await f(`/api/sessions/${parentId}/resume`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }), // fork_on_resume defaults to true
@@ -123,13 +123,13 @@ describe("cognit server — session mutations", () => {
     const f = fetchApp(ctx.app);
     const id = ctx.sessionId;
     // Close first.
-    const close = await f(`/sessions/${id}/close`, {
+    const close = await f(`/api/sessions/${id}/close`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }),
     });
     expect(close.status).toBe(200);
-    const pause = await f(`/sessions/${id}/pause`, {
+    const pause = await f(`/api/sessions/${id}/pause`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }),
@@ -142,7 +142,7 @@ describe("cognit server — session mutations", () => {
 
   it("POST /sessions/:id/pause on an unknown id returns 404 not_found", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/sessions/01nonexistentxxxxxxxxxx/pause", {
+    const r = await f("/api/sessions/01nonexistentxxxxxxxxxx/pause", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ actor }),

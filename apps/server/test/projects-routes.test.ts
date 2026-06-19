@@ -25,7 +25,7 @@ describe("cognit server — /projects routes", () => {
 
   it("GET /projects returns at least the bootstrap project", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/projects");
+    const r = await f("/api/projects");
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       version: number;
@@ -42,7 +42,7 @@ describe("cognit server — /projects routes", () => {
 
   it("POST /projects with valid body returns 201 + project.created", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/projects", {
+    const r = await f("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "acme", repo_url: "https://github.com/acme/widgets" }),
@@ -64,7 +64,7 @@ describe("cognit server — /projects routes", () => {
 
   it("POST /projects with missing name returns 400 validation_failed", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/projects", {
+    const r = await f("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ repo_url: "https://example.com" }),
@@ -77,7 +77,7 @@ describe("cognit server — /projects routes", () => {
 
   it("POST /projects with empty name returns 400 validation_failed", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/projects", {
+    const r = await f("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "" }),
@@ -89,13 +89,13 @@ describe("cognit server — /projects routes", () => {
 
   it("POST /projects then GET /projects lists the new project", async () => {
     const f = fetchApp(ctx.app);
-    const post = await f("/projects", {
+    const post = await f("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: "newproj" }),
     });
     expect(post.status).toBe(201);
-    const get = await f("/projects");
+    const get = await f("/api/projects");
     expect(get.status).toBe(200);
     const body = (await get.json()) as {
       data: { projects: Array<{ name: string }> };

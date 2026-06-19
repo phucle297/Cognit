@@ -62,12 +62,12 @@ describe("production index.ts live boot", () => {
     // Proof of route registration: response body must be ApiError envelope,
 // NOT Hono's default 404 (empty body, no JSON envelope).
     const checks: Array<[string, string, boolean]> = [
-      ["POST", "/verify", false],
-      ["POST", "/verify/x/cancel", false],
-      ["GET", "/actors", true],
-      ["POST", "/actors", false],
-      ["GET", "/sessions/missing/edges", false],
-      ["POST", "/sessions/missing/edges", false],
+      ["POST", "/api/verify", false],
+      ["POST", "/api/verify/x/cancel", false],
+      ["GET", "/api/actors", true],
+      ["POST", "/api/actors", false],
+      ["GET", "/api/sessions/missing/edges", false],
+      ["POST", "/api/sessions/missing/edges", false],
     ];
     for (const [method, p, expectOk] of checks) {
       const isPost = method === "POST";

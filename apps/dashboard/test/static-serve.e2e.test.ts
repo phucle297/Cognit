@@ -42,7 +42,7 @@ describe("cognit dashboard — static-serve e2e", () => {
     server = await bootServer();
 
     // /healthz is a registered route; no auth required.
-    const healthzRes = await fetch(`${server.url}/healthz`);
+    const healthzRes = await fetch(`${server.url}/api/healthz`);
     expect(healthzRes.status).toBe(200);
     const healthzJson = (await healthzRes.json()) as { kind: string };
     expect(healthzJson.kind).toBe("healthz");

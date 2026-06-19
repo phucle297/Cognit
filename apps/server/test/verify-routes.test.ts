@@ -24,7 +24,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
 
   it("1. POST /verify starts a verification (201, state=started)", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/verify", {
+    const r = await f("/api/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -67,7 +67,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
       }) as unknown as Effect.Effect<void, never, never>,
     );
 
-    const r = await f("/verify", {
+    const r = await f("/api/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -82,7 +82,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
     const verificationId = ((await r.json()) as { data: { id: string } }).data.id;
 
     // Re-fetch the events list and find the started row by id.
-    const events = await f(`/sessions/${ctx.sessionId}/events?limit=200`);
+    const events = await f(`/api/sessions/${ctx.sessionId}/events?limit=200`);
     const eventsBody = (await events.json()) as {
       data: { events: ReadonlyArray<{ id: string; type: string; linked_hypothesis_id: string | null }> };
     };
@@ -97,7 +97,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
     const f = fetchApp(ctx.app);
     // Use a long-running command so the subprocess is still alive when
     // we cancel it. `sleep 30` runs in the background via sh -c.
-    const r = await f("/verify", {
+    const r = await f("/api/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -110,7 +110,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
     expect(r.status).toBe(201);
     const verificationId = ((await r.json()) as { data: { id: string } }).data.id;
 
-    const cancel = await f(`/verify/${verificationId}/cancel`, {
+    const cancel = await f(`/api/verify/${verificationId}/cancel`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -129,7 +129,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
 
     // The verification_cancelled event should be visible in the
     // session's event log with parent_verification_id = verificationId.
-    const events = await f(`/sessions/${ctx.sessionId}/events?limit=200`);
+    const events = await f(`/api/sessions/${ctx.sessionId}/events?limit=200`);
     const eventsBody = (await events.json()) as {
       data: { events: ReadonlyArray<{ id: string; type: string; parent_verification_id: string | null }> };
     };
@@ -139,7 +139,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
     expect(cancelled).toBeDefined();
 
     // Idempotency: second cancel returns 200 with idempotent=true.
-    const cancel2 = await f(`/verify/${verificationId}/cancel`, {
+    const cancel2 = await f(`/api/verify/${verificationId}/cancel`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -157,7 +157,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
 
   it("4. POST /verify/:id/cancel on an unknown id returns 404", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/verify/01nosuchverifxxxxxxxxxxxxx/cancel", {
+    const r = await f("/api/verify/01nosuchverifxxxxxxxxxxxxx/cancel", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -170,7 +170,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
   it("5. POST /verify on a closed session returns 409", async () => {
     const f = fetchApp(ctx.app);
     // Close the bootstrap session.
-    const close = await f(`/sessions/${ctx.sessionId}/close`, {
+    const close = await f(`/api/sessions/${ctx.sessionId}/close`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -179,7 +179,7 @@ describe("cognit server — /verify routes (phase 5.6)", () => {
     });
     expect(close.status).toBe(200);
 
-    const r = await f("/verify", {
+    const r = await f("/api/verify", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({

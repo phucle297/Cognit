@@ -20,7 +20,7 @@ describe("cognit server — /sessions routes", () => {
 
   it("GET /sessions returns the session list as a v1 envelope", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/sessions");
+    const r = await f("/api/sessions");
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       version: number;
@@ -35,7 +35,7 @@ describe("cognit server — /sessions routes", () => {
 
   it("GET /sessions/:id returns the session row (session.get envelope)", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}`);
+    const r = await f(`/api/sessions/${ctx.sessionId}`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -48,7 +48,7 @@ describe("cognit server — /sessions routes", () => {
 
   it("GET /sessions/:id/state returns the full SessionState", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}/state`);
+    const r = await f(`/api/sessions/${ctx.sessionId}/state`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -65,7 +65,7 @@ describe("cognit server — /sessions routes", () => {
 
   it("GET /sessions/:id/events returns the events for the session", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/${ctx.sessionId}/events?limit=10`);
+    const r = await f(`/api/sessions/${ctx.sessionId}/events?limit=10`);
     expect(r.status).toBe(200);
     const body = (await r.json()) as {
       kind: string;
@@ -79,7 +79,7 @@ describe("cognit server — /sessions routes", () => {
 
   it("GET /sessions/:id/state on an unknown id returns 404", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f(`/sessions/01nosuchsessxxxxxxxxxxx/state`);
+    const r = await f(`/api/sessions/01nosuchsessxxxxxxxxxxx/state`);
     expect(r.status).toBe(404);
   });
 });

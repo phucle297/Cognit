@@ -18,13 +18,13 @@ describe("cognit server — /healthz", () => {
 
   it("returns 200 with no auth required", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/healthz");
+    const r = await f("/api/healthz");
     expect(r.status).toBe(200);
   });
 
   it("returns the v1 envelope shape { version, kind, data: { status } }", async () => {
     const f = fetchApp(ctx.app);
-    const r = await f("/healthz");
+    const r = await f("/api/healthz");
     const body = (await r.json()) as { version: number; kind: string; data: { status: string } };
     expect(body.version).toBe(1);
     expect(body.kind).toBe("healthz");
