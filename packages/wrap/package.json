@@ -1,13 +1,15 @@
 {
-  "name": "@cognit/cli",
+  "name": "@cognit/wrap",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "cognit": "./src/index.ts"
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "echo \"wrap: no build (consume TS source directly)\"",
     "typecheck": "tsgo --noEmit",
     "test": "vitest --run",
     "test:watch": "vitest",
@@ -17,19 +19,11 @@
     "@cognit/core": "workspace:*",
     "@cognit/db": "workspace:*",
     "@cognit/verification": "workspace:*",
-    "@cognit/wrap": "workspace:*",
-    "chokidar": "^5.0.0",
-    "commander": "^15.0.0",
     "effect": "3.21.3",
-    "tar": "^7.5.16",
-    "yaml": "^2.9.0"
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.3",
-    "better-sqlite3": "^12.11.1",
-    "tsup": "^8.5.1",
-    "tsx": "^4.22.4",
     "vitest": "^4.1.9"
   }
 }

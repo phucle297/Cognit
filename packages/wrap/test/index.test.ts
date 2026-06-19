@@ -1,0 +1,342 @@
+/**
+ * `packages/wrap/test/index.test.ts` — unit tests for the wrap
+ * producer (Phase 9.2).
+ *
+ * Coverage map:
+ *   - AC 9.2.1 (happy path)        — `node -e "process.exit(0)"`
+ *                                    spawns, emits one terminal
+ *                                    inbox file with
+ *                                    `verification_passed`,
+ *                                    exit_code=0. Atomic-write
+ *                                    helper exercised transitively.
+ *   - AC 9.2.2 (per-stderr-line)  — `bash -c 'echo oops >&2'`
+ *                                    produces at least one
+ *                                    `observation_added` envelope.
+ *   - AC 9.2.3 (failure paths)    — exit 1 emits
+ *                                    `verification_failed`; spawn
+ *                                    of a nonexistent binary emits
+ *                                    `verification_errored` with
+ *                                    `error_code=enoent`.
+ *   - AC 9.2.4 (artifact)         — combined stdout+stderr > 1024
+ *                                    chars creates
+ *                                    `artifacts/<sha>.log` and
+ *                                    `artifactRefs` on the
+ *                                    terminal envelope.
+ *
+ * Each AC has at least one positive and one negative case as
+ * required by the project's quality gate.
+ */
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { Effect } from "effect";
+import { mkdtemp, rm, readFile, readdir, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import {
+  runWrap,
+  appendInboxEnvelope,
+  inboxFilename,
+  WRAP_SCHEMA_VERSION,
+  type WrapEnvelope,
+} from "../src/index.js";
+import { atomicWriteJson } from "../src/atomic-write.js";
+import { ulid } from "ulid";
+
+let inboxDir = "";
+let artifactsDir = "";
+let sessionId = "";
+
+const sessionUlid = "0123456789ABCDEFGHJKMNPQRS";
+
+beforeEach(async () => {
+  const root = await mkdtemp(join(tmpdir(), "cognit-wrap-"));
+  inboxDir = join(root, "inbox");
+  artifactsDir = join(root, "artifacts");
+  await rm(inboxDir, { recursive: true, force: true });
+  await rm(artifactsDir, { recursive: true, force: true });
+  await new Promise((r) => setImmediate(r));
+  // sessionId is a valid ULID; the watcher will accept it as a
+  // filename prefix without needing an actual DB row (the watcher
+  // calls appendEvent with it, and appendEvent auto-creates the
+  // session if missing). These tests don't touch the DB so we
+  // just use a fresh ULID per test for envelope uniqueness.
+  sessionId = ulid();
+});
+
+afterEach(async () => {
+  await rm(inboxDir, { recursive: true, force: true });
+  await rm(artifactsDir, { recursive: true, force: true });
+});
+
+const baseInput = (command: readonly string[]) => ({
+  command,
+  cwd: process.cwd(),
+  env: process.env,
+  inboxDir,
+  artifactsDir,
+  sessionId,
+});
+
+const parseEnvelopeFile = async (filePath: string): Promise<WrapEnvelope> => {
+  const text = await readFile(filePath, "utf8");
+  return JSON.parse(text) as WrapEnvelope;
+};
+
+describe("atomicWriteJson — AC 9.2.1 atomic-write helper", () => {
+  it("writes the file at the requested path with no leftover .tmp", async () => {
+    const filePath = join(inboxDir, "test.json");
+    const written = await Effect.runPromise(
+      atomicWriteJson({ path: filePath, contents: "{\"hello\":\"world\"}" }),
+    );
+    expect(written).toBe(filePath);
+    const onDisk = await readFile(filePath, "utf8");
+    expect(onDisk).toBe("{\"hello\":\"world\"}");
+    const entries = await readdir(inboxDir);
+    expect(entries).toContain("test.json");
+    expect(entries).not.toContain("test.json.tmp");
+  });
+
+  it("rejects paths not ending in .json", async () => {
+    const filePath = join(inboxDir, "test.txt");
+    const result = await Effect.runPromise(
+      Effect.either(atomicWriteJson({ path: filePath, contents: "x" })),
+    );
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      const message = (result.left as Error).message;
+      expect(message).toMatch(/\.json/);
+    }
+  });
+
+  it("fsync + rename yields the final path with no partial .tmp", async () => {
+    // A concurrent reader of the inbox dir should never observe a
+    // `.tmp` file at any point. We exercise the protocol by writing
+    // many small files in parallel — the rename is atomic on POSIX
+    // so a reader sees either nothing or the final file.
+    const writes = await Effect.runPromise(
+      Effect.all(
+        Array.from({ length: 50 }, (_, i) =>
+          atomicWriteJson({ path: join(inboxDir, `f${i}.json`), contents: String(i) }),
+        ),
+        { concurrency: 8, discard: false },
+      ) as unknown as Effect.Effect<ReadonlyArray<string>, never, never>,
+    );
+    expect(writes).toHaveLength(50);
+    const entries = await readdir(inboxDir);
+    expect(entries.sort()).toEqual(Array.from({ length: 50 }, (_, i) => `f${i}.json`).sort());
+  });
+});
+
+describe("inboxFilename — AC 9.2.1 filename contract", () => {
+  it("matches <session>-<ulid>.json", () => {
+    const name = inboxFilename(sessionUlid, "0123456789ABCDEFGHJKMNPQRT");
+    expect(name).toBe(`${sessionUlid}-0123456789ABCDEFGHJKMNPQRT.json`);
+  });
+});
+
+describe("appendInboxEnvelope — AC 9.2.1 envelope shape", () => {
+  it("stamps schema_version=1.1.0 and a per-event ULID", async () => {
+    const env: WrapEnvelope = {
+      type: "observation_added",
+      version: WRAP_SCHEMA_VERSION,
+      session_id: sessionUlid,
+      actor_name: "test",
+      actor_type: "worker",
+      id: "0123456789ABCDEFGHJKMNPQRT",
+      payload: { text: "hello" },
+    };
+    const filePath = await Effect.runPromise(appendInboxEnvelope(inboxDir, env));
+    expect(filePath).toBe(join(inboxDir, `${sessionUlid}-${env.id}.json`));
+    const onDisk = await parseEnvelopeFile(filePath);
+    expect(onDisk.version).toBe("1.1.0");
+    expect(onDisk.session_id).toBe(sessionUlid);
+    expect(onDisk.actor_type).toBe("worker");
+    expect(onDisk.payload).toEqual({ text: "hello" });
+  });
+});
+
+describe("runWrap — AC 9.2.1 spawn + capture + atomic-write", () => {
+  it("happy path: spawns `node -e process.exit(0)` and writes one verification_passed envelope", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["node", "-e", "process.exit(0)"])),
+    );
+    expect(out.terminalType).toBe("verification_passed");
+    expect(out.writtenFiles).toHaveLength(1);
+    expect(out.spawnErrorCode).toBeUndefined();
+    expect(out.artifact).toBeNull();
+
+    const env = await parseEnvelopeFile(out.writtenFiles[0]!);
+    expect(env.type).toBe("verification_passed");
+    expect(env.session_id).toBe(sessionId);
+    expect(env.actor_type).toBe("worker");
+    expect(env.actor_name).toBe("cognit-wrap");
+    expect(env.version).toBe("1.1.0");
+    const payload = env.payload as { exit_code?: number; duration_ms?: number };
+    expect(payload.exit_code).toBe(0);
+    expect(typeof payload.duration_ms).toBe("number");
+  });
+
+  it("no stderr lines means no observation envelopes (per-line policy)", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["node", "-e", "process.exit(0)"])),
+    );
+    expect(out.writtenFiles).toHaveLength(1);
+    // Only the terminal envelope is on disk.
+    const entries = await readdir(inboxDir);
+    expect(entries).toHaveLength(1);
+  });
+});
+
+describe("runWrap — AC 9.2.2 per-stderr-line observation policy", () => {
+  it("emits one observation_added envelope per non-empty stderr line", async () => {
+    const out = await Effect.runPromise(
+      runWrap(
+        baseInput([
+          "bash",
+          "-c",
+          "echo line1 1>&2; echo line2 1>&2; echo line3 1>&2; exit 1",
+        ]),
+      ),
+    );
+    expect(out.terminalType).toBe("verification_failed");
+    // Three stderr lines + one terminal.
+    expect(out.writtenFiles.length).toBeGreaterThanOrEqual(4);
+    const types: string[] = [];
+    for (const f of out.writtenFiles) {
+      const env = await parseEnvelopeFile(f);
+      types.push(env.type);
+    }
+    const observationCount = types.filter((t) => t === "observation_added").length;
+    expect(observationCount).toBe(3);
+  });
+
+  it("each observation envelope carries payload.text = the line content", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["bash", "-c", "echo alpha 1>&2; echo beta 1>&2; exit 1"])),
+    );
+    const lines: string[] = [];
+    for (const f of out.writtenFiles) {
+      const env = await parseEnvelopeFile(f);
+      if (env.type === "observation_added") {
+        const text = (env.payload as { text?: unknown }).text;
+        if (typeof text === "string") lines.push(text);
+      }
+    }
+    expect(lines.sort()).toEqual(["alpha", "beta"]);
+  });
+
+  it("observation envelopes are emitted even when the child exits 0", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["bash", "-c", "echo warning 1>&2"])),
+    );
+    expect(out.terminalType).toBe("verification_passed");
+    const types: string[] = [];
+    for (const f of out.writtenFiles) {
+      const env = await parseEnvelopeFile(f);
+      types.push(env.type);
+    }
+    // One stderr line + one terminal.
+    expect(types.filter((t) => t === "observation_added").length).toBe(1);
+    expect(types.filter((t) => t === "verification_passed").length).toBe(1);
+  });
+});
+
+describe("runWrap — AC 9.2.3 terminal-event mapping", () => {
+  it("exit non-zero -> verification_failed", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["node", "-e", "process.exit(7)"])),
+    );
+    expect(out.terminalType).toBe("verification_failed");
+    expect(out.spawnErrorCode).toBeUndefined();
+    const terminal = out.writtenFiles[out.writtenFiles.length - 1]!;
+    const env = await parseEnvelopeFile(terminal);
+    expect(env.type).toBe("verification_failed");
+    const payload = env.payload as { exit_code?: number };
+    expect(payload.exit_code).toBe(7);
+  });
+
+  it("ENOENT on spawn -> verification_errored with spawnErrorCode=enoent", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["/no/such/binary/xyz-abc-12345"])),
+    );
+    expect(out.terminalType).toBe("verification_errored");
+    expect(out.spawnErrorCode).toBe("enoent");
+    const terminal = out.writtenFiles[0]!;
+    const env = await parseEnvelopeFile(terminal);
+    expect(env.type).toBe("verification_errored");
+    const payload = env.payload as { error_code?: string; error?: string };
+    expect(payload.error_code).toBe("enoent");
+    expect(typeof payload.error).toBe("string");
+    expect(payload.error!.length).toBeGreaterThan(0);
+  });
+
+  it("errored path does NOT create an artifact (no output captured)", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["/no/such/binary/xyz-abc-9999"])),
+    );
+    expect(out.artifact).toBeNull();
+    const entries = await readdir(artifactsDir).catch(() => [] as string[]);
+    expect(entries).toHaveLength(0);
+  });
+});
+
+describe("runWrap — AC 9.2.4 artifact on large output", () => {
+  it("writes artifacts/<sha>.log when combined output > 1024 chars", async () => {
+    const out = await Effect.runPromise(
+      runWrap(
+        baseInput([
+          "node",
+          "-e",
+          "process.stdout.write('x'.repeat(2000))",
+        ]),
+      ),
+    );
+    expect(out.terminalType).toBe("verification_passed");
+    expect(out.artifact).not.toBeNull();
+    const ref = out.artifact!;
+    expect(ref.path.startsWith(artifactsDir)).toBe(true);
+    expect(ref.path.endsWith(".log")).toBe(true);
+
+    const onDisk = await readFile(ref.path, "utf8");
+    const sha = createHash("sha256").update(onDisk, "utf8").digest("hex");
+    expect(sha).toBe(ref.id);
+
+    const s = await stat(ref.path);
+    expect(s.size).toBe(ref.sizeBytes);
+
+    // The terminal envelope references the artifact.
+    const terminal = out.writtenFiles[out.writtenFiles.length - 1]!;
+    const env = await parseEnvelopeFile(terminal);
+    expect(env.artifactRefs).toEqual([ref.id]);
+  });
+
+  it("does NOT write an artifact when combined output is small (< 1024 chars)", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["node", "-e", "process.stdout.write('short')"])),
+    );
+    expect(out.artifact).toBeNull();
+    const terminal = out.writtenFiles[out.writtenFiles.length - 1]!;
+    const env = await parseEnvelopeFile(terminal);
+    expect(env.artifactRefs).toBeUndefined();
+  });
+});
+
+describe("runWrap — sink path integrity", () => {
+  it("every written file matches <session-id>-<ulid>.json", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["node", "-e", "process.exit(0)"])),
+    );
+    for (const f of out.writtenFiles) {
+      const base = f.split("/").pop()!;
+      expect(base).toMatch(new RegExp(`^${sessionId}-[0-9A-HJKMNP-TV-Z]{26}\\.json$`));
+    }
+  });
+
+  it("no .tmp files remain on disk after the run", async () => {
+    await Effect.runPromise(
+      runWrap(baseInput(["node", "-e", "process.exit(0)"])),
+    );
+    const entries = await readdir(inboxDir);
+    expect(entries.some((n) => n.endsWith(".tmp"))).toBe(false);
+  });
+});

@@ -35,6 +35,9 @@ importers:
       '@cognit/verification':
         specifier: workspace:*
         version: link:../../packages/verification
+      '@cognit/wrap':
+        specifier: workspace:*
+        version: link:../../packages/wrap
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -298,6 +301,31 @@ importers:
       effect:
         specifier: 3.21.3
         version: 3.21.3
+    devDependencies:
+      '@types/node':
+        specifier: ^25.9.3
+        version: 25.9.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/wrap:
+    dependencies:
+      '@cognit/core':
+        specifier: workspace:*
+        version: link:../core
+      '@cognit/db':
+        specifier: workspace:*
+        version: link:../db
+      '@cognit/verification':
+        specifier: workspace:*
+        version: link:../verification
+      effect:
+        specifier: 3.21.3
+        version: 3.21.3
+      ulid:
+        specifier: ^3.0.2
+        version: 3.0.2
     devDependencies:
       '@types/node':
         specifier: ^25.9.3
