@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Add fuse.js + GET /api/sessions/search (weighted 5 kinds + filters)
+search: Phase 7 Recovery Engine (v0.2 surface + fuzzy search + CLI + dashboard)
 queue: 
-next: Cognit-7r
+next: 
