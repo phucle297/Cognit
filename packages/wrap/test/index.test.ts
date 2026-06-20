@@ -11,7 +11,7 @@
  *                                    helper exercised transitively.
  *   - AC 9.2.2 (per-stderr-line)  — `bash -c 'echo oops >&2'`
  *                                    produces at least one
- *                                    `observation_added` envelope.
+ *                                    `observation_recorded` envelope.
  *   - AC 9.2.3 (failure paths)    — exit 1 emits
  *                                    `verification_failed`; spawn
  *                                    of a nonexistent binary emits
@@ -137,7 +137,7 @@ describe("inboxFilename — AC 9.2.1 filename contract", () => {
 describe("appendInboxEnvelope — AC 9.2.1 envelope shape", () => {
   it("stamps schema_version=1.1.0 and a per-event ULID", async () => {
     const env: WrapEnvelope = {
-      type: "observation_added",
+      type: "observation_recorded",
       version: WRAP_SCHEMA_VERSION,
       session_id: sessionUlid,
       actor_name: "test",
@@ -188,7 +188,7 @@ describe("runWrap — AC 9.2.1 spawn + capture + atomic-write", () => {
 });
 
 describe("runWrap — AC 9.2.2 per-stderr-line observation policy", () => {
-  it("emits one observation_added envelope per non-empty stderr line", async () => {
+  it("emits one observation_recorded envelope per non-empty stderr line", async () => {
     const out = await Effect.runPromise(
       runWrap(
         baseInput([
@@ -206,7 +206,7 @@ describe("runWrap — AC 9.2.2 per-stderr-line observation policy", () => {
       const env = await parseEnvelopeFile(f);
       types.push(env.type);
     }
-    const observationCount = types.filter((t) => t === "observation_added").length;
+    const observationCount = types.filter((t) => t === "observation_recorded").length;
     expect(observationCount).toBe(3);
   });
 
@@ -217,7 +217,7 @@ describe("runWrap — AC 9.2.2 per-stderr-line observation policy", () => {
     const lines: string[] = [];
     for (const f of out.writtenFiles) {
       const env = await parseEnvelopeFile(f);
-      if (env.type === "observation_added") {
+      if (env.type === "observation_recorded") {
         const text = (env.payload as { text?: unknown }).text;
         if (typeof text === "string") lines.push(text);
       }
@@ -236,7 +236,7 @@ describe("runWrap — AC 9.2.2 per-stderr-line observation policy", () => {
       types.push(env.type);
     }
     // One stderr line + one terminal.
-    expect(types.filter((t) => t === "observation_added").length).toBe(1);
+    expect(types.filter((t) => t === "observation_recorded").length).toBe(1);
     expect(types.filter((t) => t === "verification_passed").length).toBe(1);
   });
 });
@@ -338,5 +338,48 @@ describe("runWrap — sink path integrity", () => {
     );
     const entries = await readdir(inboxDir);
     expect(entries.some((n) => n.endsWith(".tmp"))).toBe(false);
+  });
+});
+
+describe("runWrap — single-spawn guarantee (P0 fix)", () => {
+  it("runs the wrapped command exactly ONCE (no re-spawn for stderr capture)", async () => {
+    // Side-effect counter survives the run. Each invocation of the
+    // wrapped command increments it. If wrap re-spawned to capture
+    // stderr (the pre-fix bug), the count would be 2.
+    const counterFile = join(inboxDir, "counter.txt");
+    const counterScript = `
+      const fs = require('fs');
+      const f = ${JSON.stringify(counterFile)};
+      const n = (parseInt(fs.existsSync(f) ? fs.readFileSync(f,'utf8') : '0', 10) + 1);
+      fs.writeFileSync(f, String(n));
+      process.stderr.write('hit-' + n + String.fromCharCode(10));
+      process.exit(0);
+    `;
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["node", "-e", counterScript])),
+    );
+    expect(out.terminalType).toBe("verification_passed");
+    const count = parseInt(await readFile(counterFile, "utf8"), 10);
+    expect(count).toBe(1);
+
+    // And the stderr observation should reference hit-1 (the only run).
+    const observations: WrapEnvelope[] = [];
+    for (const f of out.writtenFiles) {
+      const env = await parseEnvelopeFile(f);
+      if (env.type === "observation_recorded") observations.push(env);
+    }
+    expect(observations).toHaveLength(1);
+    expect((observations[0]!.payload as { text: string }).text).toBe("hit-1");
+  });
+
+  it("does NOT re-spawn on the errored (ENOENT) path either", async () => {
+    const out = await Effect.runPromise(
+      runWrap(baseInput(["/no/such/binary/never-exists-xyz-qqq"])),
+    );
+    expect(out.terminalType).toBe("verification_errored");
+    expect(out.writtenFiles).toHaveLength(1);
+    const only = out.writtenFiles[0]!;
+    const env = await parseEnvelopeFile(only);
+    expect(env.type).toBe("verification_errored");
   });
 });

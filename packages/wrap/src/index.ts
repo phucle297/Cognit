@@ -4,7 +4,7 @@
  *
  * Three envelope types are produced per invocation:
  *
- *   - `observation_added` — one per non-empty stderr line (AC 9.2.2).
+ *   - `observation_recorded` — one per non-empty stderr line (AC 9.2.2).
  *     Per-line granularity is the chosen policy; the alternative
  *     (one batched file with `payload.lines: string[]`) loses
  *     timeline granularity under noisy tools. With per-line files
@@ -24,7 +24,7 @@
  * `EnvelopeSchema`):
  *
  *   {
- *     type:        "observation_added" | "verification_passed" | ...,
+ *     type:        "observation_recorded" | "verification_passed" | ...,
  *     version:     "1.1.0",
  *     session_id:  ULID,
  *     actor_name:  string,
@@ -52,15 +52,14 @@
  * reused via `runVerification`.
  */
 import path from "node:path";
+import fsp from "node:fs/promises";
 import { Effect, Ref } from "effect";
 import { ulid } from "ulid";
 import {
   runVerification,
-  spawnVerification,
   type ArtifactRef,
   type RunVerificationInput,
   type RunVerificationOutput,
-  type SpawnResult,
   type TerminalEvent,
 } from "@cognit/verification";
 import { atomicWriteJson } from "./atomic-write.js";
@@ -78,7 +77,7 @@ export const WRAP_SCHEMA_VERSION = "1.1.0" as const;
  * (`packages/db/src/event-schema.ts`).
  */
 export type WrapEnvelopeType =
-  | "observation_added"
+  | "observation_recorded"
   | "verification_passed"
   | "verification_failed"
   | "verification_errored";
@@ -165,7 +164,7 @@ const makeEnvelope = (params: {
  * Decision: per-stderr-line observation policy (AC 9.2.2).
  *
  * We split stderr on `\n`, drop empty lines, and emit one
- * `observation_added` envelope per line. The alternative
+ * `observation_recorded` envelope per line. The alternative
  * (one file with `payload.lines: string[]`) batches noise into a
  * single timeline row, which is faster but degrades the timeline
  * resolution under verbose tools. Per-line is the safer default
@@ -173,20 +172,24 @@ const makeEnvelope = (params: {
  * line, which is acceptable for typical worker invocations (≤
  * a few hundred lines of stderr). The choice is also documented in
  * the `cognit wrap --help` text.
+ *
+ * Lines are accumulated via the engine's `onStderrLine` callback
+ * (run before `onTerminal`), so observation envelopes are written
+ * in stream order and the wrapped command runs exactly ONCE.
  */
+
 const emitObservationFiles = (params: {
   readonly inboxDir: string;
   readonly sessionId: string;
   readonly actorName: string;
-  readonly stderr: string;
+  readonly lines: ReadonlyArray<string>;
 }): Effect.Effect<ReadonlyArray<string>, Error> => {
-  const lines = params.stderr.split(/\r?\n/).filter((l) => l.length > 0);
-  if (lines.length === 0) return Effect.succeed([] as ReadonlyArray<string>);
+  if (params.lines.length === 0) return Effect.succeed([] as ReadonlyArray<string>);
   return Effect.gen(function* () {
     const written: string[] = [];
-    for (const line of lines) {
+    for (const line of params.lines) {
       const env = makeEnvelope({
-        type: "observation_added",
+        type: "observation_recorded",
         sessionId: params.sessionId,
         actorName: params.actorName,
         payload: { text: line },
@@ -240,16 +243,16 @@ export interface RunWrapOutput {
  * Run `<command>` and translate the subprocess output into inbox
  * envelopes.
  *
- * Implementation strategy: re-use the verification engine's spawn
- * substrate directly to get the typed SpawnError + stdout/stderr
- * capture. Then call `runVerification` to get the terminal event
- * + artifact. That avoids re-implementing the 1MB truncation,
- * artifact sha256, and terminal-event mapping that
- * `packages/verification/src/index.ts` already owns.
+ * Implementation strategy: delegate to the verification engine's
+ * `runVerification`, which already owns spawn, capture, 1 MB
+ * truncation, sha256 artifact, and the terminal-event mapping.
+ * Wrap adds: (a) the `onStderrLine` callback so per-line stderr
+ * observations are produced from the SAME spawn (no double-spawn),
+ * and (b) the terminal envelope write into the inbox.
  *
  * Order of writes:
- *   1. observation envelopes (one per stderr line) — only when
- *      the terminal was `verification_failed`.
+ *   1. observation envelopes (one per stderr line, via
+ *      `onStderrLine` fired before `onTerminal`).
  *   2. terminal envelope (`verification_passed` / `_failed` /
  *      `_errored`).
  *
@@ -264,15 +267,31 @@ export const runWrap = (
     const actorName = input.actorName ?? "cognit-wrap";
     const signal = input.signal ?? new AbortController().signal;
 
+    // Ensure inbox + artifacts dirs exist BEFORE the spawn. The
+    // wrapped subprocess may write side-effect files into either
+    // (the single-spawn test does); `atomicWriteJson` only
+    // mkdirs the parent of the file it's about to write, which
+    // races the child process.
+    yield* Effect.tryPromise({
+      try: () => fsp.mkdir(input.inboxDir, { recursive: true, mode: 0o700 }),
+      catch: (e) => new Error(`runWrap: mkdir inbox failed: ${String(e)}`),
+    });
+    yield* Effect.tryPromise({
+      try: () => fsp.mkdir(input.artifactsDir, { recursive: true, mode: 0o700 }),
+      catch: (e) => new Error(`runWrap: mkdir artifacts failed: ${String(e)}`),
+    });
+
     // Stage 1: spawn + capture + artifact + terminal via the
     // engine. The engine's `onTerminal` callback is invoked
     // exactly once; we mirror the terminal into a local ref so
     // the rest of the function can build envelopes around it.
-    // The engine's `onTerminal` callback is invoked synchronously
-    // from within `runVerification`'s effect. We capture the
-    // terminal into a Ref so the post-run read sees the populated
-    // value with a clean type.
-    const holder = yield* Ref.make<TerminalEvent | null>(null);
+    // `onStderrLine` accumulates per-line stderr into a second
+    // ref for stage 2. Both refs are allocated inside the Effect
+    // context so the runtime mutation primitives are wired up.
+    const stderrLinesRef = yield* Ref.make<ReadonlyArray<string>>([]);
+    const stderrLineSink = (line: string): Effect.Effect<void, never> =>
+      Ref.update(stderrLinesRef, (acc) => [...acc, line]);
+    const terminalHolder = yield* Ref.make<TerminalEvent | null>(null);
     const rvInput: RunVerificationInput = {
       command: input.command,
       cwd: input.cwd,
@@ -280,10 +299,11 @@ export const runWrap = (
       signal,
       paths: { artifacts: input.artifactsDir },
       onTerminal: (e) =>
-        Ref.set(holder, e).pipe(Effect.orElseSucceed(() => undefined)),
+        Ref.set(terminalHolder, e).pipe(Effect.orElseSucceed(() => undefined)),
+      onStderrLine: stderrLineSink,
     };
     const verificationOutput: RunVerificationOutput = yield* runVerification(rvInput);
-    const captured: TerminalEvent | null = yield* Ref.get(holder);
+    const captured: TerminalEvent | null = yield* Ref.get(terminalHolder);
     if (captured === null) {
       return yield* Effect.fail(
         new Error("runWrap: runVerification did not invoke onTerminal"),
@@ -291,41 +311,17 @@ export const runWrap = (
     }
     const capturedTerminal: TerminalEvent = captured;
 
-    // Stage 2: capture stderr per line for the observation
-    // envelopes. The engine's terminal payload exposes stderr only
-    // on `verification_failed` (as `stderr_excerpt`, already 1 MB-
-    // truncated), which is the wrong shape for a per-line policy
-    // and the wrong gate (a successful run can still have
-    // interesting stderr — warnings, deprecations, etc.).
-    //
-    // Re-spawn the same command via `spawnVerification` to get
-    // the raw stdout/stderr strings. This is the only "duplicate
-    // spawn" in the package and it's bounded: at most one extra
-    // child spawn per wrap invocation, only when the wrapped
-    // command is idempotent (the user's responsibility — wrap
-    // docs say "run the same command twice if you want both an
-    // exit code AND per-line stderr observations").
-    //
-    // On any re-spawn error (binary gone between the two spawns,
-    // permission revoked, etc.) we fall back to an empty stderr
-    // line list and emit zero observation files. The terminal
-    // envelope still records the original run.
-    let stderrText = "";
-    const reSpawn = yield* Effect.either(spawnVerification({
-      command: input.command,
-      cwd: input.cwd,
-      env: input.env,
-      signal,
-    }));
-    if (reSpawn._tag === "Right") {
-      const r: SpawnResult = reSpawn.right;
-      stderrText = r.stderr;
-    }
+    // Stage 2: flush accumulated stderr lines as observation
+    // envelopes. Lines were captured by the engine during the
+    // single spawn; no re-spawn. The errored (SpawnError) path
+    // produces zero lines because the engine never buffers
+    // stderr on spawn failure.
+    const stderrLines = yield* Ref.get(stderrLinesRef);
     const observationFiles: ReadonlyArray<string> = yield* emitObservationFiles({
       inboxDir: input.inboxDir,
       sessionId: input.sessionId,
       actorName,
-      stderr: stderrText,
+      lines: stderrLines,
     });
 
     // Stage 3: terminal envelope.

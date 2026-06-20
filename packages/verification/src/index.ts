@@ -48,6 +48,19 @@ export interface RunVerificationInput {
   readonly signal: AbortSignal;
   readonly paths: { readonly artifacts: string };
   readonly onTerminal: (event: TerminalEvent) => Effect.Effect<void, never>;
+  /**
+   * Optional per-stderr-line callback. Fired once per non-empty
+   * line of the child's stderr AFTER the spawn completes and
+   * BEFORE `onTerminal`. Used by `cognit wrap` to emit one
+   * `observation_recorded` envelope per line without re-spawning
+   * the wrapped command. When omitted, the engine still buffers
+   * stderr internally for `stderr_excerpt` and artifact writing —
+   * the callback is the only difference.
+   *
+   * Not fired on the errored (SpawnError) path because no output
+   * was captured.
+   */
+  readonly onStderrLine?: (line: string) => Effect.Effect<void, never>;
 }
 
 export interface RunVerificationOutput {
@@ -86,6 +99,17 @@ export const runVerification = (
     const { exitCode, stdout, stderr, durationMs } = either.right;
     const stdoutExcerpt = truncateExcerpt(stdout);
     const stderrExcerpt = truncateExcerpt(stderr);
+
+    // Per-line stderr fan-out (best-effort; never fails the run).
+    // Fires BEFORE the terminal callback so consumers that emit
+    // envelopes per line see observations ordered before the
+    // terminal event in their writer.
+    if (input.onStderrLine !== undefined && stderr.length > 0) {
+      const lines = stderr.split(/\r?\n/).filter((l) => l.length > 0);
+      for (const line of lines) {
+        yield* input.onStderrLine(line);
+      }
+    }
 
     let artifact: ArtifactRef | null = null;
     if (shouldWriteArtifact(stdout, stderr)) {

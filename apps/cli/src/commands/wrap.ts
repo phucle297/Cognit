@@ -12,7 +12,7 @@
  * command starts with `--` itself.
  *
  * Per-line stderr observation policy: each non-empty stderr line
- * becomes a separate `observation_added` envelope. See
+ * becomes a separate `observation_recorded` envelope. See
  * `packages/wrap/src/index.ts` for the rationale.
  *
  * Session resolution: `--session <id>` is required (or a sticky
@@ -81,8 +81,17 @@ const parseActor = (raw: string | undefined): string => {
   // `worker` downstream (the envelope schema constraint), so we
   // discard any `:<type>` suffix and keep just the name.
   const idx = raw.lastIndexOf(":");
-  if (idx < 0) return raw;
-  return raw.slice(0, idx) || "cognit-wrap";
+  const name = idx < 0 ? raw : raw.slice(0, idx);
+  if (name.length === 0) {
+    // Bare colon (`--actor :worker`) or empty name. Fall back to
+    // default rather than reject — the user clearly meant something,
+    // and "cognit-wrap" is the safe default for untyped callers.
+    process.stderr.write(
+      `cognit: wrap: --actor "${raw}" has empty name; using default "cognit-wrap"\n`,
+    );
+    return "cognit-wrap";
+  }
+  return name;
 };
 
 const printSummary = (terminalType: string, count: number): void => {
@@ -116,10 +125,15 @@ export function registerWrap(program: Command): void {
       const paths = projectPaths(root);
 
       const ac = new AbortController();
-      const onSigint = (): void => {
+      // Abort on SIGINT and SIGTERM so `kill <pid>` and Ctrl-C both
+      // propagate to the wrapped subprocess. Without SIGTERM the
+      // child only dies when the parent process is hard-killed,
+      // which leaks orphaned workers on long runs.
+      const onAbortSignal = (): void => {
         ac.abort();
       };
-      process.on("SIGINT", onSigint);
+      process.on("SIGINT", onAbortSignal);
+      process.on("SIGTERM", onAbortSignal);
 
       const program = runWrap({
         command: argv,
@@ -132,22 +146,12 @@ export function registerWrap(program: Command): void {
         actorName,
       });
 
-      let summary: {
-        terminalType: string;
-        spawnErrorCode?: string;
-        writtenCount: number;
-      } | null = null;
       try {
         const out = await Effect.runPromise(program).catch((e: unknown) => {
           process.stderr.write(`cognit: wrap: ${(e as Error).message ?? String(e)}\n`);
           process.exitCode = 1;
           throw e;
         });
-        summary = {
-          terminalType: out.terminalType,
-          ...(out.spawnErrorCode !== undefined ? { spawnErrorCode: out.spawnErrorCode } : {}),
-          writtenCount: out.writtenFiles.length,
-        };
         if (getOutputMode() === "json") {
           emit("json", "wrap", {
             session_id: sessionId,
@@ -164,8 +168,8 @@ export function registerWrap(program: Command): void {
         if (out.terminalType === "verification_failed") process.exitCode = 1;
         else if (out.terminalType === "verification_errored") process.exitCode = 2;
       } finally {
-        process.off("SIGINT", onSigint);
+        process.off("SIGINT", onAbortSignal);
+        process.off("SIGTERM", onAbortSignal);
       }
-      void summary;
     });
 }

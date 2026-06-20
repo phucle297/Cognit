@@ -232,3 +232,93 @@ describe("runVerification — artifact integration", () => {
     expect(s.size).toBe(out.artifact!.sizeBytes);
   });
 });
+
+describe("runVerification — onStderrLine callback (Phase 9.2 P0 fix)", () => {
+  it("fires once per non-empty stderr line and BEFORE onTerminal", async () => {
+    const order: string[] = [];
+    await Effect.runPromise(
+      runVerification({
+        ...baseInput([
+          "node",
+          "-e",
+          "process.stderr.write('a\\nb\\nc\\n'); process.exit(0)",
+        ]),
+        onStderrLine: (line) =>
+          Effect.sync(() => {
+            order.push(`line:${line}`);
+          }),
+      }),
+    );
+    order.push("terminal");
+    // Three non-empty lines, fired in arrival order, before terminal.
+    expect(order).toEqual(["line:a", "line:b", "line:c", "terminal"]);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.type).toBe("verification_passed");
+  });
+
+  it("drops empty lines (consecutive newlines do not produce blank callbacks)", async () => {
+    const seen: string[] = [];
+    await Effect.runPromise(
+      runVerification({
+        ...baseInput([
+          "node",
+          "-e",
+          "process.stderr.write('a\\n\\n\\nb\\n'); process.exit(0)",
+        ]),
+        onStderrLine: (line) =>
+          Effect.sync(() => {
+            seen.push(line);
+          }),
+      }),
+    );
+    expect(seen).toEqual(["a", "b"]);
+  });
+
+  it("does NOT fire on the errored (SpawnError) path", async () => {
+    const seen: string[] = [];
+    const out = await Effect.runPromise(
+      runVerification({
+        ...baseInput(["/no/such/binary/xyz-stderr-callback-test"]),
+        onStderrLine: (line) =>
+          Effect.sync(() => {
+            seen.push(line);
+          }),
+      }),
+    );
+    expect(out.terminal.type).toBe("verification_errored");
+    expect(seen).toEqual([]);
+  });
+
+  it("still emits verification_failed with stderr_excerpt when callback fires", async () => {
+    const seen: string[] = [];
+    await Effect.runPromise(
+      runVerification({
+        ...baseInput([
+          "node",
+          "-e",
+          "process.stderr.write('oops'); process.exit(2)",
+        ]),
+        onStderrLine: (line) =>
+          Effect.sync(() => {
+            seen.push(line);
+          }),
+      }),
+    );
+    expect(seen).toEqual(["oops"]);
+    expect(captured[0]?.type).toBe("verification_failed");
+    const payload = captured[0]?.payload as Record<string, unknown>;
+    expect(payload.stderr_excerpt).toBe("oops");
+  });
+
+  it("callback is OPTIONAL — omitting it preserves prior behavior", async () => {
+    // No onStderrLine supplied. Must succeed and emit terminal as before.
+    const out = await Effect.runPromise(
+      runVerification(
+        baseInput(["node", "-e", "process.stderr.write('hi'); process.exit(1)"]),
+      ),
+    );
+    expect(out.terminal.type).toBe("verification_failed");
+    const payload = captured[0]?.payload as Record<string, unknown>;
+    expect(payload.stderr_excerpt).toBe("hi");
+  });
+});
