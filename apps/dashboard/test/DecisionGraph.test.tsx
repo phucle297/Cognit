@@ -88,7 +88,7 @@ describe("DecisionGraphPage (6.8.2.P4)", () => {
     expect(await screen.findByTestId("decision-empty")).toBeInTheDocument();
   });
 
-  it("auto-collapses sidebar on mount", async () => {
+  it("does NOT auto-collapse sidebar on mount (user toggles manually)", async () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (String(url).includes("/state")) {
         return Promise.resolve(new Response(envelope(stateResp([])), { status: 200 }));
@@ -102,7 +102,11 @@ describe("DecisionGraphPage (6.8.2.P4)", () => {
     renderDG();
     await screen.findByTestId("decision-count");
     await waitFor(() => {
-      expect(readCollapsed()).toBe("1");
+      // Sidebar stays expanded by default — localStorage flag must
+      // remain "0" after the page mounts. Previously this route
+      // called setCollapsed(true) on mount, which auto-collapsed
+      // the sidebar every time the user opened the decision graph.
+      expect(readCollapsed()).toBe("0");
     });
   });
 

@@ -24,7 +24,6 @@ import { Card, CardContent } from "@/shared/ui/card";
 
 import { GraphCanvas, type GraphResp, type LayoutMode } from "@/components/GraphCanvas";
 import { GraphControls } from "@/components/GraphControls";
-import { useSidebar } from "@/widgets/sidebar/sidebar-provider";
 
 type DecisionStateShape = {
   readonly id: string;
@@ -56,12 +55,6 @@ const flatten = <T,>(m: Record<string, T> | undefined | null): T[] => (m ? Objec
 export const DecisionGraphPage = (): JSX.Element => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session") ?? "";
-  const { setCollapsed } = useSidebar();
-
-  useEffect(() => {
-    setCollapsed(true);
-    return (): void => setCollapsed(false);
-  }, [setCollapsed]);
 
   const statePath = sessionId ? `/api/sessions/${sessionId}/state` : null;
   const graphPath = sessionId ? `/api/sessions/${sessionId}/graph` : null;

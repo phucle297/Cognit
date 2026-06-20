@@ -2,9 +2,10 @@
  * apps/dashboard/src/widgets/sidebar/sidebar-provider.tsx — sidebar state.
  *
  * FSD layer: widgets. Exposes a small Context with collapsed state
- * persisted to localStorage under `cognit.sidebar.collapsed`. Pages
- * (Phase 4 graph routes) call `setCollapsed(true)` on mount; the
- * collapse toggle button lives in the Sidebar itself.
+ * persisted to localStorage under `cognit.sidebar.collapsed`. The
+ * collapse toggle button lives in the Sidebar itself; pages do NOT
+ * force-collapse on mount (graph routes rely on the user's manual
+ * toggle for extra canvas space).
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";

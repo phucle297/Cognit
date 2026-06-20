@@ -76,7 +76,7 @@ describe("KnowledgeGraphPage (6.8.2.P4)", () => {
     expect(await screen.findByTestId("kg-empty")).toBeInTheDocument();
   });
 
-  it("auto-collapses sidebar on mount", async () => {
+  it("does NOT auto-collapse sidebar on mount (user toggles manually)", async () => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (String(url).includes("/graph")) {
         return Promise.resolve(new Response(envelope(sampleGraph), { status: 200 }));
@@ -90,7 +90,11 @@ describe("KnowledgeGraphPage (6.8.2.P4)", () => {
     renderKG("01TEST");
     await screen.findByTestId("kg-node-count");
     await waitFor(() => {
-      expect(readCollapsed()).toBe("1");
+      // Sidebar stays expanded by default — localStorage flag must
+      // remain "0" after the page mounts. Previously this route
+      // called setCollapsed(true) on mount, which auto-collapsed
+      // the sidebar every time the user opened the graph view.
+      expect(readCollapsed()).toBe("0");
     });
   });
 });

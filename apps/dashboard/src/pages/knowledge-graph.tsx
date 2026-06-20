@@ -22,7 +22,6 @@ import { Sheet } from "@/shared/ui/sheet";
 
 import { GraphCanvas, type GraphResp, type LayoutMode } from "@/components/GraphCanvas";
 import { GraphControls } from "@/components/GraphControls";
-import { useSidebar } from "@/widgets/sidebar/sidebar-provider";
 
 const AUTO_CONSTELLATION_THRESHOLD = 200;
 
@@ -41,12 +40,6 @@ export const KnowledgeGraphPage = (): JSX.Element => {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session") ?? "";
   const apiPath = sessionId ? buildPath(sessionId) : null;
-  const { setCollapsed } = useSidebar();
-
-  useEffect(() => {
-    setCollapsed(true);
-    return (): void => setCollapsed(false);
-  }, [setCollapsed]);
 
   const { data, error, loading, refetch } = useApi<GraphResp>(apiPath);
   const [mode, setMode] = useState<LayoutMode | null>(null);
