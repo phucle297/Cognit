@@ -37,7 +37,12 @@ export interface AtomicWriteInput {
 const ensureParentDir = (filePath: string): Promise<void> => {
   const idx = filePath.lastIndexOf("/");
   const dir = idx >= 0 ? filePath.slice(0, idx) : ".";
-  return fsp.mkdir(dir, { recursive: true }).then(() => undefined);
+  // Mode 0o700: only the owner can list/traverse the inbox parent.
+  // Other local users on a multi-tenant box can't enumerate
+  // `<session>-<ulid>.json` filenames (the session id is a secret
+  // in some deployments). `recursive: true` is a no-op for already-
+  // existing dirs; the mode only applies to newly created parents.
+  return fsp.mkdir(dir, { recursive: true, mode: 0o700 }).then(() => undefined);
 };
 
 /**
@@ -76,7 +81,16 @@ export const atomicWriteJson = (input: AtomicWriteInput): Effect.Effect<string, 
       // would mean the fsync races the effect boundary. Doing the
       // whole temp-file sequence synchronously is fine: it's a few
       // syscalls on a single small file.
-      fd = fs.openSync(tmpPath, "w", 0o644);
+      // Mode 0o600: only the owner can read the temp file (which
+      // holds the full envelope JSON, including the wrapped command
+      // and any payload text from stderr). The `"wx"` flag is
+      // `O_CREAT | O_EXCL | O_WRONLY` — refuse to open an existing
+      // file (so a prior crash's leftover `.tmp` or a symlink planted
+      // by another local user cannot be silently truncated and
+      // overwritten). Node does not expose `O_NOFOLLOW` directly,
+      // but `wx` + the parent-dir mode 0o700 above close the most
+      // exploitable races.
+      fd = fs.openSync(tmpPath, "wx", 0o600);
       fs.writeSync(fd, contents);
       fs.fsyncSync(fd);
       fs.closeSync(fd);

@@ -13,6 +13,7 @@ import {
   DbError,
   SessionClosed,
   UnknownEventType,
+  UnknownEventVersion,
   UnknownSession,
   ValidationFailure,
 } from "./errors";
@@ -70,7 +71,12 @@ const EnvelopeSchema = Schema.Struct({
   actor_name: Schema.String.pipe(Schema.minLength(1)),
   actor_type: ActorType,
   payload: Schema.Unknown,
-  id: Schema.optional(Schema.String),
+  // When supplied by the producer, the envelope id MUST be a ULID.
+  // The event-store uses it as the events.id PRIMARY KEY; a non-ULID
+  // value would silently break downstream consumers (snapshots, SSE
+  // bus, mempalace links) that key on ULID-shaped strings. Reject at
+  // the envelope boundary instead of corrupting the row.
+  id: Schema.optional(Schema.String.pipe(Schema.pattern(ULID_RE))),
   source: Schema.optional(
     Schema.Struct({
       tool: Schema.String,
@@ -81,7 +87,17 @@ const EnvelopeSchema = Schema.Struct({
   artifactRefs: Schema.optional(Schema.Array(Schema.String)),
   causationId: Schema.optional(Schema.String),
   correlationId: Schema.optional(Schema.String),
-  confidence: Schema.optional(Schema.Number),
+  // Bound confidence to [0, 1] (defense-in-depth at the envelope
+  // boundary). Out-of-range values used to surface as a generic
+  // DbError from the INSERT, which the watcher miscategorized as
+  // `actor_not_registered` and confused users investigating
+  // `.cognit/_error/*.reason.txt`.
+  confidence: Schema.optional(
+    Schema.Number.pipe(
+      Schema.greaterThanOrEqualTo(0),
+      Schema.lessThanOrEqualTo(1),
+    ),
+  ),
   parentVerificationId: Schema.optional(Schema.String),
   linkedHypothesisId: Schema.optional(Schema.String),
 });
@@ -225,22 +241,43 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
         }
 
         // Step 4: payload schema decode keyed on (version, type).
+        // Fail loudly when no schema is registered: silently skipping
+        // validation would let unknown event types pass the envelope
+        // gate only to be rejected at `appendEvent` with a less
+        // actionable `UnknownEventType` error. Catch it here as
+        // `schema_validation_failure` with the exact (version, type)
+        // pair so the sidecar reason tells the producer what's wrong.
         const payloadSchema = lookupPayloadSchema(p.version, p.type);
-        if (payloadSchema) {
-          const decoded = Schema.decodeUnknownEither(payloadSchema)(p.payload);
-          if (Either.isLeft(decoded)) {
-            const reason = `payload: ${String(decoded.left)}`;
-            yield* logger.log("error", { file: filePath, reason }, "inbox: payload decode failed");
-            yield* moveToError(
-              filePath,
-              base,
-              config.errorDir,
-              "schema_validation_failure",
-              reason,
-              logger,
-            );
-            return;
-          }
+        if (!payloadSchema) {
+          const reason = `unknown (version, type) pair: ${p.version}/${p.type}`;
+          yield* logger.log(
+            "error",
+            { file: filePath, version: p.version, type: p.type },
+            "inbox: unknown (version, type)",
+          );
+          yield* moveToError(
+            filePath,
+            base,
+            config.errorDir,
+            "schema_validation_failure",
+            reason,
+            logger,
+          );
+          return;
+        }
+        const decoded = Schema.decodeUnknownEither(payloadSchema)(p.payload);
+        if (Either.isLeft(decoded)) {
+          const reason = `payload: ${String(decoded.left)}`;
+          yield* logger.log("error", { file: filePath, reason }, "inbox: payload decode failed");
+          yield* moveToError(
+            filePath,
+            base,
+            config.errorDir,
+            "schema_validation_failure",
+            reason,
+            logger,
+          );
+          return;
         }
 
         // Step 5: actor_type decode. Redundant with the envelope
@@ -351,12 +388,19 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
  * `schema_validation_failure`, `actor_not_registered`) are covered;
  * the internal categories (`invalid_actor_type`, `invalid_envelope`)
  * never reach this path because the watcher rejects them earlier.
+ *
+ * Parameter union must match the full `AppendError` set from
+ * `packages/db/src/errors.ts` — widening it is the only way the
+ * compiler enforces exhaustiveness. Falling through with an unknown
+ * tag used to crash the sidecar write because the switch returned
+ * `undefined` and the `category` field is non-optional.
  */
 const mapAppendError = (
   e:
     | DbError
     | SessionClosed
     | UnknownEventType
+    | UnknownEventVersion
     | ValidationFailure
     | UnknownSession
     | ConstraintViolation,
@@ -366,6 +410,11 @@ const mapAppendError = (
       return {
         category: "unknown_session_id",
         reason: `session not found: ${e.sessionId}`,
+      };
+    case "SessionClosed":
+      return {
+        category: "unknown_session_id",
+        reason: `session closed: ${e.sessionId}`,
       };
     case "ValidationFailure":
       return {
@@ -377,19 +426,23 @@ const mapAppendError = (
         category: "schema_validation_failure",
         reason: `unknown event type: ${e.type}`,
       };
+    case "UnknownEventVersion":
+      return {
+        category: "schema_validation_failure",
+        reason: `unknown version ${e.version} for type ${e.type}`,
+      };
     case "ConstraintViolation":
       return {
         category: "actor_not_registered",
         reason: `rule ${e.ruleId} blocked: ${e.reason}`,
       };
-    case "SessionClosed":
-      return {
-        category: "unknown_session_id",
-        reason: `session closed: ${e.sessionId}`,
-      };
     case "DbError":
+      // Storage / driver failure. Distinct from
+      // `actor_not_registered` so users investigating
+      // `.cognit/_error/*.reason.txt` don't go chasing identity
+      // issues when the real cause is disk/db.
       return {
-        category: "actor_not_registered",
+        category: "internal_db_error",
         reason: `db: ${e.message}`,
       };
   }
