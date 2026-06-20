@@ -15,12 +15,14 @@ const renderSidebar = (initialPath = "/") =>
   );
 
 describe("Sidebar", () => {
-  it("renders 7 nav links grouped into Main, Explore, Admin sections", () => {
+  it("renders the 7 primary nav links + 3 Quick Actions + section headers", () => {
     renderSidebar();
     const aside = screen.getByRole("complementary");
+    // 7 primary nav links + 3 Quick Actions = 10 total links.
     const links = within(aside).getAllByRole("link");
-    expect(links).toHaveLength(7);
+    expect(links).toHaveLength(10);
 
+    // Primary nav links (Main / Explore / Admin).
     expect(within(aside).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/");
     expect(within(aside).getByRole("link", { name: "Timeline" })).toHaveAttribute("href", "/timeline");
     expect(within(aside).getByRole("link", { name: "Knowledge Graph" })).toHaveAttribute("href", "/knowledge-graph");
@@ -29,9 +31,16 @@ describe("Sidebar", () => {
     expect(within(aside).getByRole("link", { name: "Recovery" })).toHaveAttribute("href", "/recovery-center");
     expect(within(aside).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
 
+    // Section headers.
     expect(within(aside).getByText("Main")).toBeInTheDocument();
     expect(within(aside).getByText("Explore")).toBeInTheDocument();
     expect(within(aside).getByText("Admin")).toBeInTheDocument();
+
+    // Quick Actions block + entries.
+    expect(within(aside).getByText("Quick Actions")).toBeInTheDocument();
+    expect(within(aside).getByRole("link", { name: /New Session/i })).toBeInTheDocument();
+    expect(within(aside).getByRole("link", { name: /Rules/i })).toBeInTheDocument();
+    expect(within(aside).getByRole("link", { name: /Snapshots/i })).toBeInTheDocument();
   });
 
   it("toggles collapsed state via the toggle button", async () => {

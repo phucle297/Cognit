@@ -1,7 +1,26 @@
 /**
  * apps/dashboard/src/widgets/sidebar/index.tsx — left rail nav.
+ *
+ * Restyled to match the Alina template nav pattern: semantic
+ * icons per item, brand badge area, optional badge counters on
+ * nav links, and a Quick Actions block at the bottom. Light
+ * theme — uses the existing design tokens in
+ * `apps/dashboard/src/app/index.css`.
  */
-import { Boxes, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import {
+  Boxes,
+  CircleDot,
+  Cog,
+  History,
+  LayoutDashboard,
+  ListChecks,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PlusCircle,
+  ScrollText,
+  Share2,
+  TestTube2,
+} from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import { useSidebar } from "./sidebar-provider";
@@ -12,52 +31,83 @@ interface NavItem {
   to: string;
   label: string;
   icon: LucideIcon;
+  /** Optional badge counter (e.g. unread notifications). */
+  badge?: string;
 }
 
-const SECTIONS: ReadonlyArray<{ title: string; items: ReadonlyArray<NavItem> }> = [
+const SECTIONS: ReadonlyArray<{
+  title: string;
+  items: ReadonlyArray<NavItem>;
+}> = [
   {
     title: "Main",
     items: [
-      { to: "/", label: "Overview", icon: Boxes },
-      { to: "/timeline", label: "Timeline", icon: Boxes },
+      { to: "/", label: "Overview", icon: LayoutDashboard },
+      { to: "/timeline", label: "Timeline", icon: ScrollText },
     ],
   },
   {
     title: "Explore",
     items: [
-      { to: "/knowledge-graph", label: "Knowledge Graph", icon: Boxes },
-      { to: "/decision-graph", label: "Decision Graph", icon: Boxes },
-      { to: "/verification", label: "Verification", icon: Boxes },
+      { to: "/knowledge-graph", label: "Knowledge Graph", icon: Share2 },
+      { to: "/decision-graph", label: "Decision Graph", icon: CircleDot },
+      { to: "/verification", label: "Verification", icon: TestTube2 },
     ],
   },
   {
     title: "Admin",
     items: [
-      { to: "/recovery-center", label: "Recovery", icon: Boxes },
-      { to: "/settings", label: "Settings", icon: Boxes },
+      { to: "/recovery-center", label: "Recovery", icon: History },
+      { to: "/settings", label: "Settings", icon: Cog },
     ],
   },
+];
+
+const QUICK_ACTIONS: ReadonlyArray<{ label: string; icon: LucideIcon; to: string }> = [
+  { label: "New Session", icon: PlusCircle, to: "/?new=session" },
+  { label: "Rules", icon: ListChecks, to: "/rules" },
+  { label: "Snapshots", icon: Boxes, to: "/?snapshots=1" },
 ];
 
 export const Sidebar = () => {
   const { collapsed, toggle } = useSidebar();
   return (
     <aside
+      data-testid="sidebar"
       className={cn(
         "sticky top-0 flex h-screen flex-col border-r bg-card",
         transition("width", "base"),
         collapsed ? "w-14" : "w-56",
       )}
     >
-      <div className={cn("flex h-12 items-center border-b", collapsed ? "justify-center px-2" : "px-4")}>
-        <Boxes className="size-5 shrink-0" aria-hidden />
-        {!collapsed ? <span className="ml-2 font-semibold tracking-tight">Cognit</span> : null}
+      {/* Brand area — square logo chip + wordmark. Collapses to chip-only. */}
+      <div
+        className={cn(
+          "flex h-14 items-center gap-2.5 border-b",
+          collapsed ? "justify-center px-2" : "px-4",
+        )}
+      >
+        <div
+          className="flex size-8 shrink-0 items-center justify-center rounded-md bg-[var(--color-brand)] text-[var(--color-brand-foreground)]"
+          aria-hidden
+        >
+          <Boxes className="size-4" />
+        </div>
+        {!collapsed ? (
+          <div className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate text-sm font-semibold tracking-tight">Cognit</span>
+            <span className="truncate text-[10px] uppercase tracking-wider text-muted-foreground">
+              Knowledge layer
+            </span>
+          </div>
+        ) : null}
       </div>
-      <nav className="flex-1 overflow-y-auto p-2">
+
+      <nav className="flex-1 overflow-y-auto p-2" aria-label="Primary">
         {SECTIONS.map((section) => (
           <div key={section.title} className="mb-4">
             {!collapsed ? (
-              <div className="mb-1 px-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              <div className="mb-1 px-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
                 {section.title}
               </div>
             ) : null}
@@ -66,24 +116,78 @@ export const Sidebar = () => {
                 key={item.to}
                 to={item.to}
                 end={item.to === "/"}
+                data-testid={`sidebar-link-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                 className={({ isActive }) =>
                   cn(
-                    "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-medium",
+                    "group relative flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-medium",
                     transition("colors", "fast"),
                     isActive
-                      ? "bg-accent text-accent-foreground"
+                      ? "bg-[var(--color-brand-bg)] text-[var(--color-brand)]"
                       : "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground",
                     collapsed && "justify-center",
                   )
                 }
               >
-                <item.icon className="size-4 shrink-0" aria-hidden />
-                {!collapsed ? <span>{item.label}</span> : null}
+                {({ isActive }) => (
+                  <>
+                    {/* Left rail accent — visible only on active item, expanded sidebar only. */}
+                    {!collapsed && isActive ? (
+                      <span
+                        aria-hidden
+                        className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-[var(--color-brand)]"
+                      />
+                    ) : null}
+                    <item.icon
+                      className={cn(
+                        "size-4 shrink-0",
+                        isActive ? "text-[var(--color-brand)]" : "text-muted-foreground group-hover:text-foreground",
+                      )}
+                      aria-hidden
+                    />
+                    {!collapsed ? (
+                      <>
+                        <span className="flex-1 truncate">{item.label}</span>
+                        {item.badge !== undefined ? (
+                          <span
+                            className="ml-auto rounded-full bg-[var(--color-brand)] px-1.5 text-[10px] font-semibold leading-5 text-[var(--color-brand-foreground)]"
+                            aria-label={`${item.badge} pending`}
+                          >
+                            {item.badge}
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </>
+                )}
               </NavLink>
             ))}
           </div>
         ))}
+
+        {/* Quick Actions — secondary nav block, mirrors Alina template footer. */}
+        {!collapsed ? (
+          <div className="mb-2 mt-6">
+            <div className="mb-1 px-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Quick Actions
+            </div>
+            {QUICK_ACTIONS.map((action) => (
+              <NavLink
+                key={action.label}
+                to={action.to}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-medium",
+                  "text-muted-foreground hover:bg-accent/60 hover:text-accent-foreground",
+                  transition("colors", "fast"),
+                )}
+              >
+                <action.icon className="size-4 shrink-0" aria-hidden />
+                <span className="truncate">{action.label}</span>
+              </NavLink>
+            ))}
+          </div>
+        ) : null}
       </nav>
+
       <button
         type="button"
         onClick={toggle}
@@ -94,8 +198,14 @@ export const Sidebar = () => {
         )}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
       >
-        {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-        {!collapsed ? <span className="ml-2">Collapse</span> : null}
+        {collapsed ? (
+          <PanelLeftOpen className="size-4" />
+        ) : (
+          <>
+            <PanelLeftClose className="size-4" aria-hidden />
+            <span className="ml-2">Collapse</span>
+          </>
+        )}
       </button>
     </aside>
   );

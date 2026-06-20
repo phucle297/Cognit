@@ -28,6 +28,12 @@
   --color-card-foreground: oklch(0.145 0 0);
   --color-ring: oklch(0.708 0 0);
 
+  /* brand accent (indigo) — used for active sidebar item, focus rings,
+     KPI sparklines. Single token, semantic alias. */
+  --color-brand: oklch(0.55 0.18 270);
+  --color-brand-foreground: oklch(0.985 0 0);
+  --color-brand-bg: oklch(0.96 0.04 270);
+
   /* typography */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Inter var", sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
@@ -37,6 +43,10 @@
   --space-page-y: 2rem;       /* page vertical padding */
   --space-card:  1.5rem;      /* card inner padding */
   --space-stack: 1rem;        /* vertical stack between siblings */
+  --space-sidebar-w: 14rem;   /* sidebar expanded width */
+  --space-sidebar-w-collapsed: 3.5rem;
+  --space-topbar-h: 3.5rem;   /* topbar height */
+  --space-kpi-min-h: 7rem;    /* KPI card minimum height */
 
   /* radius scale */
   --radius-sm: 0.25rem;

@@ -1,5 +1,10 @@
 /**
  * apps/dashboard/src/shared/ui/stat-card.tsx — KPI tile.
+ *
+ * Restyled to match the Alina KPI card pattern: brand-color
+ * icon chip on the left, label, large value, optional delta +
+ * trend hint. Optional `subtitle` slot for a secondary metric
+ * (e.g. "of 120 total"). Light theme via tokens.
  */
 import type { LucideIcon } from "lucide-react";
 import { ArrowDown, ArrowUp } from "lucide-react";
@@ -10,23 +15,47 @@ export interface StatCardProps {
   readonly value: string | number;
   readonly delta?: number;
   readonly icon?: LucideIcon;
+  /** Optional secondary metric shown under the value. */
+  readonly subtitle?: string;
   readonly className?: string;
 }
 
-export const StatCard = ({ label, value, delta, icon: Icon, className }: StatCardProps) => {
+export const StatCard = ({
+  label,
+  value,
+  delta,
+  icon: Icon,
+  subtitle,
+  className,
+}: StatCardProps) => {
   const positive = delta !== undefined && delta >= 0;
   return (
     <div
+      data-testid="stat-card"
       className={cn(
-        "flex flex-col gap-2 rounded-lg border bg-card p-6 shadow-[var(--shadow-sm)]",
+        "flex min-h-[var(--space-kpi-min-h)] flex-col gap-3 rounded-lg border bg-card p-5 shadow-[var(--shadow-sm)]",
         className,
       )}
     >
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>{label}</span>
-        {Icon ? <Icon className="size-4" aria-hidden /> : null}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        {Icon ? (
+          <span
+            aria-hidden
+            className="flex size-9 items-center justify-center rounded-md bg-[var(--color-brand-bg)] text-[var(--color-brand)]"
+          >
+            <Icon className="size-4" />
+          </span>
+        ) : null}
       </div>
-      <div className="text-3xl font-semibold tracking-tight">{value}</div>
+      <div className="flex items-baseline gap-2">
+        <span className="text-3xl font-semibold tracking-tight tabular-nums">{value}</span>
+        {subtitle !== undefined ? (
+          <span className="text-xs text-muted-foreground">{subtitle}</span>
+        ) : null}
+      </div>
       {delta !== undefined ? (
         <div
           className={cn(
@@ -35,8 +64,8 @@ export const StatCard = ({ label, value, delta, icon: Icon, className }: StatCar
           )}
         >
           {positive ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />}
-          {positive ? `+${delta}` : `${delta}`}
-          <span className="text-muted-foreground">vs last week</span>
+          <span className="tabular-nums">{positive ? `+${delta}` : `${delta}`}</span>
+          <span className="font-normal text-muted-foreground">vs last week</span>
         </div>
       ) : null}
     </div>

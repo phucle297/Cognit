@@ -1,7 +1,14 @@
 /**
  * apps/dashboard/src/shared/ui/data-table.tsx — simple sortable table.
+ *
+ * Restyled to match the Alina table pattern: sticky header, hover
+ * row highlight, optional zebra striping, tabular numerics for
+ * any numeric cells (consumer can opt in via `numeric: true` on
+ * the column). Sortable columns show direction glyph on the
+ * active header.
  */
 import { useState, type ReactNode } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../lib/cn";
 
 export interface DataTableColumn<T> {
@@ -9,6 +16,10 @@ export interface DataTableColumn<T> {
   readonly header: string;
   readonly render?: (row: T) => ReactNode;
   readonly width?: string;
+  /** Right-align + tabular nums. Use for numeric columns. */
+  readonly numeric?: boolean;
+  /** Disable sort for this column (e.g. action column). */
+  readonly disableSort?: boolean;
 }
 
 export interface DataTableProps<T> {
@@ -18,6 +29,8 @@ export interface DataTableProps<T> {
   readonly onRowClick?: (row: T) => void;
   readonly className?: string;
   readonly emptyMessage?: string;
+  /** Zebra striping — off by default to keep dense tables readable. */
+  readonly striped?: boolean;
 }
 
 export function DataTable<T>({
@@ -27,6 +40,7 @@ export function DataTable<T>({
   onRowClick,
   className,
   emptyMessage = "No items.",
+  striped = false,
 }: DataTableProps<T>) {
   const [sortBy, setSortBy] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
@@ -51,41 +65,66 @@ export function DataTable<T>({
 
   return (
     <div className={cn("overflow-hidden rounded-lg border bg-card shadow-[var(--shadow-sm)]", className)}>
-      <table className="w-full text-sm">
-        <thead className="border-b bg-muted/50 text-left">
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                style={c.width ? { width: c.width } : undefined}
-                className="cursor-pointer select-none px-4 py-2.5 font-medium text-muted-foreground hover:text-foreground"
-                onClick={() => toggleSort(c.key)}
-              >
-                {c.header}
-                {sortBy?.key === c.key ? (sortBy.dir === "asc" ? " ↑" : " ↓") : null}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((row) => (
-            <tr
-              key={rowKey(row)}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              className={cn(
-                "border-b last:border-b-0",
-                onRowClick && "cursor-pointer transition-colors hover:bg-muted/50",
-              )}
-            >
-              {columns.map((c) => (
-                <td key={c.key} className="px-4 py-2.5">
-                  {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? "")}
-                </td>
-              ))}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 z-10 border-b bg-muted/60 text-left text-xs uppercase tracking-wider text-muted-foreground backdrop-blur">
+            <tr>
+              {columns.map((c) => {
+                const isActive = sortBy?.key === c.key;
+                return (
+                  <th
+                    key={c.key}
+                    style={c.width ? { width: c.width } : undefined}
+                    className={cn(
+                      "select-none px-4 py-2.5 font-medium",
+                      c.numeric && "text-right",
+                      !c.disableSort && "cursor-pointer hover:text-foreground",
+                    )}
+                    onClick={c.disableSort ? undefined : () => toggleSort(c.key)}
+                    aria-sort={isActive ? (sortBy!.dir === "asc" ? "ascending" : "descending") : "none"}
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      <span>{c.header}</span>
+                      {isActive ? (
+                        sortBy!.dir === "asc" ? (
+                          <ChevronUp className="size-3" aria-hidden />
+                        ) : (
+                          <ChevronDown className="size-3" aria-hidden />
+                        )
+                      ) : null}
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sorted.map((row, rowIdx) => (
+              <tr
+                key={rowKey(row)}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                className={cn(
+                  "border-b last:border-b-0",
+                  onRowClick && "cursor-pointer transition-colors hover:bg-muted/40",
+                  striped && rowIdx % 2 === 1 && "bg-muted/20",
+                )}
+              >
+                {columns.map((c) => (
+                  <td
+                    key={c.key}
+                    className={cn(
+                      "px-4 py-3 align-middle",
+                      c.numeric && "text-right tabular-nums",
+                    )}
+                  >
+                    {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? "")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
