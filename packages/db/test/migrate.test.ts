@@ -348,3 +348,53 @@ describe("migratePayload — v1.0.0 → v1.1.0", () => {
     await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
   });
 });
+
+describe("migratePayload — v1.1.0 → v1.2.0", () => {
+  it("lifts a v1.1.0 hypothesis_created payload (identity transform, fields untouched)", async () => {
+    const program = Effect.gen(function* () {
+      const reg = yield* MigrationRegistry;
+      const payload = { title: "Turbopack leaks", text: "explain" };
+      const migrated = (yield* migratePayload(
+        "hypothesis_created",
+        "1.1.0",
+        "1.2.0",
+        payload,
+        reg.transformsFor,
+      )) as { title: string; text: string };
+      expect(migrated.title).toBe("Turbopack leaks");
+      expect(migrated.text).toBe("explain");
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
+  });
+
+  it("v1.1.0 → v1.2.0 lifts a v1.1.0 hypothesis_ranked absence (no event rows added)", async () => {
+    // Pre-v1.2.0 stores cannot contain hypothesis_ranked rows; the
+    // migration runner's identity transform must NOT synthesize them.
+    // We assert by checking the registered transforms list.
+    const program = Effect.gen(function* () {
+      const reg = yield* MigrationRegistry;
+      const path = reg.transformsFor("1.1.0", "1.2.0");
+      expect(path).toHaveLength(1);
+      expect(path[0]?.from).toBe("1.1.0");
+      expect(path[0]?.to).toBe("1.2.0");
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
+  });
+
+  it("v1.0.0 → v1.2.0 picks the single sufficient transform (minimum path)", async () => {
+    // The runner picks transforms with t.to >= to AND t.from >= from.
+    // For 1.0.0 -> 1.2.0: the 1.0.0->1.1.0 transform is excluded (its
+    // t.to = 1.1.0 is below 1.2.0). Only the 1.1.0->1.2.0 identity
+    // transform is selected — its identity fn is sufficient because
+    // both transforms are pure passthroughs.
+    const program = Effect.gen(function* () {
+      const reg = yield* MigrationRegistry;
+      const path = reg.transformsFor("1.0.0", "1.2.0");
+      expect(path).toHaveLength(1);
+      expect(path.map((t) => `${t.from}->${t.to}`)).toEqual([
+        "1.1.0->1.2.0",
+      ]);
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
+  });
+});

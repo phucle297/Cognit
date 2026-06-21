@@ -92,6 +92,34 @@ export interface HypothesisState {
    * over-rank before the column is backfilled.
    */
   readonly gravity_fired_at: number;
+  /**
+   * v1.2.0 — AI-driven gravity rank override. When `ai_rank_score` is
+   * non-null, the gravity engine uses it verbatim instead of the
+   * weighted-sum formula. The formula is still the source of truth
+   * for hypotheses the AI supervisor has not evaluated yet (legacy
+   * data + bootstrap mode), so the two views stay comparable on the
+   * dashboard.
+   *
+   * `ai_rank_reasoning` is the free-text rationale from the
+   * evaluator (rendered on the dashboard and tail of the recovery
+   * envelope). `ai_rank_evaluator` is currently always `"ai-supervisor"`
+   * — the field is open so future evaluators (learned ranker,
+   * human override) can be distinguished in the timeline.
+   *
+   * `ai_rank_event_id` is the event id of the latest `hypothesis_ranked`
+   * event that produced the override — used by tests to assert that
+   * the reducer selected the right event when multiple ranks exist
+   * for the same hypothesis.
+   *
+   * All five fields are nullable so legacy v1.1.0 hypotheses
+   * (and v1.2.0 hypotheses that the AI has not yet ranked) decode
+   * without a transform.
+   */
+  readonly ai_rank_score: number | null;
+  readonly ai_rank_reasoning: string | null;
+  readonly ai_rank_evaluator: string | null;
+  readonly ai_rank_at: string | null;
+  readonly ai_rank_event_id: string | null;
 }
 
 export interface TheoryState {

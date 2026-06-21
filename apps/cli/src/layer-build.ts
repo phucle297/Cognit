@@ -88,7 +88,7 @@ export const buildAppLayer = (
   redactionConfig: Layer.Layer<RedactionConfig> = RedactionConfigDefault,
   actorDefaults: Layer.Layer<ActorDefaults> = actorDefaultsLayer(ActorDefaultsBuiltIn),
 ): AppLayer => Layer.provideMerge(
-  Layer.merge(
+  Layer.provideMerge(
     Layer.merge(
       DbLive(root + "/.cognit/cognit.db", policy, redactionConfig),
       LoggerNoop,

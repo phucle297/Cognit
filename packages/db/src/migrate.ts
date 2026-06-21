@@ -2,7 +2,7 @@ import { Effect, Either, Layer, Schema } from "effect";
 import { MigrationRegistry } from "./context";
 import {
   PAYLOAD_SCHEMAS_BY_VERSION,
-  PAYLOAD_SCHEMAS_V1_1_0,
+  PAYLOAD_SCHEMAS_V1_2_0,
 } from "./event-schema";
 import { MigrationTransformError, ValidationFailure } from "./errors";
 import { semverGte, semverCompare } from "./semver";
@@ -30,11 +30,24 @@ export interface Transform {
  * with `null` defaults). Registered explicitly so the migration
  * runner can prove the path exists and `migratePayload` can pick
  * the right per-version schema for re-validation.
+ *
+ * v1.1.0 -> v1.2.0 is also an identity transform at the payload
+ * level — the new `hypothesis_ranked` type is purely additive and
+ * existing payloads are untouched. Registered explicitly so the
+ * chain v1.0.0 -> v1.2.0 stays a single registered path and the
+ * schema validator re-checks the lifted shape against the v1.2.0
+ * schemas (defence in depth — older event rows that ever break
+ * the v1.2.0 schema must surface here, not silently downstream).
  */
 const TRANSFORMS: ReadonlyArray<Transform> = [
   {
     from: "1.0.0",
     to: "1.1.0",
+    fn: (payload) => payload,
+  },
+  {
+    from: "1.1.0",
+    to: "1.2.0",
     fn: (payload) => payload,
   },
 ];
@@ -56,12 +69,12 @@ export const MigrationRegistryLive: Layer.Layer<MigrationRegistry> = Layer.succe
 
 /**
  * Pick the schema map for a target version. Falls back to the
- * current v1.1.0 map for unknown versions — the schema-validation
+ * current v1.2.0 map for unknown versions — the schema-validation
  * step that follows is the authoritative "this shape is not allowed"
  * signal, so a forward-default is safe.
  */
 const schemaMapFor = (version: string): Readonly<Record<string, Schema.Schema<any, any, never>>> =>
-  PAYLOAD_SCHEMAS_BY_VERSION[version] ?? PAYLOAD_SCHEMAS_V1_1_0;
+  PAYLOAD_SCHEMAS_BY_VERSION[version] ?? PAYLOAD_SCHEMAS_V1_2_0;
 
 /**
  * Lift a stored payload to `target` version by walking transforms.

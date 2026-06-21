@@ -269,6 +269,11 @@ describe("rankHypotheses", () => {
         last_event_id: "H-1",
         last_event_at: "2026-06-19T00:00:00.000Z",
         gravity_fired_at: 1_700_000_000,
+        ai_rank_score: null,
+        ai_rank_reasoning: null,
+        ai_rank_evaluator: null,
+        ai_rank_at: null,
+        ai_rank_event_id: null,
       },
       {
         id: "H-2",
@@ -285,6 +290,11 @@ describe("rankHypotheses", () => {
         last_event_id: "H-2",
         last_event_at: "2026-06-19T00:00:00.000Z",
         gravity_fired_at: 1_700_000_000,
+        ai_rank_score: null,
+        ai_rank_reasoning: null,
+        ai_rank_evaluator: null,
+        ai_rank_at: null,
+        ai_rank_event_id: null,
       },
     ]);
     const out = rankHypotheses(
@@ -317,6 +327,11 @@ describe("rankHypotheses", () => {
         last_event_id: "H-b",
         last_event_at: "2026-06-19T00:00:00.000Z",
         gravity_fired_at: 1_700_000_000,
+        ai_rank_score: null,
+        ai_rank_reasoning: null,
+        ai_rank_evaluator: null,
+        ai_rank_at: null,
+        ai_rank_event_id: null,
       },
       {
         id: "H-a",
@@ -333,6 +348,11 @@ describe("rankHypotheses", () => {
         last_event_id: "H-a",
         last_event_at: "2026-06-19T00:00:00.000Z",
         gravity_fired_at: 1_700_000_000,
+        ai_rank_score: null,
+        ai_rank_reasoning: null,
+        ai_rank_evaluator: null,
+        ai_rank_at: null,
+        ai_rank_event_id: null,
       },
     ]);
     // H-b's actor has higher trust; H-a's actor has lower trust.
@@ -371,6 +391,11 @@ describe("rankHypotheses", () => {
         last_event_id: "H-z",
         last_event_at: "2026-06-19T00:00:00.000Z",
         gravity_fired_at: 1_700_000_000,
+        ai_rank_score: null,
+        ai_rank_reasoning: null,
+        ai_rank_evaluator: null,
+        ai_rank_at: null,
+        ai_rank_event_id: null,
       },
       {
         id: "H-a",
@@ -387,6 +412,11 @@ describe("rankHypotheses", () => {
         last_event_id: "H-a",
         last_event_at: "2026-06-19T00:00:00.000Z",
         gravity_fired_at: 1_700_000_000,
+        ai_rank_score: null,
+        ai_rank_reasoning: null,
+        ai_rank_evaluator: null,
+        ai_rank_at: null,
+        ai_rank_event_id: null,
       },
     ]);
     const out = rankHypotheses(

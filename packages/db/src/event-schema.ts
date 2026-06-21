@@ -4,8 +4,15 @@ import { Schema } from "effect";
  * Current payload schema version. Append always writes this version.
  * On read, `migrate(eventRow, row.version, CURRENT_VERSION)` brings old
  * events up to current. Migrations are pure, additive, and tested.
+ *
+ * v1.2.0 adds the `hypothesis_ranked` event type for AI-driven gravity
+ * ranking. The event carries an explicit score + reasoning emitted by
+ * an external evaluator (e.g. the AI supervisor in @cognit/agent). The
+ * reducer stores the latest rank on `HypothesisState.ai_rank_*` fields;
+ * the gravity engine consults them and falls back to the rule-based
+ * formula when no AI rank is present.
  */
-export const CURRENT_VERSION = "1.1.0" as const;
+export const CURRENT_VERSION = "1.2.0" as const;
 
 /**
  * Per-event-type payload Schemas. Each is a Struct with the fields the
@@ -203,6 +210,34 @@ const RedactionAppliedPayload = Schema.Struct({
   entity_id: Schema.NullOr(Schema.String),
   field_path: Schema.String,
 });
+/**
+ * v1.2.0: AI-driven gravity ranking. Emitted by an external evaluator
+ * (the AI supervisor in @cognit/agent) to override the rule-based
+ * formula score for a specific hypothesis. The reducer stores the
+ * latest such event on `HypothesisState.ai_rank_*`; the gravity engine
+ * reads those fields before consulting the formula.
+ *
+ * `hypothesis_id` is in the payload (not the FK column) because the
+ * rank is about a hypothesis that already exists in state. Using the
+ * payload keeps the column contract narrow; the reducer resolves the
+ * target by id at fold time. `linked_hypothesis_id` is NOT set on
+ * these events — it would change the cursor semantics for the SSE
+ * stream and create a phantom link in the verification queries.
+ *
+ * `context_event_ids` records which prior events the evaluator saw
+ * when it decided. Used for replay-debugging ("why did the AI rank
+ * this way?") and for de-duplication when the supervisor retries.
+ */
+const HypothesisRankedPayload = Schema.Struct({
+  hypothesis_id: Schema.String.pipe(Schema.minLength(1)),
+  score: Schema.Number.pipe(Schema.greaterThanOrEqualTo(0), Schema.lessThanOrEqualTo(1)),
+  reasoning: Schema.String.pipe(Schema.minLength(1)),
+  evaluator: Schema.Literal("ai-supervisor"),
+  override_rule_based: Schema.Boolean,
+  context_event_ids: Schema.optionalWith(Schema.Array(Schema.String), {
+    default: () => [] as string[],
+  }),
+});
 const ProjectCreatedPayload = Schema.Struct({
   name: Schema.String.pipe(Schema.minLength(1)),
 });
@@ -302,6 +337,17 @@ export const PAYLOAD_SCHEMAS_V1_1_0: Readonly<Record<string, Schema.Schema<any, 
 } as const;
 
 /**
+ * v1.2.0 payload schemas. Only the new `hypothesis_ranked` type is
+ * added; all other types are aliases for the v1.1.0 schemas (the
+ * changes are purely additive at the event-type level). This mirrors
+ * the v1.0.0 → v1.1.0 step pattern and keeps the diff reviewable.
+ */
+export const PAYLOAD_SCHEMAS_V1_2_0: Readonly<Record<string, Schema.Schema<any, any, never>>> = {
+  ...PAYLOAD_SCHEMAS_V1_1_0,
+  hypothesis_ranked: HypothesisRankedPayload,
+} as const;
+
+/**
  * Schema map keyed by payload version. The migration runner uses this
  * to pick the right schema for the `to` version. Unlisted versions
  * fall back to v1.0.0 strict schemas (defensive default — unknown
@@ -312,6 +358,7 @@ export const PAYLOAD_SCHEMAS_BY_VERSION: Readonly<
 > = {
   "1.0.0": PAYLOAD_SCHEMAS_V1,
   "1.1.0": PAYLOAD_SCHEMAS_V1_1_0,
+  "1.2.0": PAYLOAD_SCHEMAS_V1_2_0,
 };
 
 /**
@@ -319,4 +366,4 @@ export const PAYLOAD_SCHEMAS_BY_VERSION: Readonly<
  */
 export type PayloadSchemaByType = typeof PAYLOAD_SCHEMAS_V1_1_0;
 export type EventType = keyof PayloadSchemaByType;
-export const EVENT_TYPES: ReadonlyArray<string> = Object.keys(PAYLOAD_SCHEMAS_V1_1_0);
+export const EVENT_TYPES: ReadonlyArray<string> = Object.keys(PAYLOAD_SCHEMAS_V1_2_0);

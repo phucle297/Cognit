@@ -102,6 +102,7 @@ Session
 ├─ Conclusions (verified by verifications)
 ├─ Verifications (with full lifecycle)
 ├─ Edges (typed relationships between entities)
+├─ Hypothesis ranks (v1.2.0 — AI-driven gravity override)
 └─ Snapshots (state checkpoints for fast resume)
 ```
 
@@ -236,6 +237,7 @@ verification_passed
 verification_errored
 verification_rerun
 edge_created
+hypothesis_ranked (v1.2.0 — AI-driven gravity rank override)
 actor_registered
 snapshot_created
 ```

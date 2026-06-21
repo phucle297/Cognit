@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 2026-06-20 [COGNIT-UI-1]
+search: A1: hypothesis_ranked event type + state fields + v1.2.0 schema
 queue: 
-next: Cognit-psl
+next: Cognit-e3a

@@ -43,6 +43,9 @@ import {
   ConstraintPolicy,
   Uuid,
   UuidLive,
+  ActorDefaults,
+  ActorDefaultsBuiltIn,
+  actorDefaultsLayer,
 } from "@cognit/db";
 import { EventBus, EventBusLive } from "./bus.js";
 import { registerHealthz } from "./routes/healthz.js";
@@ -87,10 +90,13 @@ const dbPath = `${root}/.cognit/cognit.db`;
 // silently broken (SSE handler subscribed, but the bus had an empty
 // subscriber list — POST /events published to nobody).
 const appLayer = Layer.provideMerge(
-  DbLive(dbPath, SessionPolicyDefault),
-  Layer.mergeAll(EventBusLive, LoggerNoop, UuidLive),
+  Layer.provideMerge(
+    DbLive(dbPath, SessionPolicyDefault),
+    Layer.mergeAll(EventBusLive, LoggerNoop, UuidLive),
+  ),
+  actorDefaultsLayer(ActorDefaultsBuiltIn),
 ) as Layer.Layer<
-  DbConnection | EventStore | SessionService | ConstraintPolicy | ProjectService | EventBus | Logger | Uuid,
+  DbConnection | EventStore | SessionService | ConstraintPolicy | ProjectService | EventBus | Logger | Uuid | ActorDefaults,
   never,
   never
 >;

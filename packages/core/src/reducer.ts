@@ -70,6 +70,7 @@ const STATE_EVENT_TYPES = new Set<string>([
   "verification_rerun",
   "artifact_attached",
   "edge_created",
+  "hypothesis_ranked",
 ]);
 
 const NON_STATE_EVENT_TYPES = new Set<string>([
@@ -254,6 +255,14 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
         last_event_id: event.id,
         last_event_at: event.created_at,
         gravity_fired_at: firedAtSec,
+        // v1.2.0 — AI rank starts unset. The gravity engine falls
+        // back to the formula until the AI supervisor emits a
+        // `hypothesis_ranked` event for this hypothesis.
+        ai_rank_score: null,
+        ai_rank_reasoning: null,
+        ai_rank_evaluator: null,
+        ai_rank_at: null,
+        ai_rank_event_id: null,
       };
       const hypotheses = new Map(state.hypotheses);
       hypotheses.set(event.id, h);
@@ -334,6 +343,44 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       };
       const hypotheses = new Map(state.hypotheses);
       hypotheses.set(id, updated);
+      return { ...next, hypotheses };
+    }
+
+    case "hypothesis_ranked": {
+      // v1.2.0 AI-driven gravity rank override. The target hypothesis
+      // is identified by `hypothesis_id` in the payload (NOT via
+      // `linked_hypothesis_id` — that FK column is reserved for
+      // verification_* events so the SSE stream cursor semantics stay
+      // stable). If the target is missing (orphan rank event from an
+      // import that lost the hypothesis row, or out-of-order replay
+      // before a hypothesis_created row landed), the reducer advances
+      // last_event_* but leaves the hypothesis map untouched — fail
+      // silent in state, the timeline still has the audit row.
+      const targetId = getString(payload, "hypothesis_id");
+      const score = getNumber(payload, "score");
+      const reasoning = getString(payload, "reasoning") ?? "";
+      const evaluator = getString(payload, "evaluator") ?? "ai-supervisor";
+      if (targetId === null || score === null) {
+        // Malformed event (schema should have caught it, but the
+        // reducer is total and tolerates a missing payload).
+        return next;
+      }
+      const cur = state.hypotheses.get(targetId);
+      if (!cur) {
+        return next;
+      }
+      const updated: import("./state.js").HypothesisState = {
+        ...cur,
+        ai_rank_score: score,
+        ai_rank_reasoning: reasoning,
+        ai_rank_evaluator: evaluator,
+        ai_rank_at: event.created_at,
+        ai_rank_event_id: event.id,
+        last_event_id: event.id,
+        last_event_at: event.created_at,
+      };
+      const hypotheses = new Map(state.hypotheses);
+      hypotheses.set(targetId, updated);
       return { ...next, hypotheses };
     }
 

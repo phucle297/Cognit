@@ -5,11 +5,12 @@ import {
   EVENT_TYPES,
   PAYLOAD_SCHEMAS_V1,
   PAYLOAD_SCHEMAS_V1_1_0,
+  PAYLOAD_SCHEMAS_V1_2_0,
 } from "../src";
 
 describe("event schema registry", () => {
-  it("CURRENT_VERSION is 1.1.0", () => {
-    expect(CURRENT_VERSION).toBe("1.1.0");
+  it("CURRENT_VERSION is 1.2.0", () => {
+    expect(CURRENT_VERSION).toBe("1.2.0");
   });
 
   it("every event type from plan.xml has a schema", () => {
@@ -175,6 +176,106 @@ describe("event schema registry", () => {
       };
       expect(r.pattern).toBe("jwt");
       expect("content" in r).toBe(false);
+    }
+  });
+
+  it("v1.2.0 registers hypothesis_ranked but not in v1.1.0 (additive only)", () => {
+    expect(PAYLOAD_SCHEMAS_V1_2_0["hypothesis_ranked"]).toBeDefined();
+    expect(PAYLOAD_SCHEMAS_V1_1_0["hypothesis_ranked"]).toBeUndefined();
+    expect(PAYLOAD_SCHEMAS_V1["hypothesis_ranked"]).toBeUndefined();
+    expect(EVENT_TYPES).toContain("hypothesis_ranked");
+  });
+
+  it("v1.2.0 hypothesis_ranked decodes a valid override payload", () => {
+    const s = PAYLOAD_SCHEMAS_V1_2_0["hypothesis_ranked"] as Schema.Schema<any, any, never>;
+    const decoded = Schema.decodeUnknownEither(s)({
+      hypothesis_id: "01hypxxxxxxxxxxxxxxxxxxxxxx",
+      score: 0.72,
+      reasoning: "Strongest evidence + reproducible",
+      evaluator: "ai-supervisor",
+      override_rule_based: true,
+      context_event_ids: ["01obsxxxxxxxxxxxxxxxxxxxxxx", "01expxxxxxxxxxxxxxxxxxxxxxx"],
+    });
+    expect(Either.isRight(decoded)).toBe(true);
+    if (Either.isRight(decoded)) {
+      const r = decoded.right as Record<string, unknown>;
+      expect(r.score).toBe(0.72);
+      expect(r.evaluator).toBe("ai-supervisor");
+      expect(r.override_rule_based).toBe(true);
+    }
+  });
+
+  it("v1.2.0 hypothesis_ranked score must be in [0, 1]", () => {
+    const s = PAYLOAD_SCHEMAS_V1_2_0["hypothesis_ranked"] as Schema.Schema<any, any, never>;
+    expect(
+      Either.isLeft(
+        Schema.decodeUnknownEither(s)({
+          hypothesis_id: "01hypxxxxxxxxxxxxxxxxxxxxxx",
+          score: 1.5,
+          reasoning: "over-range",
+          evaluator: "ai-supervisor",
+          override_rule_based: false,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      Either.isLeft(
+        Schema.decodeUnknownEither(s)({
+          hypothesis_id: "01hypxxxxxxxxxxxxxxxxxxxxxx",
+          score: -0.1,
+          reasoning: "under-range",
+          evaluator: "ai-supervisor",
+          override_rule_based: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("v1.2.0 hypothesis_ranked evaluator restricted to ai-supervisor literal", () => {
+    const s = PAYLOAD_SCHEMAS_V1_2_0["hypothesis_ranked"] as Schema.Schema<any, any, never>;
+    expect(
+      Either.isLeft(
+        Schema.decodeUnknownEither(s)({
+          hypothesis_id: "01hypxxxxxxxxxxxxxxxxxxxxxx",
+          score: 0.5,
+          reasoning: "x",
+          evaluator: "human",
+          override_rule_based: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("v1.2.0 hypothesis_ranked requires hypothesis_id + score + reasoning + evaluator + override_rule_based", () => {
+    const s = PAYLOAD_SCHEMAS_V1_2_0["hypothesis_ranked"] as Schema.Schema<any, any, never>;
+    expect(Either.isLeft(Schema.decodeUnknownEither(s)({}))).toBe(true);
+    expect(
+      Either.isLeft(
+        Schema.decodeUnknownEither(s)({
+          hypothesis_id: "",
+          score: 0.5,
+          reasoning: "x",
+          evaluator: "ai-supervisor",
+          override_rule_based: true,
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      Either.isLeft(
+        Schema.decodeUnknownEither(s)({
+          hypothesis_id: "01hypxxxxxxxxxxxxxxxxxxxxxx",
+          score: 0.5,
+          reasoning: "",
+          evaluator: "ai-supervisor",
+          override_rule_based: true,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("v1.2.0 schema map is a strict superset of v1.1.0 (every v1.1.0 type still defined)", () => {
+    for (const t of Object.keys(PAYLOAD_SCHEMAS_V1_1_0)) {
+      expect(PAYLOAD_SCHEMAS_V1_2_0[t]).toBeDefined();
     }
   });
 });

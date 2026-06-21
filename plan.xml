@@ -223,6 +223,7 @@
       <event>hypothesis_weakened</event>
       <event>hypothesis_rejected (payload: reason_type: evidence|superseded|constraint, superseded_by_id nullable)</event>
       <event>hypothesis_promoted</event>
+      <event>hypothesis_ranked (v1.2.0, AI-driven gravity rank override; payload: hypothesis_id, score [0,1], reasoning, evaluator: ai-supervisor, override_rule_based, context_event_ids)</event>
       <event>theory_created</event>
       <event>theory_updated</event>
       <event>theory_merged (payload: merged_into_theory_id)</event>

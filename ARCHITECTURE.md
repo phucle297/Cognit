@@ -406,11 +406,11 @@ The four sub-beads in `plan.xml` phase 4:
 - **4d — Export / import**: `vacuumInto(db, targetPath)` (single SQL
   `VACUUM INTO`, no-dep, fresh better-sqlite3 handle), `tar@7`
   integration, and the bundle layout
-  `{ manifest.json (format_version 1, schema_version 1.1.0), cognit.yaml,
+  `{ manifest.json (format_version 1, schema_version 1.2.0), cognit.yaml,
   cognit.db, optional artifacts/ }`. `cognit import` reads the bundle
   in dependency order, applies the merge strategy, and (for `fork`)
   rewrites ids + FKs via a per-table `idMap` so no orphan
   `events.session_id` remains. Cross-version payloads are migrated via
-  `migratePayload` on read (the v1.0.0 → v1.1.0 transform is identity
-  for the current set of event types — the schema is a strict
-  superset).
+  `migratePayload` on read (the v1.0.0 → v1.1.0 and v1.1.0 → v1.2.0
+  transforms are both identity — v1.2.0 adds the `hypothesis_ranked`
+  event type purely additively).

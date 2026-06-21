@@ -206,6 +206,125 @@ describe("reducer — hypothesis state machine", () => {
     expect(h?.current_confidence).toBe(0.5);
   });
 
+  it("hypothesis_created backfills AI rank fields to null (unranked at birth)", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"T","text":"t"}',
+        }),
+      ],
+      baseState(),
+    );
+    const h = s.hypotheses.get("01h");
+    expect(h?.ai_rank_score).toBeNull();
+    expect(h?.ai_rank_reasoning).toBeNull();
+    expect(h?.ai_rank_evaluator).toBeNull();
+    expect(h?.ai_rank_at).toBeNull();
+    expect(h?.ai_rank_event_id).toBeNull();
+  });
+
+  it("hypothesis_ranked populates AI rank fields on the target hypothesis", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"T","text":"t"}',
+        }),
+        mkEvent({
+          id: "01r",
+          type: "hypothesis_ranked",
+          payload_json: JSON.stringify({
+            hypothesis_id: "01h",
+            score: 0.72,
+            reasoning: "Strongest evidence + reproducible",
+            evaluator: "ai-supervisor",
+            override_rule_based: true,
+          }),
+          version: "1.2.0",
+        }),
+      ],
+      baseState(),
+    );
+    const h = s.hypotheses.get("01h");
+    expect(h?.ai_rank_score).toBe(0.72);
+    expect(h?.ai_rank_reasoning).toBe("Strongest evidence + reproducible");
+    expect(h?.ai_rank_evaluator).toBe("ai-supervisor");
+    expect(h?.ai_rank_event_id).toBe("01r");
+    expect(h?.ai_rank_at).not.toBeNull();
+    expect(h?.last_event_id).toBe("01r");
+  });
+
+  it("hypothesis_ranked for a missing hypothesis id is a no-op (no crash)", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01r",
+          type: "hypothesis_ranked",
+          payload_json: JSON.stringify({
+            hypothesis_id: "01missing",
+            score: 0.5,
+            reasoning: "x",
+            evaluator: "ai-supervisor",
+            override_rule_based: false,
+          }),
+          version: "1.2.0",
+        }),
+      ],
+      baseState(),
+    );
+    expect(s.hypotheses.size).toBe(0);
+    // Timeline still records the event — audit trail intact.
+    expect(s.timeline).toHaveLength(1);
+  });
+
+  it("a later hypothesis_ranked replaces an earlier rank (last-write-wins)", () => {
+    resetClock();
+    const s = reduce(
+      [
+        mkEvent({
+          id: "01h",
+          type: "hypothesis_created",
+          payload_json: '{"title":"T","text":"t"}',
+        }),
+        mkEvent({
+          id: "01r1",
+          type: "hypothesis_ranked",
+          payload_json: JSON.stringify({
+            hypothesis_id: "01h",
+            score: 0.3,
+            reasoning: "first",
+            evaluator: "ai-supervisor",
+            override_rule_based: true,
+          }),
+          version: "1.2.0",
+        }),
+        mkEvent({
+          id: "01r2",
+          type: "hypothesis_ranked",
+          payload_json: JSON.stringify({
+            hypothesis_id: "01h",
+            score: 0.85,
+            reasoning: "second",
+            evaluator: "ai-supervisor",
+            override_rule_based: true,
+          }),
+          version: "1.2.0",
+        }),
+      ],
+      baseState(),
+    );
+    const h = s.hypotheses.get("01h");
+    expect(h?.ai_rank_score).toBe(0.85);
+    expect(h?.ai_rank_reasoning).toBe("second");
+    expect(h?.ai_rank_event_id).toBe("01r2");
+  });
+
   it("hypothesis_weakened transitions active -> weakened and records reason", () => {
     resetClock();
     const s = reduce(
