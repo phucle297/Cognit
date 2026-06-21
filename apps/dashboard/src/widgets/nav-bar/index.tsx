@@ -19,7 +19,7 @@ export const NavBar = (): JSX.Element => {
   return (
     <header
       data-testid="nav-bar"
-      className="flex h-14 items-center gap-4 border-b bg-card px-[var(--space-page-x)]"
+      className="flex h-14 items-center gap-4 border-b border-[oklch(0.88_0_0)] bg-card px-[var(--space-page-x)]"
     >
       <Breadcrumb items={[{ label: "Cognit" }]} />
 

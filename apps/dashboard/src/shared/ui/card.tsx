@@ -8,16 +8,28 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "../lib/cn";
 
-const cardVariants = cva("rounded-lg text-card-foreground", {
-  variants: {
-    variant: {
-      default: "border bg-card shadow-[var(--shadow-sm)]",
-      elevated: "border bg-card shadow-[var(--shadow)]",
-      flat: "border bg-card",
+const cardVariants = cva(
+  "rounded-lg text-card-foreground transition-[box-shadow,transform] duration-[var(--duration-base)] ease-[var(--ease-out)]",
+  {
+    variants: {
+      variant: {
+        // Borderless by default — shadow alone separates the card
+        // from the page. Less visual noise than a 1px line.
+        default: "bg-card shadow-[var(--shadow)]",
+        elevated: "bg-card shadow-[var(--shadow-md)]",
+        // Opt-in for surfaces that genuinely need a hard edge
+        // (e.g. inputs inside a card, dialog body on tinted bg).
+        outlined: "border border-border bg-card",
+        // Interactive: lifts on hover with a slightly deeper
+        // shadow. Use on clickable cards (project tiles, KPIs).
+        interactive:
+          "bg-card shadow-[var(--shadow)] hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]",
+        flat: "bg-card",
+      },
     },
+    defaultVariants: { variant: "default" },
   },
-  defaultVariants: { variant: "default" },
-});
+);
 
 export type CardProps = HTMLAttributes<HTMLDivElement> &
   VariantProps<typeof cardVariants>;

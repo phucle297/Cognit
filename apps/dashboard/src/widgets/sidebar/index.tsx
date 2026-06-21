@@ -75,7 +75,7 @@ export const Sidebar = () => {
     <aside
       data-testid="sidebar"
       className={cn(
-        "sticky top-0 flex h-screen flex-col border-r bg-card",
+        "sticky top-0 flex h-screen flex-col border-r border-[var(--color-border-subtle)] bg-card",
         transition("width", "base"),
         collapsed ? "w-14" : "w-56",
       )}
@@ -83,7 +83,7 @@ export const Sidebar = () => {
       {/* Brand area — square logo chip + wordmark. Collapses to chip-only. */}
       <div
         className={cn(
-          "flex h-14 items-center gap-2.5 border-b",
+          "flex h-14 items-center gap-2.5 border-b border-[var(--color-border-subtle)]",
           collapsed ? "justify-center px-2" : "px-4",
         )}
       >
@@ -192,7 +192,7 @@ export const Sidebar = () => {
         type="button"
         onClick={toggle}
         className={cn(
-          "flex h-10 items-center border-t text-sm text-muted-foreground hover:bg-accent/60",
+          "flex h-10 items-center border-t border-[var(--color-border-subtle)] text-sm text-muted-foreground hover:bg-accent/60",
           transition("colors", "fast"),
           collapsed ? "justify-center" : "px-4",
         )}

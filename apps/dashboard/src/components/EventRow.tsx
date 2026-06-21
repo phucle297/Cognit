@@ -29,7 +29,7 @@ export const EventRow = ({ event }: EventRowProps): JSX.Element => {
     <div
       data-testid="timeline-event-row"
       data-event-id={event.id}
-      className="grid grid-cols-[10rem_8rem_minmax(0,1fr)_minmax(0,2fr)] items-center gap-3 border-b border-border/60 px-3 py-2 text-sm"
+      className="grid grid-cols-[10rem_8rem_minmax(0,1fr)_minmax(0,2fr)] items-center gap-3 border-b border-divider px-3 py-2 text-sm"
     >
       <span className="font-mono text-xs text-muted-foreground">{formatUlid(event.id)}</span>
       <span className="font-mono text-xs text-muted-foreground">{formatIso(event.ts)}</span>

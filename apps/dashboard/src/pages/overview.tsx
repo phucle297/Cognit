@@ -185,9 +185,9 @@ export const OverviewPage = (): JSX.Element => {
       </header>
 
       <section className="grid gap-4 sm:grid-cols-3" data-testid="overview-stats">
-        <StatCard label="Sessions" value={stats.total} delta={stats.weekDelta} icon={Activity} />
-        <StatCard label="Events this week" value={stats.weekCount} icon={ScrollText} />
-        <StatCard label="Open Decisions" value={0} icon={CheckCircle2} />
+        <StatCard label="Sessions" value={stats.total} delta={stats.weekDelta} icon={Activity} staggerIndex={0} />
+        <StatCard label="Events this week" value={stats.weekCount} icon={ScrollText} staggerIndex={1} />
+        <StatCard label="Open Decisions" value={0} icon={CheckCircle2} staggerIndex={2} />
       </section>
 
       {sessions.length === 0 ? (

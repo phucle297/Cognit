@@ -6,6 +6,7 @@
  * trend hint. Optional `subtitle` slot for a secondary metric
  * (e.g. "of 120 total"). Light theme via tokens.
  */
+import type { CSSProperties } from "react";
 import type { LucideIcon } from "lucide-react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -18,6 +19,9 @@ export interface StatCardProps {
   /** Optional secondary metric shown under the value. */
   readonly subtitle?: string;
   readonly className?: string;
+  /** Apply the staggered fade-in animation. Pass the 0-based index
+   *  so the card slides in after its siblings. */
+  readonly staggerIndex?: number;
 }
 
 export const StatCard = ({
@@ -27,13 +31,18 @@ export const StatCard = ({
   icon: Icon,
   subtitle,
   className,
+  staggerIndex,
 }: StatCardProps) => {
   const positive = delta !== undefined && delta >= 0;
   return (
     <div
       data-testid="stat-card"
+      style={staggerIndex !== undefined ? ({ "--stagger-index": staggerIndex } as CSSProperties) : undefined}
       className={cn(
-        "flex min-h-[var(--space-kpi-min-h)] flex-col gap-3 rounded-lg border bg-card p-5 shadow-[var(--shadow-sm)]",
+        "flex min-h-[var(--space-kpi-min-h)] flex-col gap-3 rounded-lg bg-card p-5 shadow-[var(--shadow)]",
+        "transition-[box-shadow,transform] duration-[var(--duration-base)] ease-[var(--ease-out)]",
+        "hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]",
+        staggerIndex !== undefined && "stagger-item",
         className,
       )}
     >

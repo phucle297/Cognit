@@ -43,6 +43,16 @@ export const TabsContent = forwardRef<
   ElementRef<typeof RadixTabs.Content>,
   ComponentPropsWithoutRef<typeof RadixTabs.Content>
 >(({ className, ...props }, ref) => (
-  <RadixTabs.Content ref={ref} className={cn("mt-2 focus-visible:outline-none", className)} {...props} />
+  <RadixTabs.Content
+    ref={ref}
+    className={cn(
+      "mt-2 focus-visible:outline-none",
+      // Radix keeps the active panel mounted and toggles data-state,
+      // so the keyframe re-fires every time the user picks a new tab.
+      "data-[state=active]:animate-[fade-in_var(--duration-base)_var(--ease-out)_both]",
+      className,
+    )}
+    {...props}
+  />
 ));
 TabsContent.displayName = "TabsContent";

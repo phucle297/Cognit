@@ -68,9 +68,9 @@ export const DecisionList = ({
     <div
       data-testid="decision-list"
       role="list"
-      className="overflow-hidden rounded-md border border-border"
+      className="overflow-hidden rounded-md border border-divider bg-card shadow-[var(--shadow-sm)]"
     >
-      {decisions.map((d) => {
+      {decisions.map((d, idx) => {
         const basedOn = edges.filter(
           (e) =>
             e.edge_type === "based_on" &&
@@ -95,7 +95,8 @@ export const DecisionList = ({
             data-testid="decision-row"
             data-decision-id={d.id}
             data-decision-state={d.state}
-            className="flex flex-col gap-2 border-b border-border/60 px-3 py-3 text-sm last:border-b-0"
+            style={{ "--stagger-index": idx } as React.CSSProperties}
+            className="flex flex-col gap-2 border-b border-divider px-3 py-3 text-sm last:border-b-0 stagger-item"
           >
             <div className="flex items-start justify-between gap-3">
               <p className="text-foreground">{d.text}</p>

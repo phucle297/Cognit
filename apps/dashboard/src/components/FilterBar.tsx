@@ -41,7 +41,7 @@ export const FilterBar = ({
   return (
     <div
       data-testid="timeline-filter-bar"
-      className="flex flex-col gap-3 rounded-md border border-border bg-card p-3"
+      className="flex flex-col gap-3 rounded-md border border-divider bg-card p-3 shadow-[var(--shadow-sm)]"
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Type</span>

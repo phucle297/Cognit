@@ -24,9 +24,14 @@ export const TimelineList = ({ events }: TimelineListProps): JSX.Element => {
     );
   }
   return (
-    <div data-testid="timeline-list" role="list" className="overflow-hidden rounded-md border border-border">
-      {events.map((e) => (
-        <div role="listitem" key={e.id}>
+    <div data-testid="timeline-list" role="list" className="overflow-hidden rounded-md border border-divider bg-card shadow-[var(--shadow-sm)]">
+      {events.map((e, idx) => (
+        <div
+          role="listitem"
+          key={e.id}
+          style={{ "--stagger-index": idx } as React.CSSProperties}
+          className="stagger-item"
+        >
           <EventRow event={e} />
         </div>
       ))}

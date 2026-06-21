@@ -54,16 +54,17 @@ export const VerificationList = ({
     <div
       data-testid="verification-list"
       role="list"
-      className="overflow-hidden rounded-md border border-border"
+      className="overflow-hidden rounded-md border border-divider bg-card shadow-[var(--shadow-sm)]"
     >
-      {verifications.map((v) => (
+      {verifications.map((v, idx) => (
         <div
           role="listitem"
           key={v.id}
           data-testid="verification-row"
           data-verification-id={v.id}
           data-verification-status={v.state}
-          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border/60 px-3 py-2 text-sm last:border-b-0"
+          style={{ "--stagger-index": idx } as React.CSSProperties}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-divider px-3 py-2 text-sm last:border-b-0 stagger-item"
         >
           <div className="flex min-w-0 flex-col gap-1">
             <div className="flex flex-wrap items-center gap-2">

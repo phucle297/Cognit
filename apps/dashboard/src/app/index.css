@@ -9,15 +9,23 @@
 @import "tailwindcss";
 
 @theme {
-  /* existing color tokens (unchanged) */
+  /* existing color tokens (lightened for a subtler feel) */
   --color-background: oklch(1 0 0);
   --color-foreground: oklch(0.145 0 0);
   --color-muted: oklch(0.97 0 0);
   --color-muted-foreground: oklch(0.556 0 0);
-  --color-border: oklch(0.922 0 0);
-  --color-input: oklch(0.922 0 0);
-  --color-primary: oklch(0.205 0 0);
-  --color-primary-foreground: oklch(0.985 0 0);
+  /* Border palette — three tiers so we can pick the right weight
+     per surface without leaning on a single hard 1px line. */
+  --color-border: oklch(0.94 0 0);              /* default separators (was 0.922) */
+  --color-border-subtle: oklch(0.965 0 0);     /* sidebar divider, list rows (effectively bg-muted/40) */
+  --color-divider: oklch(0.965 0 0);           /* semantic alias for list-row separators */
+  --color-input: oklch(0.922 0 0);             /* inputs keep a touch more contrast for focus */
+  /* Primary / brand — amber `#ebb434` (oklch ≈ 0.81 0.16 85).
+     Used by primary buttons, sidebar active state, brand chip,
+     KPI icon chip, focus ring. Foreground flips to near-black so
+     the warm bg reads with sufficient contrast. */
+  --color-primary: oklch(0.81 0.16 85);
+  --color-primary-foreground: oklch(0.205 0 0);
   --color-secondary: oklch(0.97 0 0);
   --color-secondary-foreground: oklch(0.205 0 0);
   --color-accent: oklch(0.97 0 0);
@@ -26,13 +34,13 @@
   --color-destructive-foreground: oklch(0.985 0 0);
   --color-card: oklch(1 0 0);
   --color-card-foreground: oklch(0.145 0 0);
-  --color-ring: oklch(0.708 0 0);
+  --color-ring: oklch(0.81 0.16 85);
 
-  /* brand accent (indigo) — used for active sidebar item, focus rings,
-     KPI sparklines. Single token, semantic alias. */
-  --color-brand: oklch(0.55 0.18 270);
-  --color-brand-foreground: oklch(0.985 0 0);
-  --color-brand-bg: oklch(0.96 0.04 270);
+  /* brand accent (amber) — used for active sidebar item, focus
+     rings, KPI sparklines. Single token, semantic alias. */
+  --color-brand: oklch(0.81 0.16 85);
+  --color-brand-foreground: oklch(0.205 0 0);
+  --color-brand-bg: oklch(0.96 0.05 85);
 
   /* typography */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Inter var", sans-serif;
@@ -54,10 +62,11 @@
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
 
-  /* elevation */
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.05);
-  --shadow: 0 1px 3px oklch(0 0 0 / 0.08), 0 1px 2px oklch(0 0 0 / 0.04);
-  --shadow-md: 0 4px 12px oklch(0 0 0 / 0.08), 0 2px 4px oklch(0 0 0 / 0.04);
+  /* elevation — slightly softer so cards feel lighter */
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04);
+  --shadow: 0 1px 3px oklch(0 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.03);
+  --shadow-md: 0 6px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.03);
+  --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.08), 0 4px 8px oklch(0 0 0 / 0.04);
 
   /* motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -92,8 +101,27 @@ body,
 }
 
 @keyframes page-enter {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes item-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Stagger helper: child sets --stagger-index, this scales the
+   delay so a list fades in one item at a time. Caps at index 12
+   so a long list doesn't feel slow. */
+.stagger-item {
+  opacity: 0;
+  animation: item-enter var(--duration-base) var(--ease-out) both;
+  animation-delay: calc(min(var(--stagger-index, 0), 12) * 30ms);
 }
 
 @media (prefers-reduced-motion: reduce) {
