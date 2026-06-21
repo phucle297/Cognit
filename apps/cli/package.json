@@ -16,8 +16,10 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
+    "@cognit/agent": "workspace:*",
     "@cognit/core": "workspace:*",
     "@cognit/db": "workspace:*",
+    "@cognit/llm": "workspace:*",
     "@cognit/verification": "workspace:*",
     "@cognit/wrap": "workspace:*",
     "chokidar": "^5.0.0",

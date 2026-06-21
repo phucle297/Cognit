@@ -24,8 +24,17 @@ import {
   RedactionConfigDefault,
   MigrationRegistry,
   Uuid,
+  UuidLive,
   CognitionService,
 } from "@cognit/db";
+import {
+  AgentConfig,
+  LlmCompletionError,
+  LlmProvider,
+  llmProviderFrom,
+  parseAgentConfig,
+} from "@cognit/agent";
+import { LlmLiveLazy } from "@cognit/llm";
 import { readConfig } from "./yaml-io.js";
 import { projectPaths } from "./paths.js";
 
@@ -56,7 +65,8 @@ export type AppServices =
   | ArtifactRepo
   | Uuid
   | ActorDefaults
-  | EventBus;
+  | EventBus
+  | LlmProvider;
 
 /**
  * The full Layer for a given project root. DbLive composes
@@ -170,3 +180,118 @@ export const withAppLayerAndConfig = async <A, E, R>(
     Effect.provide(buildAppLayer(root, policy, redactionCfg, actorDefaults)),
   ) as any;
 };
+
+/**
+ * Build an `LlmProvider` Layer from an `AgentConfig`.
+ *
+ * - `provider: "mock"` → canned stop-only decision via
+ *   `@cognit/agent`'s `llmProviderFrom`. `@cognit/llm`'s `modelFor`
+ *   throws for `mock` by design, so we cannot route through the
+ *   real provider factory. The canned response keeps tests and
+ *   smoke runs working without API keys.
+ * - Real providers (`anthropic` / `openai` / `google` / `ollama`)
+ *   → `@cognit/llm`'s `LlmLiveLazy`. Missing env vars surface as
+ *   `LlmCompletionError` on the first call rather than crashing
+ *   at process start, so a misconfigured operator gets a usable
+ *   error message.
+ */
+export const buildLlmLayer = (cfg: AgentConfig): Layer.Layer<LlmProvider> => {
+  if (cfg.provider === "mock") {
+    // Mock decision: no actions, no rank overrides, stop=false so
+    // the supervisor keeps ticking (tests for `--once` and for the
+    // stop sentinel both rely on the loop actually looping). The
+    // rationale is informative; ops can see why a tick ran with
+    // no decisions.
+    return llmProviderFrom(() =>
+      Effect.succeed(
+        JSON.stringify({
+          schema_version: "1",
+          rationale: "mock: no LLM available; loop continues without actions",
+          actions: [],
+          rank_overrides: [],
+          stop: false,
+        }),
+      ),
+    );
+  }
+  return LlmLiveLazy(cfg);
+};
+
+/**
+ * Compose `buildAppLayer` with an `LlmProvider` Layer so callers
+ * that need the supervisor loop can `Effect.provide` everything in
+ * one shot. The merge keeps `AppLayer`'s error channel unchanged
+ * (`DbError | DbCorrupted`) — the LLM layer does not add to it;
+ * runtime failures surface as `LlmCompletionError` etc. on the
+ * Effect's error channel, not the Layer's.
+ */
+export const buildAppLayerWithAgent = (
+  root: string,
+  agentCfg: AgentConfig,
+  policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
+  redactionConfig: Layer.Layer<RedactionConfig> = RedactionConfigDefault,
+  actorDefaults: Layer.Layer<ActorDefaults> = actorDefaultsLayer(ActorDefaultsBuiltIn),
+): Layer.Layer<AppServices, DbError | DbCorrupted | LlmCompletionError, never> =>
+  // `runTick` (in @cognit/agent) requires Uuid in its R-channel for
+  // auto-generating tick ids. `DbLive` uses `UuidLive` internally
+  // but does NOT expose `Uuid` in its public output set. We merge
+  // `UuidLive` here so the supervisor loop can find it at runtime.
+  Layer.merge(
+    Layer.provideMerge(
+      buildAppLayer(root, policy, redactionConfig, actorDefaults),
+      UuidLive,
+    ),
+    buildLlmLayer(agentCfg),
+  ) as Layer.Layer<AppServices, DbError | DbCorrupted | LlmCompletionError, never>;
+
+/**
+ * Async variant — reads `cognit.yaml`, derives `SessionPolicy` /
+ * `RedactionConfig` / `ActorDefaults`, AND composes the LLM layer.
+ * Use this from `cognit agent run` (which needs all three).
+ *
+ * The merged error channel includes `LlmCompletionError` so the
+ * caller can catch missing-env failures cleanly.
+ */
+export const withAppLayerAndConfigAndAgent = async <A, E, R>(
+  root: string,
+  eff: Effect.Effect<A, E, R>,
+  agentCfg: AgentConfig,
+): Promise<Effect.Effect<A, E | LlmCompletionError, Exclude<R, AppServices>>> => {
+  const config = await readConfig(projectPaths(root).config);
+  const policy: Layer.Layer<SessionPolicy> = Layer.succeed(SessionPolicy)({
+    everyN: config.session.snapshot_every_n_events,
+    forkOnResume: config.session.fork_on_resume,
+  });
+  const redactionCfg: Layer.Layer<RedactionConfig> = Layer.succeed(RedactionConfig)({
+    userPatterns: config.redaction.patterns,
+  });
+  const actorDefaults: Layer.Layer<ActorDefaults> = actorDefaultsLayer({
+    human: config.actors.defaults.human,
+    worker: config.actors.defaults.worker,
+    system: config.actors.defaults.system,
+  });
+  const fullLayer = buildAppLayerWithAgent(
+    root,
+    agentCfg,
+    policy,
+    redactionCfg,
+    actorDefaults,
+  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return eff.pipe(Effect.provide(fullLayer)) as any;
+};
+
+/**
+ * Convenience: parse an `AgentConfig` from partial CLI flags. Accepts
+ * `provider` / `model` as overrides; the rest falls back to
+ * `defaultAgentConfig`. Throws via `parseAgentConfig` if the input
+ * is malformed (e.g. unknown provider).
+ */
+export const agentConfigFromFlags = (flags: {
+  provider?: string;
+  model?: string;
+}): AgentConfig =>
+  parseAgentConfig({
+    ...(flags.provider !== undefined ? { provider: flags.provider } : {}),
+    ...(flags.model !== undefined ? { model: flags.model } : {}),
+  });

@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: A1: hypothesis_ranked event type + state fields + v1.2.0 schema
+search: C1: Vercel AI SDK provider layer (packages/llm/)
 queue: 
 next: Cognit-e3a

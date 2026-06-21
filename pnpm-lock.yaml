@@ -26,12 +26,18 @@ importers:
 
   apps/cli:
     dependencies:
+      '@cognit/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
       '@cognit/core':
         specifier: workspace:*
         version: link:../../packages/core
       '@cognit/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@cognit/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@cognit/verification':
         specifier: workspace:*
         version: link:../../packages/verification
@@ -71,7 +77,7 @@ importers:
         version: 4.22.4
       vitest:
         specifier: ^4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   apps/dashboard:
     dependencies:
@@ -202,7 +208,7 @@ importers:
         version: 4.22.4
       vitest:
         specifier: ^4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@25.9.3)(jsdom@29.1.1)(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/agent:
     dependencies:
