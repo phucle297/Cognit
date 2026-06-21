@@ -19,6 +19,7 @@ import {
   PlusCircle,
   ScrollText,
   Share2,
+  Sparkles,
   TestTube2,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
@@ -52,6 +53,7 @@ const SECTIONS: ReadonlyArray<{
       { to: "/knowledge-graph", label: "Knowledge Graph", icon: Share2 },
       { to: "/decision-graph", label: "Decision Graph", icon: CircleDot },
       { to: "/verification", label: "Verification", icon: TestTube2 },
+      { to: "/ai-reasoning", label: "AI Reasoning", icon: Sparkles },
     ],
   },
   {

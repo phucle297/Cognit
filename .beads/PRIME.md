@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: C1: Vercel AI SDK provider layer (packages/llm/)
+search: C3: CLI subcommand cognit agent (run/status/stop)
 queue: 
 next: Cognit-e3a

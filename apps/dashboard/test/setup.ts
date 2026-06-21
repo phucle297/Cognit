@@ -37,6 +37,7 @@ class StubEventSource {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
   static readonly CLOSED = 2;
+  static lastInstance: StubEventSource | null = null;
   readonly url: string;
   readonly withCredentials: boolean;
   readyState: number = StubEventSource.CONNECTING;
@@ -47,6 +48,7 @@ class StubEventSource {
   constructor(url: string, init?: { withCredentials?: boolean }) {
     this.url = url;
     this.withCredentials = init?.withCredentials ?? false;
+    StubEventSource.lastInstance = this;
   }
   addEventListener(type: string, cb: Listener): void {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set());
@@ -62,6 +64,9 @@ class StubEventSource {
   }
   close(): void {
     this.readyState = StubEventSource.CLOSED;
+    if (StubEventSource.lastInstance === this) {
+      StubEventSource.lastInstance = null;
+    }
   }
 }
 

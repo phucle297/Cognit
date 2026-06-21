@@ -15,12 +15,12 @@ const renderSidebar = (initialPath = "/") =>
   );
 
 describe("Sidebar", () => {
-  it("renders the 7 primary nav links + 3 Quick Actions + section headers", () => {
+  it("renders the 8 primary nav links + 3 Quick Actions + section headers", () => {
     renderSidebar();
     const aside = screen.getByRole("complementary");
-    // 7 primary nav links + 3 Quick Actions = 10 total links.
+    // 8 primary nav links (Main / Explore / Admin) + 3 Quick Actions = 11 total links.
     const links = within(aside).getAllByRole("link");
-    expect(links).toHaveLength(10);
+    expect(links).toHaveLength(11);
 
     // Primary nav links (Main / Explore / Admin).
     expect(within(aside).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/");
@@ -28,6 +28,7 @@ describe("Sidebar", () => {
     expect(within(aside).getByRole("link", { name: "Knowledge Graph" })).toHaveAttribute("href", "/knowledge-graph");
     expect(within(aside).getByRole("link", { name: "Decision Graph" })).toHaveAttribute("href", "/decision-graph");
     expect(within(aside).getByRole("link", { name: "Verification" })).toHaveAttribute("href", "/verification");
+    expect(within(aside).getByRole("link", { name: "AI Reasoning" })).toHaveAttribute("href", "/ai-reasoning");
     expect(within(aside).getByRole("link", { name: "Recovery" })).toHaveAttribute("href", "/recovery-center");
     expect(within(aside).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
 

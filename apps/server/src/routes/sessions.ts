@@ -45,6 +45,7 @@ import { envelope } from "../envelope.js";
 import { apiErrorResponse } from "../api-error.js";
 import { registerSessionsMutations } from "./sessions-mutations.js";
 import { registerSessionsGravityRoute } from "./sessions-gravity.js";
+import { registerSessionsAiReasoningRoute } from "./sessions-ai-reasoning.js";
 import {
   rankActiveHypothesesFromState,
   DEFAULT_GRAVITY_CFG,
@@ -398,6 +399,10 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
   // Phase 8 (8g.4): GET /api/sessions/:id/gravity — ranked active
   // hypotheses. Read-only.
   registerSessionsGravityRoute(app, deps);
+  // Phase C4: GET /api/sessions/:id/ai-reasoning — ranked with
+  // AI-vs-rule breakdown, plus the supervisor's decision log.
+  // GET /api/sessions/:id/ai-reasoning/stream — same scope, SSE.
+  registerSessionsAiReasoningRoute(app, deps);
 };
 
 /**
