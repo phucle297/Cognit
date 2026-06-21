@@ -82,12 +82,20 @@ export interface GravityScoreInput {
   readonly freshness_decay: number;
 }
 
-/** A hypothesis that has been ranked by `rankHypotheses`. */
+/**
+ * A hypothesis that has been ranked by `rankHypotheses`.
+ *
+ * `source` is `"ai"` when the score came from a v1.2.0
+ * `hypothesis_ranked` event (the AI supervisor's rank wins, per the
+ * override rule), and `"rule"` when the 5-axis formula produced it
+ * because no AI rank has been recorded yet.
+ */
 export interface RankedHypothesis {
   readonly id: string;
   readonly title: string;
   readonly text: string;
   readonly score: number;
+  readonly source: "ai" | "rule";
 }
 
 /**
@@ -177,6 +185,14 @@ export const freshnessForHypothesis = (
  * Stable sort: score DESC, then hypothesis id ASC. Hypotheses
  * with `state !== "active"` are excluded (AC-8.5).
  *
+ * v1.2.0 AI-rank override: when a hypothesis carries an
+ * `ai_rank_score` (emitted by an `hypothesis_ranked` event from the
+ * AI supervisor), that score REPLACES the 5-axis formula result for
+ * this ranking. The rule-based score becomes a fallback used only
+ * for hypotheses the AI has not yet scored. This matches the plan
+ * design where AI judgement is authoritative and the formula is
+ * the default until the supervisor has had a turn.
+ *
  * `contributingActorsByHypothesis` is a map from hypothesis id to
  * the list of contributing actors (built by
  * `@cognit/db/gravity.contributingActors`). `firedAtByHypothesis`
@@ -194,9 +210,18 @@ export const rankHypotheses = (
   nowSec: number,
 ): ReadonlyArray<RankedHypothesis> => {
   const halfLife = cfg.gravity.freshness_half_life_days;
-  const entries: Array<{ h: HypothesisState; score: number }> = [];
+  const entries: Array<{ h: HypothesisState; score: number; source: "ai" | "rule" }> = [];
   for (const h of state.hypotheses.values()) {
     if (h.current_state !== "active") continue;
+    // AI-rank override: if the supervisor has recorded a score for
+    // this hypothesis, that score is authoritative. We clamp defensively
+    // (the schema already enforces [0,1], but stale or out-of-range
+    // data should never break ranking).
+    const aiRank = h.ai_rank_score;
+    if (aiRank !== null && Number.isFinite(aiRank)) {
+      entries.push({ h, score: clamp(aiRank, 0, 1), source: "ai" });
+      continue;
+    }
     const actors = contributingActorsByHypothesis.get(h.id) ?? [];
     const firedAt = firedAtByHypothesis.get(h.id) ?? 0;
     const score = scoreHypothesis(
@@ -209,7 +234,7 @@ export const rankHypotheses = (
       },
       cfg,
     );
-    entries.push({ h, score });
+    entries.push({ h, score, source: "rule" });
   }
   // Stable sort: score DESC, then id ASC.
   entries.sort((a, b) => {
@@ -218,10 +243,11 @@ export const rankHypotheses = (
     if (a.h.id > b.h.id) return 1;
     return 0;
   });
-  return entries.map(({ h, score }) => ({
+  return entries.map(({ h, score, source }) => ({
     id: h.id,
     title: h.title,
     text: h.text,
     score,
+    source,
   }));
 };

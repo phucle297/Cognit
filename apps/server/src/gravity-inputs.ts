@@ -144,6 +144,12 @@ const verificationConfidenceFor = (
  * function interchangeably.
  *
  * Stable sort: score DESC, id ASC (matches the gravity package).
+ *
+ * v1.2.0 AI-rank override mirrors the gravity package: if the
+ * hypothesis has an `ai_rank_score`, that score replaces the
+ * 5-axis formula result for this ranking (source `"ai"`); the
+ * formula is the fallback for hypotheses the AI has not scored
+ * (source `"rule"`).
  */
 export const rankActiveHypothesesFromState = (
   state: SessionState,
@@ -153,9 +159,16 @@ export const rankActiveHypothesesFromState = (
   nowSec: number,
 ): ReadonlyArray<RankedHypothesis> => {
   const halfLife = cfg.gravity.freshness_half_life_days;
-  const entries: Array<{ h: HypothesisState; score: number }> = [];
+  const entries: Array<{ h: HypothesisState; score: number; source: "ai" | "rule" }> = [];
   for (const h of state.hypotheses.values()) {
     if (h.current_state !== "active") continue;
+    // AI-rank override — see packages/gravity/src/scoring.ts.
+    const aiRank = h.ai_rank_score;
+    if (aiRank !== null && Number.isFinite(aiRank)) {
+      const clamped = aiRank < 0 ? 0 : aiRank > 1 ? 1 : aiRank;
+      entries.push({ h, score: clamped, source: "ai" });
+      continue;
+    }
     const actors = contributingActorsByHypothesis.get(h.id) ?? [];
     const firedAt = firedAtByHypothesis.get(h.id) ?? 0;
     const score = scoreHypothesis(
@@ -168,7 +181,7 @@ export const rankActiveHypothesesFromState = (
       },
       cfg,
     );
-    entries.push({ h, score });
+    entries.push({ h, score, source: "rule" });
   }
   entries.sort((a, b) => {
     if (a.score !== b.score) return b.score - a.score;
@@ -176,11 +189,12 @@ export const rankActiveHypothesesFromState = (
     if (a.h.id > b.h.id) return 1;
     return 0;
   });
-  return entries.map(({ h, score }) => ({
+  return entries.map(({ h, score, source }) => ({
     id: h.id,
     title: h.title,
     text: h.text,
     score,
+    source,
   }));
 };
 
