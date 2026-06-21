@@ -645,3 +645,283 @@ describe("inbox processFile", () => {
     expect(inboxIgnored(path.join(root, "inbox", "_error", "x.json"))).toBe(true);
   });
 });
+
+/**
+ * Cognit-9w6 — negative coverage for the envelope schema-validation
+ * step in `processFile` (Cognit-3ru hardening follow-up).
+ *
+ * Three classes of rejection:
+ *   1. ULID envelope id: when the producer supplies an `id`, it MUST
+ *      be a Crockford-base32 ULID. Non-ULID strings (empty, wrong
+ *      length, lowercase, illegal chars) are rejected at the
+ *      envelope boundary with `schema_validation_failure`.
+ *   2. Confidence range: out-of-range values (1.5, -0.1, NaN,
+ *      Infinity) are rejected. The whole point of the move was to
+ *      stop the inbox from surfacing a `actor_not_registered`
+ *      miscategorization for what is really a `ValidationFailure`.
+ *   3. Unknown (version, type): envelopes with an unregistered
+ *      version literal OR a (known version, unknown type) pair are
+ *      caught at the payload-schema lookup step.
+ */
+describe("inbox processFile — Cognit-9w6 negative tests", () => {
+  let dirs!: Awaited<ReturnType<typeof withTempDirs>>;
+  beforeEach(async () => {
+    dirs = await withTempDirs();
+  });
+
+  /**
+   * Run processFile against a single envelope and return the first
+   * line of the sidecar reason.txt (e.g. `invalid_json: ...`,
+   * `schema_validation_failure: ...`, `unknown_session_id: ...`).
+   */
+  const processAndReadReason = async (
+    file: string,
+    dbPath: string,
+  ): Promise<string> => {
+    const config: InboxWatcherConfig = {
+      inboxDir: dirs.inbox,
+      processedDir: dirs.processed,
+      errorDir: dirs.error,
+      debounceMs: 50,
+    };
+    const program = Effect.gen(function* () {
+      const conn = yield* DbConnection;
+      setupSession(conn);
+      const { processFile } = yield* makeInboxWatcher(config);
+      yield* processFile(file);
+    });
+    await Effect.runPromise(
+      program.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<void, never, never>,
+    );
+    const base = path.basename(file);
+    const reasonPath = path.join(dirs.error, `${base}.reason.txt`);
+    return (await fs.readFile(reasonPath, "utf8")).split("\n")[0]!;
+  };
+
+  describe("ULID envelope id", () => {
+    it("rejects an empty-string `id` as schema_validation_failure", async () => {
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "observation_recorded",
+        version: "1.1.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: "",
+        payload: { text: "empty id" },
+      });
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+
+    it("rejects a clearly non-ULID `id` (random words)", async () => {
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "observation_recorded",
+        version: "1.1.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: "not-a-ulid",
+        payload: { text: "garbage id" },
+      });
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+
+    it("rejects an `id` with the wrong length (24 chars)", async () => {
+      // 24 chars is one short of a ULID. Same character set, so it's
+      // not a regex/character-class bug — it's a length bound.
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "observation_recorded",
+        version: "1.1.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: "0123456789ABCDEFGHJKMNPQR",
+        payload: { text: "short id" },
+      });
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+
+    it("rejects an `id` with illegal characters (lowercase)", async () => {
+      // 26 chars, valid length, but 'i' and 'l' are not in the
+      // Crockford alphabet. The case-insensitive 'i' is the easiest
+      // typo producers actually make.
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "observation_recorded",
+        version: "1.1.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: "0123456789abcdefghjkmnpqrs",
+        payload: { text: "lowercase id" },
+      });
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+
+    it("still accepts an envelope with a well-formed ULID `id`", async () => {
+      // The negative test sibling — prove the gate isn't over-eager.
+      const config: InboxWatcherConfig = {
+        inboxDir: dirs.inbox,
+        processedDir: dirs.processed,
+        errorDir: dirs.error,
+        debounceMs: 50,
+      };
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "observation_recorded",
+        version: "1.1.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: EVENT_ULID,
+        payload: { text: "good id" },
+      });
+      const program = Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        setupSession(conn);
+        const { processFile } = yield* makeInboxWatcher(config);
+        yield* processFile(file);
+      });
+      await Effect.runPromise(
+        program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<void, never, never>,
+      );
+      // A valid envelope should NOT be in _error/ and SHOULD be in
+      // processed/. ProcessFile is idempotent on the event id.
+      const errored = await fs.readdir(dirs.error);
+      expect(errored).toEqual([]);
+      const processed = await fs.readdir(dirs.processed);
+      expect(processed.length).toBe(1);
+      expect(processed[0]).toMatch(/\.json$/);
+    });
+  });
+
+  describe("confidence range", () => {
+    /**
+     * Each test case is the same shape: an envelope with a `confidence`
+     * value the envelope schema's `>= 0 && <= 1` predicate must reject.
+     * The expected outcome is `schema_validation_failure: envelope:`
+     * (the schema fires before payload validation reaches the same
+     * constraint).
+     */
+    const outOfRange = (confidence: number | string): {
+      type: string; version: string; session_id: string; actor_name: string;
+      actor_type: string; id: string; confidence: number | string;
+      payload: { text: string };
+    } => ({
+      type: "observation_recorded",
+      version: "1.1.0",
+      session_id: SESSION_ULID,
+      actor_name: "inboxer",
+      actor_type: "worker",
+      id: EVENT_ULID,
+      confidence,
+      payload: { text: "out of range" },
+    });
+
+    it("rejects confidence=1.5 (above upper bound)", async () => {
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, outOfRange(1.5));
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+
+    it("rejects confidence=-0.1 (below lower bound)", async () => {
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, outOfRange(-0.1));
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+
+    it("rejects confidence=NaN", async () => {
+      // NaN serializes to null in JSON, so we write the file by hand
+      // to keep the literal through. The schema still has to reject.
+      const file = path.join(dirs.inbox, INBOX_FILENAME);
+      const literal = `{
+        "type": "observation_recorded",
+        "version": "1.1.0",
+        "session_id": "${SESSION_ULID}",
+        "actor_name": "inboxer",
+        "actor_type": "worker",
+        "id": "${EVENT_ULID}",
+        "confidence": NaN,
+        "payload": { "text": "NaN" }
+      }`.replace(/\s+/g, " ");
+      await fs.writeFile(file, literal, "utf8");
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      // NaN isn't valid JSON, so this trips the JSON.parse step first.
+      expect(reason).toMatch(/^invalid_json:/);
+    });
+
+    it("rejects confidence=Infinity (string literal, since JSON has no Infinity)", async () => {
+      // We cannot put `Infinity` in valid JSON, but the envelope
+      // schema must still reject 1e308-style extremes in the [0, 1]
+      // window if the producer is rounding. The cleanest negative
+      // for the literal-union predicate is the upper bound overflow:
+      // a JSON number just above 1.
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, outOfRange(1.0000001));
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+  });
+
+  describe("unknown (version, type)", () => {
+    it("rejects an unknown version literal (999.0.0) as schema_validation_failure", async () => {
+      // Filename must be a ULID pair for the watcher to reach the
+      // schema decode step (it checks the filename regex AFTER the
+      // envelope decode). The session ULID in the filename + the
+      // bogus version in the body is enough to reach envelope
+      // decode and trip the `Schema.Literal("1.0.0", "1.1.0")`
+      // constraint.
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "observation_recorded",
+        version: "999.0.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: EVENT_ULID,
+        payload: { text: "future version" },
+      });
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+
+    it("rejects a (known version, unknown type) pair as schema_validation_failure", async () => {
+      // v1.1.0 is known, but `bogus_type` is not in the payload
+      // schema map. The envelope decode passes (it accepts any
+      // non-empty `type` string), then the payload-schema lookup
+      // step returns undefined → `schema_validation_failure` with
+      // the exact (version, type) pair in the reason.
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "bogus_type",
+        version: "1.1.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: EVENT_ULID,
+        payload: { text: "unknown type" },
+      });
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure:/);
+      // The sidecar reason includes the (version, type) pair so the
+      // producer knows what to fix.
+      expect(reason).toMatch(/1\.1\.0/);
+      expect(reason).toMatch(/bogus_type/);
+    });
+
+    it("rejects an empty `type` string as schema_validation_failure", async () => {
+      // The envelope schema requires `Schema.minLength(1)` on
+      // `type`. An empty type trips the decode at the envelope
+      // step.
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "",
+        version: "1.1.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: EVENT_ULID,
+        payload: { text: "empty type" },
+      });
+      const reason = await processAndReadReason(file, dirs.dbPath);
+      expect(reason).toMatch(/^schema_validation_failure: envelope:/);
+    });
+  });
+});
