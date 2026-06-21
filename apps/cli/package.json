@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "bin": {
-    "cognit": "./src/index.ts"
+    "cognit": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && pnpm run copy-migrations",
+    "prepare": "pnpm run build",
+    "copy-migrations": "rm -rf dist/migrations && cp -R ../../packages/db/src/schema/migrations dist/migrations",
     "typecheck": "tsgo --noEmit",
     "test": "vitest --run",
     "test:watch": "vitest",

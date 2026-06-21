@@ -1,12 +1,17 @@
 # docker-compose.yml — Phase 6.8 one-line local deploy.
 #
-#   docker compose up -d
-#   open http://localhost:6970        # dashboard (nginx + Vite dist)
+#   docker compose up -d              # server only (port 6971 internal)
+#   cognit dashboard                  # on-demand dashboard (port 6970)
+#   docker compose --profile dashboard up -d   # alternative: explicit profile
 #
 # Port policy:
-#   - :6970 host-facing only (dashboard via nginx)
+#   - :6970 host-facing only (dashboard via nginx), started on demand
 #   - :6971 internal docker network only; not exposed to host
 #   - Non-docker users (pnpm dev:server + pnpm dev:dashboard) unaffected
+#
+# The dashboard service lives behind the `dashboard` profile so a plain
+# `docker compose up` does not bind :6970. Start it explicitly via the
+# CLI (`cognit dashboard --docker`) or the profile (`--profile dashboard`).
 #
 # Data persists in the `cognit-data` named volume at /data inside the
 # server container (the server's COGNIT_ROOT). To wipe and re-seed:
@@ -47,6 +52,7 @@ services:
       dockerfile: docker/Dockerfile.dashboard
     image: cognit:dashboard
     container_name: cognit-dashboard
+    profiles: ["dashboard"]          # opt-in: only started by `cognit dashboard --docker` or `docker compose --profile dashboard up`
     ports:
       - "127.0.0.1:6970:6970"         # only host-facing port
     depends_on:

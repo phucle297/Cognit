@@ -43,7 +43,6 @@ describe("production index.ts live boot", () => {
         ...process.env,
         COGNIT_DB_PATH: dbPath,
         COGNIT_PROJECT_ID: "live-verify",
-        COGNIT_ENFORCE_AUTH: "false",
         COGNIT_BIND: "127.0.0.1",
         COGNIT_PORT: "0",
       },

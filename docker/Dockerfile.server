@@ -38,6 +38,14 @@ RUN pnpm install --frozen-lockfile
 # ── build ─────────────────────────────────────────────────────────
 FROM deps AS build
 RUN pnpm --filter @cognit/server build
+# Build the CLI bundle too so the runtime image ships a runnable
+# `cognit` binary (used via `docker exec cognit-server cognit ...`).
+# tsup inlines the @cognit/* workspace packages and the
+# `copy-migrations` postbuild step in apps/cli/package.json copies
+# the db migration .sql files into dist/migrations, so the runtime
+# only needs the cli bundle + the runtime-3rd-party deps listed in
+# apps/cli/tsup.config.ts.
+RUN pnpm --filter @cognit/cli build
 
 # ── runtime ───────────────────────────────────────────────────────
 FROM node:${NODE_VERSION} AS runtime
@@ -51,6 +59,15 @@ WORKDIR /app
 # packages resolved under apps/server/node_modules.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/server/node_modules ./apps/server/node_modules
+# CLI runtime externals (better-sqlite3, chokidar, commander, effect,
+# tar, yaml) live under apps/cli/node_modules. Re-home the CLI
+# bundle to /opt/cognit-cli and place node_modules next to index.js
+# so node's resolver finds them when `cognit` is invoked from any
+# directory inside the container (e.g. `docker exec ... cognit`).
+COPY --from=build /app/apps/cli/dist /opt/cognit-cli
+COPY --from=build /app/apps/cli/node_modules /opt/cognit-cli/node_modules
+RUN ln -s /opt/cognit-cli/index.js /usr/local/bin/cognit \
+ && chmod +x /opt/cognit-cli/index.js
 
 # Built server bundle (tsup inlines @cognit/{core,db,verification}).
 COPY --from=build /app/apps/server/dist ./apps/server/dist
