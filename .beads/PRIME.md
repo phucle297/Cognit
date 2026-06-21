@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: A1: hypothesis_ranked event type + state fields + v1.2.0 schema
+search: feat: AI supervisor — AI-driven gravity ranking (epic)
 queue: 
-next: Cognit-e3a
+next: 
