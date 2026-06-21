@@ -8,7 +8,7 @@ type LoggerService = import("effect").Context.Tag.Service<typeof Logger>;
 
 /**
  * The four spec-listed failure categories the inbox sidecar must
- * distinguish. Plus two internal categories the watcher uses to keep
+ * distinguish. Plus internal categories the watcher uses to keep
  * the failure surface unambiguous:
  *
  *   - `invalid_actor_type`: envelope decoded but `actor_type` did not
@@ -16,6 +16,10 @@ type LoggerService = import("effect").Context.Tag.Service<typeof Logger>;
  *     the schema-validation pass on `payload`.
  *   - `invalid_envelope`: envelope is not an object or has the wrong
  *     shape entirely.
+ *   - `internal_db_error`: driver-level SQLite failure (corruption,
+ *     disk full, lock timeout). Distinct from `actor_not_registered`
+ *     so `cognit doctor` can triage storage issues separately from
+ *     identity issues.
  *
  * Every category maps to exactly one branch in `processFile`
  * (`packages/db/src/inbox.ts`). The sidecar `reason.txt` is always
@@ -27,7 +31,8 @@ export type InboxFailureCategory =
   | "schema_validation_failure"
   | "actor_not_registered"
   | "invalid_actor_type"
-  | "invalid_envelope";
+  | "invalid_envelope"
+  | "internal_db_error";
 
 /**
  * Move a processed inbox file out of the active directory and write a

@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Cognit-9 Phase 9: Worker Inbox Adapter + Auto-capture (v0.2)
+search: 2026-06-20 [COGNIT-UI-1]
 queue: 
-next: Cognit-1eg
+next: Cognit-psl
