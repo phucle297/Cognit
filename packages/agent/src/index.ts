@@ -61,7 +61,13 @@ export {
 
 export {
   LlmProvider,
-  LlmCompletionError,
   llmProviderFrom,
   type LlmProviderShape,
 } from "./llm.js";
+
+export {
+  LlmCompletionError,
+  JsonParseError,
+  SchemaValidationError,
+  type JsonCompletionError,
+} from "./errors.js";

@@ -1,43 +1,32 @@
 /**
  * packages/agent/src/llm.ts — LLM provider abstraction (C2).
  *
- * The supervisor loop needs ONE thing from an LLM: given a prompt,
- * return the model's completion as a string. Parsing + schema
- * validation happens in the loop (`decodeAgentDecisionEither`) so
- * the provider boundary stays trivial and C1 (`packages/llm/`) is
- * free to choose any underlying SDK (Vercel AI SDK, raw fetch,
- * local inference, mock).
+ * The supervisor loop needs an LLM to emit text per tick. We define
+ * two methods on the provider:
  *
- * Why not return a typed `AgentDecision` directly? Two reasons:
- *   1. Providers that stream tokens or chunk outputs need to push
- *      partial strings; coercion to `AgentDecision` would require
- *      them to know the agent schema (reverse dependency).
- *   2. Tests for the loop want to inject a fixture that returns
- *      malformed JSON on purpose to assert the parse-error path.
- *      A string-returning mock is one line; a typed-decision mock
- *      would have to side-step the schema.
+ *   - `complete({ prompt, model })` → Effect<string, LlmCompletionError>
+ *       Raw text completion. The supervisor loop uses this when no
+ *       schema-aware helper is available (mock provider, future
+ *       non-AI backends).
+ *
+ *   - `completeJson({ prompt, model, provider, schema })` → Effect<T, …>
+ *       Typed completion. The C1 concrete layer
+ *       (`@cognit/llm`) wraps the model output with a JSON
+ *       parse + Effect Schema validation step. The loop prefers
+ *       this when available so the parse error class is unified.
  *
  * The provider is an Effect `Tag` so the loop composes with the
  * rest of the db/core services (DI via R-channel, swap-in tests,
  * Layer composition in the CLI).
  */
 
-import { Context, Effect, Layer } from "effect";
-
-/**
- * Raw completion error. The supervisor loop translates this into
- * a typed `AgentTickError` with the cause attached so the CLI can
- * log + retry or surface a dashboard error.
- */
-export class LlmCompletionError extends Error {
-  override readonly name = "LlmCompletionError";
-  constructor(
-    message: string,
-    override readonly cause?: unknown,
-  ) {
-    super(message);
-  }
-}
+import { Context, Effect, Layer, Schema } from "effect";
+import type { AgentProvider } from "./agent-config.js";
+import {
+  JsonParseError,
+  LlmCompletionError,
+  SchemaValidationError,
+} from "./errors.js";
 
 export interface LlmProviderShape {
   /**
@@ -54,6 +43,23 @@ export interface LlmProviderShape {
     readonly prompt: string;
     readonly model: string;
   }) => Effect.Effect<string, LlmCompletionError>;
+  /**
+   * Typed JSON completion. Optional — providers that do not
+   * implement it (e.g. the mock layer used by tests) leave the
+   * supervisor loop to parse + validate from `complete()`. The C1
+   * concrete layer (`@cognit/llm`) implements both methods.
+   */
+  readonly completeJson?: <T>(
+    input: {
+      readonly prompt: string;
+      readonly model: string;
+      readonly provider: AgentProvider;
+      readonly schema: Schema.Schema<T>;
+    },
+  ) => Effect.Effect<
+    T,
+    LlmCompletionError | JsonParseError | SchemaValidationError
+  >;
 }
 
 export class LlmProvider extends Context.Tag("@cognit/agent/LlmProvider")<

@@ -32,11 +32,16 @@ import type { CognitConfig } from "@cognit/core/config";
 import { reduce } from "@cognit/core/reducer";
 import { emptySessionState, type ReducerEvent, type SessionState } from "@cognit/core/state";
 import { EventStore, Uuid } from "@cognit/db";
-import { Effect, Either } from "effect";
+import { Effect, Schema } from "effect";
 import { applyDecision, type ApplyError } from "./apply.js";
 import type { AgentConfig } from "./agent-config.js";
-import { decodeAgentDecisionEither, type AgentDecision } from "./decision.js";
-import { LlmProvider, type LlmCompletionError } from "./llm.js";
+import { AgentDecision, decodeAgentDecisionEither } from "./decision.js";
+import {
+  JsonParseError,
+  LlmCompletionError,
+  SchemaValidationError,
+} from "./errors.js";
+import { LlmProvider } from "./llm.js";
 import { buildPrompt } from "./prompt.js";
 
 /**
@@ -74,7 +79,12 @@ export interface RunTickInput {
 }
 
 /** Errors a tick can produce. */
-export type TickError = LlmCompletionError | DecisionParseError | ApplyError;
+export type TickError =
+  | LlmCompletionError
+  | JsonParseError
+  | SchemaValidationError
+  | DecisionParseError
+  | ApplyError;
 
 /**
  * Run one supervisor tick. Pure orchestration: read state, prompt,
@@ -107,31 +117,43 @@ export const runTick = (
     // 2. Build prompt (pure).
     const prompt = buildPrompt(state, input.cfg, input.agent);
 
-    // 3. Call the LLM.
-    const raw = yield* llm.complete({ prompt, model: input.agent.model });
-
-    // 4. Parse + validate.
-    let parsedJson: unknown;
-    try {
-      parsedJson = JSON.parse(raw);
-    } catch (e) {
-      return yield* Effect.fail(
-        new DecisionParseError(
-          `agent tick: LLM output is not valid JSON: ${(e as Error).message}`,
-          raw,
-        ),
-      );
+    // 3. Call the LLM. Prefer the typed JSON-completion path
+    //    (`completeJson`) when the provider exposes it — C1's
+    //    `@cognit/llm` Layer does, the test mock does not. Falling
+    //    back to raw `complete()` + manual parse keeps the loop
+    //    honest with the test layer used in C2 unit tests.
+    let decision: AgentDecision;
+    if (llm.completeJson) {
+      decision = (yield* llm.completeJson({
+        prompt,
+        model: input.agent.model,
+        provider: input.agent.provider,
+        schema: AgentDecision as Schema.Schema<AgentDecision>,
+      })) as AgentDecision;
+    } else {
+      const raw = yield* llm.complete({ prompt, model: input.agent.model });
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(raw);
+      } catch (e) {
+        return yield* Effect.fail(
+          new DecisionParseError(
+            `agent tick: LLM output is not valid JSON: ${(e as Error).message}`,
+            raw,
+          ),
+        );
+      }
+      const decoded = decodeAgentDecisionEither(parsedJson);
+      if (decoded._tag === "Left") {
+        return yield* Effect.fail(
+          new DecisionParseError(
+            `agent tick: LLM output failed AgentDecision validation: ${String(decoded.left)}`,
+            raw,
+          ),
+        );
+      }
+      decision = decoded.right;
     }
-    const decoded = decodeAgentDecisionEither(parsedJson);
-    if (Either.isLeft(decoded)) {
-      return yield* Effect.fail(
-        new DecisionParseError(
-          `agent tick: LLM output failed AgentDecision validation: ${String(decoded.left)}`,
-          raw,
-        ),
-      );
-    }
-    const decision = decoded.right;
 
     // 5. Apply.
     const applied = yield* applyDecision({
