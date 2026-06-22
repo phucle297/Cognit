@@ -32,6 +32,7 @@ import {
   DbError,
 } from "@cognit/db";
 import { envelope } from "../envelope.js";
+import { apiErrorResponse } from "../api-error.js";
 import type { ServerRuntime } from "./sessions.js";
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]*$/i;
@@ -110,14 +111,15 @@ export const registerProjectsRoutes = (app: Hono, deps: ProjectsRouteDeps): void
     try {
       body = await c.req.json();
     } catch (e) {
-      return c.json(
-        { error: "bad_request", message: `body is not JSON: ${(e as Error).message}` },
-        400,
+      return apiErrorResponse(
+        c,
+        "bad_request",
+        `body is not JSON: ${(e as Error).message}`,
       );
     }
     const parsed = parseBody(body);
     if (!parsed.ok) {
-      return c.json({ error: "validation_failed", message: parsed.error }, 400);
+      return apiErrorResponse(c, "validation_failed", parsed.error);
     }
 
     const program = Effect.gen(function* () {
@@ -175,12 +177,18 @@ export const registerProjectsRoutes = (app: Hono, deps: ProjectsRouteDeps): void
     if (exit._tag === "Failure") {
       const cause = (exit as { cause: unknown }).cause;
       if (isConflict(cause)) {
-        return c.json(
-          { error: "conflict", message: `project '${cause.name}' already exists` },
-          409,
+        return apiErrorResponse(
+          c,
+          "conflict",
+          `project '${cause.name}' already exists`,
         );
       }
-      return c.json({ error: "internal", cause }, 500);
+      // Never leak the raw Effect cause on the wire (DbError internals
+      // expose SQLite messages + stack traces). Use the v1 api_error
+      // envelope so dashboards can surface code + request_id, and
+      // server-side logs keep the cause.
+      process.stderr.write(`POST /projects: internal failure: ${JSON.stringify(cause)}\n`);
+      return apiErrorResponse(c, "internal", "project.create failed");
     }
     const project = (exit as { value: ProjectRow }).value;
     return c.json(envelope("project.created", { project }), 201);

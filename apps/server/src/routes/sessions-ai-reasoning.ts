@@ -308,8 +308,29 @@ export const registerSessionsAiReasoningRoute = (
   // into `sseHandler` (the factory is curried over runtime + opts,
   // not over the request). The handler then subscribes to the bus
   // and filters by both `session_id` and `type`.
-  app.get("/api/sessions/:id/ai-reasoning/stream", (c) => {
+  //
+  // Pre-flight existence check: an unknown session id must 404
+  // before the stream commits its 200 — otherwise the dashboard
+  // would sit on "loading" forever waiting for frames that never
+  // arrive. Mirrors the GET handler's 404 path so the two surfaces
+  // share the same error envelope.
+  app.get("/api/sessions/:id/ai-reasoning/stream", async (c) => {
     const id = c.req.param("id");
+    const existsProgram = Effect.gen(function* () {
+      const service = yield* SessionService;
+      return yield* service.show(id);
+    });
+    const existsExit = await runtime.runPromiseExit(
+      existsProgram as unknown as Effect.Effect<unknown, unknown, never>,
+    );
+    if (existsExit._tag === "Failure") {
+      const cause = (existsExit as { cause: unknown }).cause;
+      const err = JSON.stringify(cause);
+      if (err.includes("UnknownSession") || err.includes("UnknownGoalOrId")) {
+        return apiErrorResponse(c, "not_found", `session '${id}' not found`, { id });
+      }
+      return apiErrorResponse(c, "internal", "session.ai_reasoning: stream open failed");
+    }
     const handler = sseHandler(runtime, {
       replayLimit: 200,
       projectId,

@@ -37,9 +37,14 @@ import {
   SessionPolicyDefault,
   SessionService,
   ConstraintPolicy,
+  Uuid,
+  UuidLive,
+  ActorDefaults,
+  ActorDefaultsBuiltIn,
+  actorDefaultsLayer,
 } from "@cognit/db";
 import { EventBus, EventBusLive } from "../src/bus.js";
-import { sseHandler } from "../src/sse.js";
+import { sseHandler, CROCKFORD_ALPHABET_RE, LAST_EVENT_ID_MAX_LEN } from "../src/sse.js";
 import type { ServerRuntime } from "../src/routes/sessions.js";
 import { bootServer, parseSseFrames, readUntil, type BootedServer } from "./helpers.js";
 
@@ -227,9 +232,9 @@ describe("cognit server — SSE bus", () => {
 
     const appLayer = Layer.provideMerge(
       DbLive(dbPath, SessionPolicyDefault),
-      Layer.merge(EventBusLive, LoggerNoop),
+      Layer.mergeAll(EventBusLive, LoggerNoop, UuidLive, actorDefaultsLayer(ActorDefaultsBuiltIn)),
     );
-    type Ctx = DbConnection | EventStore | SessionService | ProjectService | ConstraintPolicy | EventBus | Logger;
+    type Ctx = DbConnection | EventStore | SessionService | ProjectService | ConstraintPolicy | EventBus | Logger | Uuid | ActorDefaults;
     const managed = ManagedRuntime.make(appLayer as Layer.Layer<Ctx, never, never>);
     const projectId = await managed.runPromise(
       Effect.gen(function* () {
@@ -298,5 +303,178 @@ describe("cognit server — SSE bus", () => {
     // Reference unused symbols to satisfy the linter.
     void Queue;
     void sessionId;
+  });
+
+  // ---- phase C5 follow-ups ----
+
+  it("emits an `event: error` SSE frame when bus.subscribe() fails (no 200 + empty stream)", async () => {
+    // Build a runtime with a REAL EventBusLive — but inject a
+    // custom EventBus layer that fails the `subscribe` call so we
+    // can exercise the sse.ts catchAllCause handler in a
+    // deterministic way. The pure missing-service case was tested
+    // out-of-band (see apps/server/src/sse.ts: failing-bus
+    // regression covered by the effect runtime itself).
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cognit-sse-err-"));
+    const dbPath = path.join(dir, "cognit.db");
+    await fs.mkdir(path.join(dir, ".cognit"), { recursive: true });
+    await fs.writeFile(path.join(dir, ".cognit", "cognit.yaml"), "version: 1\n");
+    // Custom EventBus layer whose subscribe() always rejects.
+    const failingBusLayer = Layer.succeed(
+      EventBus,
+      {
+        publish: () => Effect.void,
+        subscribe: () => Effect.fail(new Error("synthetic bus failure")),
+        shutdown: Effect.void,
+      },
+    );
+    const appLayer = Layer.provideMerge(
+      DbLive(dbPath, SessionPolicyDefault),
+      Layer.mergeAll(
+        failingBusLayer,
+        LoggerNoop,
+        UuidLive,
+        actorDefaultsLayer(ActorDefaultsBuiltIn),
+      ),
+    );
+    type Ctx = DbConnection | EventStore | SessionService | ProjectService | ConstraintPolicy | EventBus | Logger | Uuid | ActorDefaults;
+    const managed = ManagedRuntime.make(appLayer as Layer.Layer<Ctx, never, never>);
+    const projectId = await managed.runPromise(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const id = "01projectxxxxxxxxxxxxxxxxx";
+        conn.handle.run(
+          `INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`,
+          [id, "test", new Date().toISOString()],
+        );
+        return id;
+      }),
+    );
+    const runtime: ServerRuntime = {
+      runPromise: <A, E>(eff: Effect.Effect<A, E, never>) =>
+        managed.runPromise(eff as unknown as Effect.Effect<A, never, Ctx>) as Promise<A>,
+      runPromiseExit: async <A, E>(eff: Effect.Effect<A, E, never>) => {
+        const r = await managed.runPromiseExit(eff as unknown as Effect.Effect<A, never, Ctx>);
+        return r._tag === "Success"
+          ? { _tag: "Success" as const, value: r.value as A }
+          : { _tag: "Failure" as const, cause: r.cause };
+      },
+      runFork: <A, E>(eff: Effect.Effect<A, E, never>) =>
+        managed.runFork(eff as unknown as Effect.Effect<A, never, Ctx>) as Fiber.RuntimeFiber<A, E>,
+    };
+    const app = new Hono();
+    app.get("/api/events/stream", sseHandler(runtime, { projectId, heartbeatMs: 50, replayLimit: 5 }));
+    const listener = await new Promise<{ url: string; close: () => Promise<void> }>((resolve, reject) => {
+      let s: ServerType | null = null;
+      s = serve({ fetch: app.fetch, hostname: "127.0.0.1", port: 0 }, (info) => {
+        resolve({
+          url: `http://127.0.0.1:${info.port}`,
+          close: async () => {
+            s?.close();
+            await managed.dispose();
+            await fs.rm(dir, { recursive: true, force: true });
+          },
+        });
+      });
+      setTimeout(() => reject(new Error("sse-err: listen timeout")), 5000).unref();
+    });
+    try {
+      const r = await fetch(`${listener.url}/api/events/stream`);
+      expect(r.status).toBe(200);
+      const reader = r.body!.getReader();
+      const decoder = new TextDecoder();
+      const acc = await readUntil(
+        reader,
+        decoder,
+        (s) => /event:\s*error/.test(s),
+        2000,
+      );
+      try { await reader.cancel(); } catch { /* ignore */ }
+      expect(acc).toMatch(/event:\s*error/);
+      expect(acc).toContain(`"kind":"api_error"`);
+      expect(acc).toContain(`"code":"internal"`);
+      expect(acc).toContain(`"message":"event stream subscribe failed"`);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("rejects last_event_id longer than 64 chars and non-Crockford before SQL", async () => {
+    server = await bootServer();
+    const decoder = new TextDecoder();
+    // 1) Length cap: 65 'A' chars → must NOT be treated as a cursor.
+    //    The replay falls back to the full tail, never throws a
+    //    SQL parameter error.
+    const tooLong = "A".repeat(LAST_EVENT_ID_MAX_LEN + 1);
+    expect(tooLong.length).toBeGreaterThan(LAST_EVENT_ID_MAX_LEN);
+    const r1 = await fetch(
+      `${server.url}/api/events/stream?last_event_id=${tooLong}`,
+    );
+    expect(r1.status).toBe(200);
+    const reader1 = r1.body!.getReader();
+    const acc1 = await readUntil(reader1, decoder, (s) => s.includes("event:"), 1500);
+    try { await reader1.cancel(); } catch { /* ignore */ }
+    expect(acc1).toMatch(/event:\s*event/);
+
+    // 2) Non-Crockford: contains 'L' which is NOT in the Crockford
+    //    base32 alphabet (excludes I, L, O, U).
+    const nonCrockford = "01HELLOHELLOHELLOHELLO";
+    expect(CROCKFORD_ALPHABET_RE.test(nonCrockford)).toBe(false);
+    const r2 = await fetch(
+      `${server.url}/api/events/stream?last_event_id=${encodeURIComponent(nonCrockford)}`,
+    );
+    expect(r2.status).toBe(200);
+    const reader2 = r2.body!.getReader();
+    const acc2 = await readUntil(reader2, decoder, (s) => s.includes("event:"), 1500);
+    try { await reader2.cancel(); } catch { /* ignore */ }
+    expect(acc2).toMatch(/event:\s*event/);
+
+    // 3) Crockford-conformant cursor still works (regression check
+    //    that the validation didn't accidentally reject everything).
+    // Post two markers so the cursor (first id) is NOT the most
+    // recent — the second marker should appear in the replay tail.
+    const markerA = `capA-${Date.now()}`;
+    const markerB = `capB-${Date.now()}`;
+    const postA = await fetch(`${server.url}/api/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: server.sessionId,
+        type: "observation_recorded",
+        payload: { text: markerA },
+        actor: "alice:human",
+      }),
+    });
+    expect(postA.status).toBe(201);
+    const postedA = (await postA.json()) as { data: { event: { id: string } } };
+    const validCursor = postedA.data.event.id;
+    const postB = await fetch(`${server.url}/api/events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        session_id: server.sessionId,
+        type: "observation_recorded",
+        payload: { text: markerB },
+        actor: "alice:human",
+      }),
+    });
+    expect(postB.status).toBe(201);
+    expect(CROCKFORD_ALPHABET_RE.test(validCursor)).toBe(true);
+    expect(validCursor.length).toBeLessThanOrEqual(LAST_EVENT_ID_MAX_LEN);
+    const r3 = await fetch(
+      `${server.url}/api/events/stream?last_event_id=${validCursor}`,
+    );
+    expect(r3.status).toBe(200);
+    const reader3 = r3.body!.getReader();
+    const acc3 = await readUntil(
+      reader3,
+      decoder,
+      (s) => s.includes(markerB),
+      2000,
+    );
+    try { await reader3.cancel(); } catch { /* ignore */ }
+    // MarkerB is strictly after the cursor → it must be replayed.
+    expect(acc3).toContain(markerB);
+    // MarkerA is the cursor itself → it must NOT be replayed.
+    expect(acc3).not.toContain(markerA);
   });
 });

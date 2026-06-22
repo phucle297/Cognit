@@ -58,6 +58,7 @@ import { registerActorsRoutes } from "./routes/actors.js";
 import { registerSearchRoutes } from "./routes/search.js";
 import { registerRulesRoutes } from "./routes/rules.js";
 import { resolveServerConfig } from "./config.js";
+import { requestIdMiddleware } from "./api-error.js";
 import { findProjectRoot } from "../../../apps/cli/src/paths.js";
 
 const program = new Command();
@@ -130,14 +131,36 @@ process.stderr.write(
 
 // Build the Hono app
 const app = new Hono();
+// Stamp every request with a ULID request_id BEFORE CORS so error
+// envelopes (including 403 from the loopback-only CORS gate) carry
+// a request_id for support tickets.
+app.use("*", requestIdMiddleware);
+// Loopback-only CORS: this is a local-only tool. Reject any
+// Origin that is not http://localhost:<port> or http://127.0.0.1:<port>.
+// Wildcard ACAO would let any web page call the unauthenticated API
+// (no token, no cookie — local-only). Even though the server is
+// bound to loopback, the browser fetch path requires the loopback
+// Origin to be echoed back explicitly for the response to be
+// readable to the dashboard.
+const LOOPBACK_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 app.use("*", async (c, next) => {
-  // CORS for local browser dev
-  c.header("access-control-allow-origin", "*");
-  c.header("access-control-allow-headers", "content-type");
+  const origin = c.req.header("origin");
+  if (origin !== undefined && LOOPBACK_ORIGIN_RE.test(origin)) {
+    c.header("access-control-allow-origin", origin);
+    c.header("vary", "Origin");
+  }
+  c.header("access-control-allow-headers", "content-type, x-request-id");
   c.header("access-control-allow-methods", "GET,POST,OPTIONS");
+  c.header("access-control-expose-headers", "x-request-id");
   await next();
 });
-app.options("*", (c) => c.body(null, 204));
+app.options("*", (c) => {
+  const origin = c.req.header("origin");
+  if (origin !== undefined && !LOOPBACK_ORIGIN_RE.test(origin)) {
+    return c.body(null, 403);
+  }
+  return c.body(null, 204);
+});
 
 registerHealthz(app);
 // Search registers BEFORE sessions routes: `/api/sessions/:id`

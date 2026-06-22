@@ -87,6 +87,14 @@ const isString = (x: unknown): x is string => typeof x === "string" && x.length 
  * Hono handler factory. Returns a `Response` whose body is a
  * `ReadableStream` of SSE frames.
  */
+// Crockford base32 ULID alphabet. Used to gate `last_event_id` so we
+// never feed garbage into the SQL `id > ?` predicate (a 10kB string
+// would otherwise still parse as a valid SQLite parameter but
+// break ULID lex ordering silently — replay would skip rows the
+// client already saw).
+export const CROCKFORD_ALPHABET_RE = /^[0-9A-HJKMNP-TV-Z]*$/;
+export const LAST_EVENT_ID_MAX_LEN = 64;
+
 export const sseHandler = (runtime: ServerRuntime, opts: SseOptions) => {
   const replayLimit = opts.replayLimit ?? DEFAULT_REPLAY;
   const eventName = opts.eventName ?? "event";
@@ -110,7 +118,17 @@ export const sseHandler = (runtime: ServerRuntime, opts: SseOptions) => {
     // connection — see apps/dashboard/src/shared/api/use-event-source.ts).
     const lastEventIdRaw =
       c.req.header("last-event-id") ?? c.req.query("last_event_id");
-    const lastEventId = isString(lastEventIdRaw) ? lastEventIdRaw : null;
+    // Cap length and validate Crockford base32 BEFORE we touch SQL.
+    // Without this, an attacker-controlled cursor (e.g. a 64kB string)
+    // would push a heavy parameter into the `id > ?` predicate and
+    // could also break the lex ordering that the cursor relies on
+    // (replay skipping rows the client already saw).
+    const lastEventId =
+      isString(lastEventIdRaw) &&
+      lastEventIdRaw.length <= LAST_EVENT_ID_MAX_LEN &&
+      CROCKFORD_ALPHABET_RE.test(lastEventIdRaw)
+        ? lastEventIdRaw
+        : null;
 
     const format = (row: EventRow) =>
       encoder.encode(
@@ -177,13 +195,16 @@ export const sseHandler = (runtime: ServerRuntime, opts: SseOptions) => {
           };
 
           // Drain loop: forward every new row that passes the filter.
+          // Mirrors the heartbeat pattern: any failure (Queue shutdown,
+          // defect) is swallowed so the SSE handler exits cleanly
+          // instead of leaking a 200 + empty stream.
           const drain = Effect.gen(function* () {
             while (true) {
               const row = yield* Queue.take(queue);
               if (!matches(row)) continue;
               safeEnqueue(format(row));
             }
-          });
+          }).pipe(Effect.catchAllCause(() => Effect.void));
           const drainFiber = yield* Effect.forkDaemon(drain);
 
           // Heartbeat ticker: SSE comment every heartbeatMs.
@@ -208,9 +229,84 @@ export const sseHandler = (runtime: ServerRuntime, opts: SseOptions) => {
               /* already closed */
             }
           };
-        });
+        }).pipe(
+          // If the bus subscribe() or replay fails (DB error, missing
+          // service, layer mismatch, etc.), don't leak a 200 + empty
+          // stream — emit a single `event: error` SSE frame carrying
+          // the v1 api_error envelope and close so EventSource
+          // triggers its retry. We use catchAllCause (not catchAll)
+          // because a missing service produces a defect, which lives
+          // on the cause channel not the error channel.
+          Effect.catchAllCause((cause) => {
+            const requestId = c.get("requestId") ?? "";
+            const payload = JSON.stringify({
+              kind: "api_error",
+              code: "internal",
+              message: "event stream subscribe failed",
+              request_id: requestId,
+            });
+            safeEnqueue(
+              encoder.encode(`event: error\ndata: ${payload}\n\n`),
+            );
+            process.stderr.write(
+              `sse: subscribe failed: ${JSON.stringify(cause)}\n`,
+            );
+            try {
+              controller.close();
+            } catch {
+              /* already closed */
+            }
+            return Effect.void;
+          }),
+        );
 
-        await runtime.runPromise(program as Effect.Effect<void, never, never>);
+        // Defensive: the Effect.catchAllCause handler above already emits
+        // the v1 `event: error` frame when the program fails. The
+        // try/catch + .catch around runPromise is a belt-and-suspenders
+        // for any failure that escapes the Effect layer (e.g. a
+        // missing service lookup that throws synchronously rather
+        // than producing a Cause).
+        const rid = c.get("requestId") ?? "";
+        try {
+          const p = runtime.runPromise(program as Effect.Effect<void, never, never>);
+          void p.catch((e: unknown) => {
+            process.stderr.write(
+              `sse: runPromise rejected: ${JSON.stringify(e)}\n`,
+            );
+            const payload = JSON.stringify({
+              kind: "api_error",
+              code: "internal",
+              message: "event stream subscribe failed",
+              request_id: rid,
+            });
+            safeEnqueue(
+              encoder.encode(`event: error\ndata: ${payload}\n\n`),
+            );
+            try {
+              controller.close();
+            } catch {
+              /* already closed */
+            }
+          });
+        } catch (e) {
+          process.stderr.write(
+            `sse: runPromise sync throw: ${JSON.stringify(e)}\n`,
+          );
+          const payload = JSON.stringify({
+            kind: "api_error",
+            code: "internal",
+            message: "event stream subscribe failed",
+            request_id: rid,
+          });
+          safeEnqueue(
+            encoder.encode(`event: error\ndata: ${payload}\n\n`),
+          );
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        }
       },
       cancel() {
         cleanup?.();
