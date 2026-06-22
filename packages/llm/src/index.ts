@@ -29,8 +29,18 @@
 export {
   LlmLive,
   LlmLiveLazy,
+  LlmLiveFromRoute,
+  LlmLiveLazyFromRoute,
   llmShapeFor,
+  gatewayShapeFor,
 } from "./layer.js";
+
+export {
+  gatewayModel,
+  gatewayModelFor,
+  resolveGatewayRoute,
+  type GatewayRoute,
+} from "./gateway.js";
 
 export {
   modelFor,

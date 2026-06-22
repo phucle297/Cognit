@@ -1,5 +1,11 @@
 /**
- * packages/llm/src/provider.ts — multi-provider model factory (C1).
+ * packages/llm/src/provider.ts — LEGACY multi-provider model factory.
+ *
+ * @deprecated Retained for the `--provider` grace period on
+ * `cognit agent run`. New commands (`cognit ask`) and the migrated
+ * supervisor route through `gatewayModel` in `./gateway.js` instead.
+ * Will be deleted once `cognit agent run` no longer accepts
+ * `--provider` (one minor release per spec §4).
  *
  * Pure mapping: `AgentProvider + modelId → LanguageModelV2`. The
  * underlying SDK (`@ai-sdk/anthropic`, `@ai-sdk/openai`,
