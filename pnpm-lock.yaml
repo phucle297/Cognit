@@ -26,6 +26,15 @@ importers:
 
   apps/cli:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^2.0.83
+        version: 2.0.83(zod@4.4.3)
+      '@ai-sdk/google':
+        specifier: ^2.0.76
+        version: 2.0.76(zod@4.4.3)
+      '@ai-sdk/openai':
+        specifier: ^2.0.108
+        version: 2.0.108(zod@4.4.3)
       '@cognit/agent':
         specifier: workspace:*
         version: link:../../packages/agent
@@ -44,6 +53,9 @@ importers:
       '@cognit/wrap':
         specifier: workspace:*
         version: link:../../packages/wrap
+      ai:
+        specifier: ^6.0.208
+        version: 6.0.208(zod@4.4.3)
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -53,6 +65,9 @@ importers:
       effect:
         specifier: 3.21.3
         version: 3.21.3
+      ollama-ai-provider-v2:
+        specifier: ^2.0.0
+        version: 2.0.0(ai@6.0.208(zod@4.4.3))(zod@4.4.3)
       tar:
         specifier: ^7.5.16
         version: 7.5.16

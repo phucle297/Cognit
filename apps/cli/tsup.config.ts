@@ -35,6 +35,13 @@ export default defineConfig({
     "effect",
     "tar",
     "yaml",
+    // AI SDK chain ships CJS internals (@vercel/oidc uses dynamic
+    // require("path")). Keep the whole chain external so Node
+    // resolves them at runtime with native CJS interop.
+    "ai",
+    "ollama-ai-provider-v2",
+    /^@ai-sdk\//,
+    /^@vercel\//,
   ],
   // Inject the shebang on every rebuild so the linked cognit
   // binary runs as node dist/index.js when invoked from any cwd.

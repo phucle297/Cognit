@@ -9,13 +9,13 @@ Cognit records what AI workers **learn**, **try**, **reject**, **verify**, and *
 
 ## 1. What Cognit is (and isn't)
 
-| Cognit is | Cognit is not |
-| --- | --- |
-| Persistent decision layer | Chat history DB |
-| Typed knowledge graph | Agent framework |
-| Event-sourced investigation store | Workflow engine |
-| Worker-agnostic inbox | Backup tool |
-| **AI-supervisor-driven loop** | Manual hypothesis tracker |
+| Cognit is                         | Cognit is not             |
+| --------------------------------- | ------------------------- |
+| Persistent decision layer         | Chat history DB           |
+| Typed knowledge graph             | Agent framework           |
+| Event-sourced investigation store | Workflow engine           |
+| Worker-agnostic inbox             | Backup tool               |
+| **AI-supervisor-driven loop**     | Manual hypothesis tracker |
 
 The supervisor (an AI worker) reads the session state, reasons about it, and emits structured events. **You** do not type hypotheses — the AI does. **You** review what it produced and steer when it goes off course.
 
@@ -28,7 +28,7 @@ Requirements: **Node.js 24 LTS**, **pnpm 9**, **git**.
 ```bash
 pnpm install
 pnpm build
-pnpm link --global
+cd apps/cli/ && pnpm link --global
 ```
 
 Verify:
@@ -230,7 +230,7 @@ In `.claude/settings.json`:
 {
   "hooks": {
     "PostToolUse": "cognit observation add",
-    "PreToolUse":  "cognit hypothesis add"
+    "PreToolUse": "cognit hypothesis add"
   }
 }
 ```
@@ -284,21 +284,21 @@ The reducer applies the AI score to the target hypothesis. `linked_hypothesis_id
 
 ## 7. Core concepts in one screen
 
-| Concept | What it is |
-| --- | --- |
-| **Project** | One per repo (one per `.cognit/`). |
-| **Session** | One investigation / engineering goal. Forkable from a previous session via `cognit session resume`. |
-| **Actor** | Source of an event: `human`, `worker` (Claude Code, Codex, OpenCode, Gemini CLI, `ai-supervisor`, …), or `system`. Each has a trust score. |
-| **Observation** | Raw fact — captured by `cognit wrap` or `cognit observation add`. |
-| **Finding** | Interpretation of one or more observations. |
-| **Hypothesis** | Testable claim. Lifecycle: `active → weakened \| rejected \| promoted`. Rejection carries a `reason_type`: `evidence \| superseded \| constraint`. Carries an optional `ai_rank_score` (v1.2.0). |
-| **Theory** | Group of related hypotheses. First-class — can be merged or archived. |
-| **Experiment** | A test. Always linked via a `tests` edge to the hypothesis it tests. |
-| **Conclusion** | Verified claim. Must be backed by at least one passed verification. |
-| **Decision** | Action commitment, `based_on` one or more conclusions. |
-| **Verification** | Reproducible run of a command (build, test, lint, typecheck, benchmark, custom). Lifecycle: `started → passed \| failed \| errored \| cancelled`. |
-| **Edge** | Typed relationship (`tests`, `supports`, `contradicts`, `supersedes`, `caused`, `based_on`, `belongs_to`, `derived_from`, `references`). |
-| **Artifact** | Evidence file, addressed by sha256 (terminal logs, screenshots, diffs). |
+| Concept          | What it is                                                                                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Project**      | One per repo (one per `.cognit/`).                                                                                                                                                               |
+| **Session**      | One investigation / engineering goal. Forkable from a previous session via `cognit session resume`.                                                                                              |
+| **Actor**        | Source of an event: `human`, `worker` (Claude Code, Codex, OpenCode, Gemini CLI, `ai-supervisor`, …), or `system`. Each has a trust score.                                                       |
+| **Observation**  | Raw fact — captured by `cognit wrap` or `cognit observation add`.                                                                                                                                |
+| **Finding**      | Interpretation of one or more observations.                                                                                                                                                      |
+| **Hypothesis**   | Testable claim. Lifecycle: `active → weakened \| rejected \| promoted`. Rejection carries a `reason_type`: `evidence \| superseded \| constraint`. Carries an optional `ai_rank_score` (v1.2.0). |
+| **Theory**       | Group of related hypotheses. First-class — can be merged or archived.                                                                                                                            |
+| **Experiment**   | A test. Always linked via a `tests` edge to the hypothesis it tests.                                                                                                                             |
+| **Conclusion**   | Verified claim. Must be backed by at least one passed verification.                                                                                                                              |
+| **Decision**     | Action commitment, `based_on` one or more conclusions.                                                                                                                                           |
+| **Verification** | Reproducible run of a command (build, test, lint, typecheck, benchmark, custom). Lifecycle: `started → passed \| failed \| errored \| cancelled`.                                                |
+| **Edge**         | Typed relationship (`tests`, `supports`, `contradicts`, `supersedes`, `caused`, `based_on`, `belongs_to`, `derived_from`, `references`).                                                         |
+| **Artifact**     | Evidence file, addressed by sha256 (terminal logs, screenshots, diffs).                                                                                                                          |
 
 The graph that matters:
 
@@ -383,16 +383,16 @@ cognit dashboard
 
 Opens `http://localhost:6970` (default).
 
-| Page | Shows |
-| --- | --- |
-| **Overview** | Goal, confidence, progress, current strongest hypothesis, latest verification. |
-| **Timeline** | Event stream evolution. Filterable by type and actor. |
-| **Knowledge Graph** | All entities as nodes, all edge types as links. Toggle free / physics layout. |
-| **Decision Graph** | Decisions with `based_on` → conclusions and `caused` → experiments. |
-| **Verification** | All verifications with rerun history. |
-| **Recovery Center** | Rejected hypotheses (with reason), verified conclusions, accepted decisions, suggested next steps. |
-| **AI Reasoning** | Live SSE feed of `hypothesis_ranked` events, AI rank history, decision log. Compare AI score vs rule-based score per hypothesis. |
-| **Settings** | Project config, redaction patterns, cleanup policy, storage usage, export/import. |
+| Page                | Shows                                                                                                                            |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview**        | Goal, confidence, progress, current strongest hypothesis, latest verification.                                                   |
+| **Timeline**        | Event stream evolution. Filterable by type and actor.                                                                            |
+| **Knowledge Graph** | All entities as nodes, all edge types as links. Toggle free / physics layout.                                                    |
+| **Decision Graph**  | Decisions with `based_on` → conclusions and `caused` → experiments.                                                              |
+| **Verification**    | All verifications with rerun history.                                                                                            |
+| **Recovery Center** | Rejected hypotheses (with reason), verified conclusions, accepted decisions, suggested next steps.                               |
+| **AI Reasoning**    | Live SSE feed of `hypothesis_ranked` events, AI rank history, decision log. Compare AI score vs rule-based score per hypothesis. |
+| **Settings**        | Project config, redaction patterns, cleanup policy, storage usage, export/import.                                                |
 
 If port `6970` is busy: `--port <n>`. The API server runs separately on `6971` (read-only Hono on loopback).
 
@@ -446,13 +446,13 @@ cognit verify fail --id <verification-id>
 cognit verify rerun --parent <verification-id> --command "..." --type test
 ```
 
-| State | Meaning |
-| --- | --- |
-| `started` | Running. |
-| `passed` | Exit code 0. |
-| `failed` | Exit code ≠ 0. |
-| `errored` | Could not even run (ENOENT, EACCES, EPERM). |
-| `cancelled` | SIGINT / SIGTERM. |
+| State       | Meaning                                     |
+| ----------- | ------------------------------------------- |
+| `started`   | Running.                                    |
+| `passed`    | Exit code 0.                                |
+| `failed`    | Exit code ≠ 0.                              |
+| `errored`   | Could not even run (ENOENT, EACCES, EPERM). |
+| `cancelled` | SIGINT / SIGTERM.                           |
 
 `failed` and `errored` are different on purpose — distinguish "code under test broke" from "harness couldn't run". Output > 1 KB is captured as a sha256-keyed artifact under `.cognit/artifacts/`.
 
@@ -494,11 +494,11 @@ cognit import --input investigation-2026-06-12.tar.gz --merge-strategy skip
 
 Merge strategies:
 
-| Strategy | On collision |
-| --- | --- |
-| `skip` (default) | Keep local, drop imported. Safe to re-run. |
-| `overwrite` | Replace local with imported. |
-| `fork` | Rewrite every imported id and remap FK columns. Both sides survive. |
+| Strategy         | On collision                                                        |
+| ---------------- | ------------------------------------------------------------------- |
+| `skip` (default) | Keep local, drop imported. Safe to re-run.                          |
+| `overwrite`      | Replace local with imported.                                        |
+| `fork`           | Rewrite every imported id and remap FK columns. Both sides survive. |
 
 Bundle contents: `manifest.json`, `cognit.yaml`, `cognit.db`, optionally `artifacts/`.
 
@@ -585,7 +585,7 @@ cognit wrap -- <command> [args...]
 
 ```yaml
 project:
-  name: my-project   # set automatically from directory name at init
+  name: my-project # set automatically from directory name at init
 
 redaction:
   enabled: true
@@ -596,7 +596,7 @@ redaction:
 
 cleanup:
   artifact_max_age_days: 30
-  unreferenced_action: archive  # archive | delete | keep
+  unreferenced_action: archive # archive | delete | keep
   max_db_size_mb: 1024
 
 session:
@@ -633,7 +633,7 @@ gravity:
 
 # supervisor loop config (C2)
 agent:
-  provider: mock          # mock | anthropic | openai | google | ollama
+  provider: mock # mock | anthropic | openai | google | ollama
   model: mock-1
   max_actions_per_tick: 5 # 0 = rank-only ticks
   max_prompt_hypotheses: 50
@@ -719,37 +719,37 @@ docker compose down -v && docker compose up -d
 
 ## 18. Troubleshooting
 
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `command not found: cognit` | `pnpm link` not run, or PATH missing global bin | `pnpm link --global` and check `pnpm bin -g` |
-| `no current session` | Sticky pointer unset | `cognit session create "..."` or pass `--session <id>` |
-| Dashboard won't open | Port `6970` taken | `cognit dashboard --port 7770` |
-| Worker events not picked up | File written without atomic rename | Write `.tmp`, `fsync`, then `mv` to `.json` |
-| `hypothesis_ranked` ignored | Target hypothesis missing (orphan rank) | Check session state; ensure `hypothesis_created` precedes rank |
-| AI score clamped or fallback used | Out-of-range or non-finite `score` | Verify LLM output is finite number in `[0, 1]` |
-| Supervisor errors on first tick | Missing API key for chosen provider | Export the matching env var or use `--provider mock` |
-| Secret in old event | Redaction is ingest-only | Restore from earlier `cognit export`, re-import |
-| `cognit recovery --session <id>` rejected | Subcommand takes positional `<session-id>`, not `--session` | `cognit recovery <session-id>` |
-| Migration error on start | Schema version drift | Inspect `.cognit/cognit.db`; re-init if local-only |
+| Symptom                                   | Cause                                                       | Fix                                                            |
+| ----------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------- |
+| `command not found: cognit`               | `pnpm link` not run, or PATH missing global bin             | `pnpm link --global` and check `pnpm bin -g`                   |
+| `no current session`                      | Sticky pointer unset                                        | `cognit session create "..."` or pass `--session <id>`         |
+| Dashboard won't open                      | Port `6970` taken                                           | `cognit dashboard --port 7770`                                 |
+| Worker events not picked up               | File written without atomic rename                          | Write `.tmp`, `fsync`, then `mv` to `.json`                    |
+| `hypothesis_ranked` ignored               | Target hypothesis missing (orphan rank)                     | Check session state; ensure `hypothesis_created` precedes rank |
+| AI score clamped or fallback used         | Out-of-range or non-finite `score`                          | Verify LLM output is finite number in `[0, 1]`                 |
+| Supervisor errors on first tick           | Missing API key for chosen provider                         | Export the matching env var or use `--provider mock`           |
+| Secret in old event                       | Redaction is ingest-only                                    | Restore from earlier `cognit export`, re-import                |
+| `cognit recovery --session <id>` rejected | Subcommand takes positional `<session-id>`, not `--session` | `cognit recovery <session-id>`                                 |
+| Migration error on start                  | Schema version drift                                        | Inspect `.cognit/cognit.db`; re-init if local-only             |
 
 ---
 
 ## 19. Architecture at a glance
 
-| Package | Role |
-| --- | --- |
-| `@cognit/core` | Domain types, Effect Schema, reducer, redaction, Effect services. |
-| `@cognit/db` | Drizzle ORM, `appendEvent` (single redaction boundary), inbox watcher. |
-| `@cognit/gravity` | Pure scoring fn + AI-rank override (v1.2.0). |
-| `@cognit/agent` | Effect supervisor loop, prompt builder, `AgentDecision` schema, apply step. |
-| `@cognit/llm` | Vercel AI SDK provider layer (Anthropic / OpenAI / Google / Ollama). |
+| Package                | Role                                                                                         |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| `@cognit/core`         | Domain types, Effect Schema, reducer, redaction, Effect services.                            |
+| `@cognit/db`           | Drizzle ORM, `appendEvent` (single redaction boundary), inbox watcher.                       |
+| `@cognit/gravity`      | Pure scoring fn + AI-rank override (v1.2.0).                                                 |
+| `@cognit/agent`        | Effect supervisor loop, prompt builder, `AgentDecision` schema, apply step.                  |
+| `@cognit/llm`          | Vercel AI SDK provider layer (Anthropic / OpenAI / Google / Ollama).                         |
 | `@cognit/verification` | Subprocess engine: spawn, capture, 1 MB truncation, sha256 artifact, terminal-event mapping. |
-| `@cognit/wrap` | Producer of inbox envelopes for `cognit wrap -- <cmd>`. |
-| `@cognit/sdk` | Programmatic API for workers. |
-| `@cognit/recovery` | v0.2 recovery envelope + fuzzy search. |
-| `apps/cli` | `cognit` binary — commander command tree, layer build. |
-| `apps/server` | Hono read API on loopback `:6971`. |
-| `apps/dashboard` | Vite + React 19 SPA on `:6970`. |
+| `@cognit/wrap`         | Producer of inbox envelopes for `cognit wrap -- <cmd>`.                                      |
+| `@cognit/sdk`          | Programmatic API for workers.                                                                |
+| `@cognit/recovery`     | v0.2 recovery envelope + fuzzy search.                                                       |
+| `apps/cli`             | `cognit` binary — commander command tree, layer build.                                       |
+| `apps/server`          | Hono read API on loopback `:6971`.                                                           |
+| `apps/dashboard`       | Vite + React 19 SPA on `:6970`.                                                              |
 
 ---
 
