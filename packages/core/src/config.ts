@@ -163,6 +163,75 @@ export const GravityConfig = GravityConfigBase.pipe(
 );
 type GravityConfig = Schema.Schema.Type<typeof GravityConfig>;
 
+// --- llm (Gateway routing, phase 9) -------------------------------------
+
+/**
+ * Env-var name (must be a non-empty string, max 256 chars). The
+ * Gateway SDK reads `AI_GATEWAY_API_KEY` by default; per-model
+ * overrides point at direct provider keys (Anthropic, OpenAI,
+ * Google, DashScope, etc.) but routing still flows through
+ * `gateway(model)` from `@ai-sdk/gateway`.
+ */
+const EnvVarName = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256));
+
+/**
+ * Gateway model id (e.g. `MiniMax/MiniMax-M3`,
+ * `anthropic/claude-sonnet-4-6`). Format: `<provider>/<id>`.
+ * Free-form — the Gateway catalog validates at call time.
+ */
+const ModelId = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256));
+
+/**
+ * Per-model override. Currently only `api_key_env` — routing still
+ * flows through Gateway regardless of which key is used. Add fields
+ * here as new per-model options appear (temperature cap, region,
+ * etc.) without touching the top-level `LlmConfig`.
+ */
+const LlmModelOverride = Schema.Struct({
+  api_key_env: EnvVarName,
+});
+type LlmModelOverride = Schema.Schema.Type<typeof LlmModelOverride>;
+
+/**
+ * Per-command model override. Fall back to `llm.default_model` when
+ * absent. Optional so commands can be added one at a time without a
+ * schema migration.
+ */
+const LlmCommandConfig = Schema.Struct({
+  model: Schema.optional(ModelId),
+});
+type LlmCommandConfig = Schema.Schema.Type<typeof LlmCommandConfig>;
+
+/**
+ * Top-level LLM block. All fields optional — a project with no LLM
+ * config simply errors at first call (see config-resolver). Defaults
+ * baked here so the most common case (`AI_GATEWAY_API_KEY` env,
+ * no default model) needs zero YAML.
+ *
+ * Spec: docs/superpowers/specs/2026-06-22-gateway-multimodal-design.md §1.
+ */
+export const LlmConfig = Schema.Struct({
+  api_key_env: Schema.optionalWith(EnvVarName, { default: () => "AI_GATEWAY_API_KEY" }),
+  default_model: Schema.optional(ModelId),
+  models: Schema.optionalWith(
+    Schema.Record({ key: Schema.String, value: LlmModelOverride }),
+    { default: () => ({}) as Record<string, LlmModelOverride> },
+  ),
+  commands: Schema.optionalWith(
+    Schema.Struct({
+      ask: Schema.optional(LlmCommandConfig),
+      agent_run: Schema.optional(LlmCommandConfig),
+    }),
+    {
+      default: () => ({}) as {
+        ask?: LlmCommandConfig;
+        agent_run?: LlmCommandConfig;
+      },
+    },
+  ),
+});
+export type LlmConfig = Schema.Schema.Type<typeof LlmConfig>;
+
 // --- top-level -----------------------------------------------------------
 
 export const CognitConfigSchema = Schema.Struct({
@@ -204,10 +273,13 @@ export const CognitConfigSchema = Schema.Struct({
         },
       }) as const,
   }),
+  llm: Schema.optionalWith(LlmConfig, {
+    default: () => ({ api_key_env: "AI_GATEWAY_API_KEY", models: {}, commands: {} }) as LlmConfig,
+  }),
 });
 
 export type CognitConfig = Schema.Schema.Type<typeof CognitConfigSchema>;
-export type { RedactionPattern, UnreferencedAction, ActorKnown };
+export type { RedactionPattern, UnreferencedAction, ActorKnown, LlmModelOverride, LlmCommandConfig };
 
 /**
  * Parse and validate unknown input as a Cognit config. Throws on bad input.

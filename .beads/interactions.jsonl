@@ -103,3 +103,4 @@
 {"id":"int-d8871950","kind":"field_change","created_at":"2026-06-22T07:36:38.393844921Z","actor":"PerMees","issue_id":"Cognit-005","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-611192a7","kind":"field_change","created_at":"2026-06-22T07:36:39.48817923Z","actor":"PerMees","issue_id":"Cognit-i0g","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-946afe84","kind":"field_change","created_at":"2026-06-22T07:36:41.82847935Z","actor":"PerMees","issue_id":"Cognit-eec","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-4eb0534f","kind":"field_change","created_at":"2026-06-22T12:52:34.583904649Z","actor":"PerMees","issue_id":"Cognit-jch","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}

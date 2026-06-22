@@ -51,4 +51,71 @@ describe("cognit.yaml schema", () => {
     const longName = "x".repeat(129);
     expect(() => parseCognitConfig({ project: { name: longName } })).toThrow();
   });
+
+  describe("llm block", () => {
+    it("defaults api_key_env to AI_GATEWAY_API_KEY when llm omitted", () => {
+      const cfg = defaultConfig("x");
+      expect(cfg.llm.api_key_env).toBe("AI_GATEWAY_API_KEY");
+      expect(cfg.llm.models).toEqual({});
+      expect(cfg.llm.commands).toEqual({});
+      expect(cfg.llm.default_model).toBeUndefined();
+    });
+
+    it("accepts the full spec §1 example", () => {
+      const parsed = parseCognitConfig({
+        project: { name: "x" },
+        llm: {
+          api_key_env: "AI_GATEWAY_API_KEY",
+          default_model: "MiniMax/MiniMax-M3",
+          models: {
+            "anthropic/claude-sonnet-4-6": { api_key_env: "ANTHROPIC_API_KEY" },
+            "glm/glm-4-plus": { api_key_env: "GLM_API_KEY" },
+            "qwen/qwen-3-max": { api_key_env: "DASHSCOPE_API_KEY" },
+            "openai/gpt-4o": { api_key_env: "OPENAI_API_KEY" },
+          },
+          commands: {
+            ask: { model: "MiniMax/MiniMax-M3" },
+            agent_run: { model: "anthropic/claude-sonnet-4-6" },
+          },
+        },
+      });
+      expect(parsed.llm.default_model).toBe("MiniMax/MiniMax-M3");
+      expect(parsed.llm.models["anthropic/claude-sonnet-4-6"]?.api_key_env).toBe(
+        "ANTHROPIC_API_KEY",
+      );
+      expect(parsed.llm.commands.ask?.model).toBe("MiniMax/MiniMax-M3");
+      expect(parsed.llm.commands.agent_run?.model).toBe("anthropic/claude-sonnet-4-6");
+    });
+
+    it("rejects empty api_key_env", () => {
+      expect(() =>
+        parseCognitConfig({ project: { name: "x" }, llm: { api_key_env: "" } }),
+      ).toThrow();
+    });
+
+    it("rejects empty default_model", () => {
+      expect(() =>
+        parseCognitConfig({ project: { name: "x" }, llm: { default_model: "" } }),
+      ).toThrow();
+    });
+
+    it("rejects empty per-model api_key_env", () => {
+      expect(() =>
+        parseCognitConfig({
+          project: { name: "x" },
+          llm: { models: { "anthropic/claude-sonnet-4-6": { api_key_env: "" } } },
+        }),
+      ).toThrow();
+    });
+
+    it("accepts partial llm block (commands only)", () => {
+      const parsed = parseCognitConfig({
+        project: { name: "x" },
+        llm: { commands: { ask: { model: "anthropic/claude-sonnet-4-6" } } },
+      });
+      expect(parsed.llm.api_key_env).toBe("AI_GATEWAY_API_KEY");
+      expect(parsed.llm.commands.ask?.model).toBe("anthropic/claude-sonnet-4-6");
+      expect(parsed.llm.commands.agent_run).toBeUndefined();
+    });
+  });
 });
