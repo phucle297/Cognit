@@ -1,0 +1,32 @@
+{
+  "name": "@cognit/llm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "echo \"llm: no build (consume TS source directly)\"",
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^2.0.0",
+    "@ai-sdk/google": "^2.0.0",
+    "@ai-sdk/openai": "^2.0.0",
+    "@cognit/agent": "workspace:*",
+    "@cognit/core": "workspace:*",
+    "ai": "^6.0.0",
+    "effect": "3.21.3",
+    "ollama-ai-provider-v2": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "vitest": "^4.1.9"
+  }
+}

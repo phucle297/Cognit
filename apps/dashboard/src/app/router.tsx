@@ -21,6 +21,7 @@ import { TimelinePage } from "@/pages/timeline";
 import { KnowledgeGraphPage } from "@/pages/knowledge-graph";
 import { DecisionGraphPage } from "@/pages/decision-graph";
 import { VerificationPage } from "@/pages/verification";
+import { AiReasoningPage } from "@/pages/ai-reasoning";
 import { SettingsPage } from "@/pages/settings";
 import { Skeleton } from "@/shared/ui/skeleton";
 
@@ -51,6 +52,7 @@ export const router = createBrowserRouter(
         { path: "/knowledge-graph", element: <KnowledgeGraphPage /> },
         { path: "/decision-graph", element: <DecisionGraphPage /> },
         { path: "/verification", element: <VerificationPage /> },
+        { path: "/ai-reasoning", element: <AiReasoningPage /> },
         { path: "/recovery-center", element: withSuspense(<RecoveryCenterPage />) },
         { path: "/rules", element: withSuspense(<RulesPage />) },
         { path: "/settings", element: <SettingsPage /> },

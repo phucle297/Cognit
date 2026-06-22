@@ -43,12 +43,30 @@ import { EventBus } from "./bus.js";
 import {
   listRecentAcrossProjectE,
   listAfterEventAcrossProjectE,
+  listRecentForSessionTypedE,
+  listAfterEventForSessionTypedE,
 } from "./event-queries.js";
 import type { ServerRuntime } from "./routes/sessions.js";
 
 export interface SseOptions {
   /** Project id to scope the replay query. */
   readonly projectId: string;
+  /**
+   * When set, the replay AND live drain scope to this session only.
+   * Live rows whose `session_id` does not match are dropped before
+   * they hit the wire. Combined with `types`, this gives a small
+   * per-tab feed (e.g. AI-reasoning tab only sees its own session's
+   * `hypothesis_ranked` events).
+   */
+  readonly sessionId?: string;
+  /**
+   * Optional set of event types to forward. When set, the replay
+   * only replays events of these types AND the live drain drops
+   * anything else. Empty array would forward nothing; the SSE
+   * handler treats an empty array the same as "unset" (forwards
+   * everything, scoped only by `sessionId`).
+   */
+  readonly types?: ReadonlyArray<string>;
   /** How many recent events to replay before switching to live. */
   readonly replayLimit?: number;
   /** SSE frame name (used as `event:` field). Defaults to "event". */
@@ -75,10 +93,23 @@ export const sseHandler = (runtime: ServerRuntime, opts: SseOptions) => {
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
   const retryMs = opts.retryMs ?? DEFAULT_RETRY_MS;
   const projectId = opts.projectId;
+  const sessionId = opts.sessionId;
+  // `types` with length 0 is treated as "unset" so the existing
+  // global stream (`sseHandler(runtime, { projectId })`) keeps its
+  // behaviour — it does not pass `types`, so `opts.types` is
+  // `undefined`. Callers that want a typed stream pass a non-empty
+  // array.
+  const types = opts.types && opts.types.length > 0 ? opts.types : null;
 
   return async (c: Context): Promise<Response> => {
     const encoder = new TextEncoder();
-    const lastEventIdRaw = c.req.header("last-event-id");
+    // Accept either the standard `Last-Event-ID` header (used by
+    // native EventSource on reconnect) OR the `?last_event_id=`
+    // query string (the dashboard's use-event-source hook appends
+    // this because the native API can't set the header on a fresh
+    // connection — see apps/dashboard/src/shared/api/use-event-source.ts).
+    const lastEventIdRaw =
+      c.req.header("last-event-id") ?? c.req.query("last_event_id");
     const lastEventId = isString(lastEventIdRaw) ? lastEventIdRaw : null;
 
     const format = (row: EventRow) =>
@@ -106,19 +137,50 @@ export const sseHandler = (runtime: ServerRuntime, opts: SseOptions) => {
 
         const program = Effect.gen(function* () {
           // Replay: cursor-aware if Last-Event-ID present, else tail.
-          const replay = lastEventId
-            ? yield* listAfterEventAcrossProjectE(projectId, lastEventId, replayLimit)
-            : yield* listRecentAcrossProjectE(projectId, replayLimit);
+          // Scoped to (sessionId, types) when both are set; otherwise
+          // falls back to the project-wide tail so the global stream
+          // behaviour is unchanged.
+          let replay: ReadonlyArray<EventRow>;
+          if (sessionId !== undefined && types !== null) {
+            replay = lastEventId
+              ? yield* listAfterEventForSessionTypedE(
+                  sessionId,
+                  types,
+                  lastEventId,
+                  replayLimit,
+                )
+              : yield* listRecentForSessionTypedE(
+                  sessionId,
+                  types,
+                  replayLimit,
+                );
+          } else {
+            replay = lastEventId
+              ? yield* listAfterEventAcrossProjectE(projectId, lastEventId, replayLimit)
+              : yield* listRecentAcrossProjectE(projectId, replayLimit);
+          }
           for (const r of replay) safeEnqueue(format(r));
 
           // Subscribe to bus for live delivery.
           const bus = yield* EventBus;
           const { queue, unsub } = yield* bus.subscribe();
 
-          // Drain loop: forward every new row.
+          // Live drain. When `sessionId` or `types` is set, we filter
+          // rows in JS before enqueueing. The bus publishes every
+          // project event to every subscriber — re-subscribing per
+          // type would need bus surgery, and the dashboard tabs that
+          // consume this are O(sessions open at once), not O(events).
+          const matches = (row: EventRow): boolean => {
+            if (sessionId !== undefined && row.session_id !== sessionId) return false;
+            if (types !== null && !types.includes(row.type)) return false;
+            return true;
+          };
+
+          // Drain loop: forward every new row that passes the filter.
           const drain = Effect.gen(function* () {
             while (true) {
               const row = yield* Queue.take(queue);
+              if (!matches(row)) continue;
               safeEnqueue(format(row));
             }
           });

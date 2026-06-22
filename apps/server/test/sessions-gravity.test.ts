@@ -18,7 +18,12 @@ interface GravityResp {
     readonly ranked: ReadonlyArray<{
       readonly id: string;
       readonly text: string;
+      readonly title: string;
       readonly score: number;
+      readonly source: "ai" | "rule";
+      readonly ai_score: number | null;
+      readonly rule_score: number | null;
+      readonly delta: number | null;
     }>;
   };
 }

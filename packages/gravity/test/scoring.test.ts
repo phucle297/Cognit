@@ -436,6 +436,173 @@ describe("rankHypotheses", () => {
   });
 });
 
+/**
+ * v1.2.0 AI-rank override: a hypothesis with a recorded
+ * `ai_rank_score` is ranked by that score, not the 5-axis formula.
+ * The formula is the fallback for hypotheses the supervisor has
+ * not yet scored. `source` on each row marks which path produced it.
+ */
+describe("rankHypotheses — AI rank override (v1.2.0)", () => {
+  const buildState = (hypotheses: ReadonlyArray<HypothesisState>): SessionState => {
+    const s = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    const m = new Map<string, HypothesisState>();
+    for (const h of hypotheses) m.set(h.id, h);
+    return { ...s, hypotheses: m };
+  };
+
+  const baseActive = (id: string, overrides: Partial<HypothesisState> = {}): HypothesisState => ({
+    id,
+    title: id,
+    text: id,
+    current_state: "active",
+    current_confidence: null,
+    current_reason: null,
+    reason_type: null,
+    superseded_by_id: null,
+    promoted_to_theory_id: null,
+    belongs_to_theory_id: null,
+    created_at: "2026-06-19T00:00:00.000Z",
+    last_event_id: id,
+    last_event_at: "2026-06-19T00:00:00.000Z",
+    gravity_fired_at: 1_700_000_000,
+    ai_rank_score: null,
+    ai_rank_reasoning: null,
+    ai_rank_evaluator: null,
+    ai_rank_at: null,
+    ai_rank_event_id: null,
+    ...overrides,
+  });
+
+  it("uses AI rank when present, ignores formula even if formula would rank higher", () => {
+    // Two hypotheses: H-1 has formula inputs that would produce 1.0
+    // (full evidence/actors/freshness) but the AI ranked it 0.2.
+    // H-2 has empty inputs so formula gives 0 but AI ranked it 0.9.
+    // AI wins: H-2 ranks first, H-1 second.
+    const state = buildState([
+      baseActive("H-1", { ai_rank_score: 0.2, ai_rank_reasoning: "low", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev1" }),
+      baseActive("H-2", { ai_rank_score: 0.9, ai_rank_reasoning: "high", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev2" }),
+    ]);
+    const out = rankHypotheses(
+      state,
+      baseCfg(),
+      new Map<string, ReadonlyArray<ContributingActor>>([
+        // H-1 has high-trust actors (would push formula up)
+        ["H-1", [{ actor_id: "a", trust_score: 1.0 }]],
+        ["H-2", []],
+      ]),
+      new Map([
+        ["H-1", 1_700_000_000],
+        ["H-2", 1_700_000_000],
+      ]),
+      1_700_000_000,
+    );
+    expect(out.map((h) => h.id)).toEqual(["H-2", "H-1"]);
+    expect(out[0]?.source).toBe("ai");
+    expect(out[1]?.source).toBe("ai");
+  });
+
+  it("ai_rank_score = 0 still overrides formula (null ≠ 0)", () => {
+    // H-1 has no AI rank, so the formula decides it (full inputs -> 1.0).
+    // H-2 has ai_rank_score = 0, which is a real rank — H-2 must rank last.
+    const state = buildState([
+      baseActive("H-1"),
+      baseActive("H-2", { ai_rank_score: 0, ai_rank_reasoning: "reject", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev2" }),
+    ]);
+    const out = rankHypotheses(
+      state,
+      baseCfg(),
+      new Map<string, ReadonlyArray<ContributingActor>>([
+        ["H-1", [{ actor_id: "a", trust_score: 1.0 }]],
+        ["H-2", []],
+      ]),
+      new Map([
+        ["H-1", 1_700_000_000],
+        ["H-2", 1_700_000_000],
+      ]),
+      1_700_000_000,
+    );
+    expect(out.map((h) => h.id)).toEqual(["H-1", "H-2"]);
+    expect(out[1]?.score).toBe(0);
+    expect(out[1]?.source).toBe("ai");
+  });
+
+  it("out-of-range ai_rank_score is clamped defensively to [0, 1]", () => {
+    const state = buildState([
+      baseActive("H-1", { ai_rank_score: 1.7, ai_rank_reasoning: "x", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev1" }),
+      baseActive("H-2", { ai_rank_score: -0.3, ai_rank_reasoning: "y", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev2" }),
+    ]);
+    const out = rankHypotheses(
+      state,
+      baseCfg(),
+      new Map(),
+      new Map([
+        ["H-1", 1_700_000_000],
+        ["H-2", 1_700_000_000],
+      ]),
+      1_700_000_000,
+    );
+    expect(out[0]?.id).toBe("H-1");
+    expect(out[0]?.score).toBe(1);
+    expect(out[1]?.score).toBe(0);
+    expect(out[0]?.source).toBe("ai");
+    expect(out[1]?.source).toBe("ai");
+  });
+
+  it("mixes AI and rule: unranked hypotheses fall back to formula", () => {
+    // H-1 has no AI rank -> formula: 1 actor (trust=1) + freshness=1
+    //   => trust 0.10 + freshness 0.10 = 0.20.
+    // H-2 has AI rank 0.3.
+    // H-2 (0.3) > H-1 (0.20) — AI rank wins despite the formula
+    // having more axes available for H-1. The override is full-rank,
+    // not a tiebreaker: AI rank is the score, period.
+    const state = buildState([
+      baseActive("H-1"),
+      baseActive("H-2", { ai_rank_score: 0.3, ai_rank_reasoning: "r", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev2" }),
+    ]);
+    const out = rankHypotheses(
+      state,
+      baseCfg(),
+      new Map<string, ReadonlyArray<ContributingActor>>([
+        ["H-1", [{ actor_id: "a", trust_score: 1.0 }]],
+        ["H-2", []],
+      ]),
+      new Map([
+        ["H-1", 1_700_000_000],
+        ["H-2", 1_700_000_000],
+      ]),
+      1_700_000_000,
+    );
+    expect(out.map((h) => h.id)).toEqual(["H-2", "H-1"]);
+    expect(out[0]?.source).toBe("ai");
+    expect(out[1]?.source).toBe("rule");
+  });
+
+  it("non-finite ai_rank_score (NaN) falls back to formula rather than poisoning the rank", () => {
+    const state = buildState([
+      baseActive("H-1"),
+      baseActive("H-2", { ai_rank_score: Number.NaN, ai_rank_reasoning: "x", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev2" }),
+    ]);
+    const out = rankHypotheses(
+      state,
+      baseCfg(),
+      new Map<string, ReadonlyArray<ContributingActor>>([
+        ["H-1", []],
+        ["H-2", [{ actor_id: "a", trust_score: 1.0 }]],
+      ]),
+      new Map([
+        ["H-1", 1_700_000_000],
+        ["H-2", 1_700_000_000],
+      ]),
+      1_700_000_000,
+    );
+    // H-2 has high-trust actor, formula scores it higher than H-1.
+    // NaN rank must NOT win — fallback to formula.
+    expect(out[0]?.id).toBe("H-2");
+    expect(out[0]?.source).toBe("rule");
+    expect(out[1]?.source).toBe("rule");
+  });
+});
+
 describe("determinism", () => {
   it("6. 1000 iterations of the same input -> identical output", () => {
     const input = {

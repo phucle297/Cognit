@@ -36,6 +36,9 @@ import {
   VerificationQueries,
   Uuid,
   UuidLive,
+  ActorDefaults,
+  ActorDefaultsBuiltIn,
+  actorDefaultsLayer,
 } from "@cognit/db";
 import { EventBus, EventBusLive } from "../src/bus.js";
 import { registerHealthz } from "../src/routes/healthz.js";
@@ -61,7 +64,8 @@ type TestContext =
   | GravityQueries
   | EventBus
   | Logger
-  | Uuid;
+  | Uuid
+  | ActorDefaults;
 
 export interface TestApp {
   readonly app: Hono;
@@ -127,7 +131,12 @@ const buildRuntime = async (
 }> => {
   const appLayer = Layer.provideMerge(
     DbLive(dbPath, SessionPolicyDefault),
-    Layer.mergeAll(EventBusLive, LoggerNoop, UuidLive),
+    Layer.mergeAll(
+      EventBusLive,
+      LoggerNoop,
+      UuidLive,
+      actorDefaultsLayer(ActorDefaultsBuiltIn),
+    ),
   );
   // `ManagedRuntime.make` is synchronous in effect@3.21 — it returns
   // the ManagedRuntime object directly, which has `runPromise` and

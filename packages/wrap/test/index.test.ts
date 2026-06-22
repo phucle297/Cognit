@@ -28,10 +28,16 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { Effect } from "effect";
-import { mkdtemp, rm, readFile, readdir, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, readdir, stat } from "node:fs/promises";
+import { writeFileSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+
+// (No file-level fs mock needed: the mode-0o600 test inspects the
+// final published file — `renameSync` preserves the source inode's
+// mode bits, so the file at the target path keeps the 0o600 set by
+// `openSync(tmpPath, "wx", 0o600)`. See test body for rationale.)
 import {
   runWrap,
   appendInboxEnvelope,
@@ -124,6 +130,128 @@ describe("atomicWriteJson — AC 9.2.1 atomic-write helper", () => {
     expect(writes).toHaveLength(50);
     const entries = await readdir(inboxDir);
     expect(entries.sort()).toEqual(Array.from({ length: 50 }, (_, i) => `f${i}.json`).sort());
+  });
+
+  it("refuses to open an existing .tmp (O_EXCL/EEXIST) — does not silently truncate", async () => {
+    // Simulate a prior crash leaving a stale `.tmp` on disk, or an
+    // attacker who has planted a symlink at the temp path. The
+    // `"wx"` flag is `O_CREAT | O_EXCL | O_WRONLY` — opening MUST
+    // fail with EEXIST rather than silently truncating and
+    // overwriting the existing file.
+    //
+    // (Note: on failure, the helper best-effort `unlinkSync`s the
+    // temp path — that's the documented cleanup contract. So we do
+    // NOT assert the stale `.tmp` survives; we assert (a) the call
+    // fails with a wrapper that mentions EEXIST, (b) the final
+    // target path was NOT created (no rename ran), and (c) the
+    // helper cleaned up the stale `.tmp` so a retry is safe.)
+    await mkdir(inboxDir, { recursive: true, mode: 0o700 });
+    const filePath = join(inboxDir, "stale.json");
+    const tmpPath = `${filePath}.tmp`;
+    const staleMarker = "stale-content-from-prior-crash";
+    writeFileSync(tmpPath, staleMarker);
+
+    const result = await Effect.runPromise(
+      Effect.either(atomicWriteJson({ path: filePath, contents: "{\"fresh\":true}" })),
+    );
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      // The error message must surface EEXIST (or the documented
+      // "temp write/fsync failed" wrapper). The wrapper must not
+      // swallow the underlying errno.
+      const message = (result.left as Error).message;
+      expect(message).toMatch(/EEXIST|temp write\/fsync failed/);
+    }
+
+    // The final path must not exist (the rename never ran).
+    const entries = await readdir(inboxDir);
+    expect(entries).not.toContain("stale.json");
+
+    // The helper cleans up the stale `.tmp` on failure — a retry
+    // after the cleanup must succeed and produce the fresh payload.
+    const retry = await Effect.runPromise(
+      atomicWriteJson({ path: filePath, contents: "{\"fresh\":true}" }),
+    );
+    expect(retry).toBe(filePath);
+    expect(await readFile(filePath, "utf8")).toBe("{\"fresh\":true}");
+  });
+
+  it("refuses to open when .tmp is a symlink (EEXIST, no follow)", async () => {
+    // Same race as above but exercised via a symlink planted at the
+    // temp path. With `"wx"`, openSync must fail before any write
+    // reaches the symlink target. (Node does not expose O_NOFOLLOW
+    // directly; `wx` + parent-dir mode 0o700 close this gap, and
+    // this test pins the wx behaviour.)
+    await mkdir(inboxDir, { recursive: true, mode: 0o700 });
+    const filePath = join(inboxDir, "symlinked.json");
+    const tmpPath = `${filePath}.tmp`;
+    const outsidePath = join(inboxDir, "victim.json");
+    // Plant a dangling symlink: the target does not exist, but openSync
+    // would still happily traverse it without `wx`/`O_EXCL`. With
+    // `wx`, the open itself must fail because the symlink *entry*
+    // already exists, regardless of the target.
+    symlinkSync(outsidePath, tmpPath);
+
+    const result = await Effect.runPromise(
+      Effect.either(atomicWriteJson({ path: filePath, contents: "{\"x\":1}" })),
+    );
+    expect(result._tag).toBe("Left");
+    if (result._tag === "Left") {
+      const message = (result.left as Error).message;
+      expect(message).toMatch(/EEXIST|temp write\/fsync failed/);
+    }
+
+    // The symlink target must NOT have been created (openSync refused
+    // before any write). We never created `outsidePath` again, so
+    // readdir confirms it.
+    const entries = await readdir(inboxDir);
+    expect(entries).not.toContain("victim.json");
+    await rm(tmpPath, { force: true });
+  });
+
+  it("creates the temp file with mode 0o600 (owner read/write only)", async () => {
+    // The temp file is created with `fs.openSync(tmpPath, "wx", 0o600)`.
+    // `fs.renameSync` preserves the source inode's mode bits, so the
+    // file at the target path keeps the 0o600 set at openSync time.
+    // (The umask can only STRIP bits from the requested mode; it
+    // cannot add them. 0o600 & ~umask = 0o600 for any umask whose
+    // other-write bit (0o002) is set — which is the default on every
+    // platform we run on.)
+    await mkdir(inboxDir, { recursive: true, mode: 0o700 });
+    const filePath = join(inboxDir, "mode-temp.json");
+
+    const written = await Effect.runPromise(
+      atomicWriteJson({ path: filePath, contents: "{\"a\":1}" }),
+    );
+    expect(written).toBe(filePath);
+
+    const s = await stat(filePath);
+    expect(s.mode & 0o777).toBe(0o600);
+  });
+
+  it("creates a missing parent directory with mode 0o700 (owner only)", async () => {
+    // `ensureParentDir` runs `fsp.mkdir(dir, { recursive: true, mode: 0o700 })`.
+    // Mode applies only to newly created dirs, so we delete the
+    // parent (the inbox subdir was already created by the fixture)
+    // and let atomicWriteJson re-create it. We use a nested subpath
+    // under a brand-new parent so the parent does not pre-exist.
+    const nestedParent = join(inboxDir, "nested", "deep");
+    const filePath = join(nestedParent, "child.json");
+
+    // Sanity: the nested parent must not exist yet.
+    expect((await stat(nestedParent).catch(() => null))).toBeNull();
+
+    const written = await Effect.runPromise(
+      atomicWriteJson({ path: filePath, contents: "{\"ok\":1}" }),
+    );
+    expect(written).toBe(filePath);
+
+    const parentStat = await stat(nestedParent);
+    expect(parentStat.isDirectory()).toBe(true);
+    expect(parentStat.mode & 0o777).toBe(0o700);
+
+    // And the file itself must be readable (write path still works).
+    expect(await readFile(filePath, "utf8")).toBe("{\"ok\":1}");
   });
 });
 
