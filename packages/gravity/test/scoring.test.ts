@@ -601,6 +601,62 @@ describe("rankHypotheses — AI rank override (v1.2.0)", () => {
     expect(out[0]?.source).toBe("rule");
     expect(out[1]?.source).toBe("rule");
   });
+
+  it("+Infinity ai_rank_score falls back to formula, does not rank as 1.0", () => {
+    // `Number.isFinite(+Infinity)` is true, so a guard that only
+    // checks isFinite would silently clamp +Infinity → 1 and rank it
+    // at the top. We must reject ±Infinity and fall back to rule.
+    const state = buildState([
+      baseActive("H-1"),
+      baseActive("H-2", { ai_rank_score: Number.POSITIVE_INFINITY, ai_rank_reasoning: "x", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev2" }),
+    ]);
+    const out = rankHypotheses(
+      state,
+      baseCfg(),
+      new Map<string, ReadonlyArray<ContributingActor>>([
+        ["H-1", []],
+        ["H-2", [{ actor_id: "a", trust_score: 1.0 }]],
+      ]),
+      new Map([
+        ["H-1", 1_700_000_000],
+        ["H-2", 1_700_000_000],
+      ]),
+      1_700_000_000,
+    );
+    // H-2 must be rule-scored, not pinned to score 1.0.
+    expect(out[1]?.source).toBe("rule");
+  });
+
+  it("-Infinity ai_rank_score falls back to formula, does not rank as 0.0", () => {
+    // H-1 has a real AI rank of 0 (source "ai"); H-2 has -Infinity
+    // (malformed). Without the fix, H-2 would clamp to 0 and look
+    // indistinguishable from H-1. With the fix, H-2 falls back to
+    // rule: no actors + freshness=1 → trust 0 + freshness 0.10 = 0.10.
+    // So H-2 (0.10) > H-1 (0.0) and H-2 ranks first with source "rule".
+    const state = buildState([
+      baseActive("H-1", { ai_rank_score: 0, ai_rank_reasoning: "r", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev1" }),
+      baseActive("H-2", { ai_rank_score: Number.NEGATIVE_INFINITY, ai_rank_reasoning: "x", ai_rank_evaluator: "ai-supervisor", ai_rank_at: "2026-06-19T00:00:00.000Z", ai_rank_event_id: "ev2" }),
+    ]);
+    const out = rankHypotheses(
+      state,
+      baseCfg(),
+      new Map<string, ReadonlyArray<ContributingActor>>([
+        ["H-1", [{ actor_id: "a", trust_score: 1.0 }]],
+        ["H-2", []],
+      ]),
+      new Map([
+        ["H-1", 1_700_000_000],
+        ["H-2", 1_700_000_000],
+      ]),
+      1_700_000_000,
+    );
+    // H-2 (rule = 0.10) > H-1 (AI = 0). The crucial assertion is that
+    // H-2 is source "rule" — not "ai" with score 0.
+    expect(out[0]?.id).toBe("H-2");
+    expect(out[0]?.source).toBe("rule");
+    expect(out[1]?.id).toBe("H-1");
+    expect(out[1]?.source).toBe("ai");
+  });
 });
 
 describe("determinism", () => {

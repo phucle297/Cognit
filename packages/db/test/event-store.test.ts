@@ -337,6 +337,39 @@ describe("EventStore", () => {
     );
   });
 
+  it("rejects hypothesis_ranked payload with out-of-range score", async () => {
+    // v1.2.0 added `hypothesis_ranked`. Its schema enforces score in
+    // [0, 1]. Before the schema-map fix, append looked the type up in
+    // PAYLOAD_SCHEMAS_V1 (where hypothesis_ranked is absent) and
+    // silently accepted any payload. Verify the per-type gate now
+    // activates for the new type.
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const store = yield* EventStore;
+        const sessionId = setupProjectAndSession(conn);
+        const result = yield* store
+          .append({
+            type: "hypothesis_ranked",
+            payload: {
+              hypothesis_id: "01hyptestxxxxxxxxxxxxxxxx",
+              score: 1.7, // out of [0, 1]
+              reasoning: "x",
+              evaluator: "ai-supervisor",
+              override_rule_based: false,
+            },
+            sessionId,
+            actor: { name: "supervisor", type: "system" },
+          })
+          .pipe(Effect.either);
+        expect(Either.isLeft(result)).toBe(true);
+        if (Either.isLeft(result)) {
+          expect((result.left as { _tag: string })._tag).toBe("ValidationFailure");
+        }
+      }),
+    );
+  });
+
   it("rejects unknown session ids", async () => {
     await runWithLayer(
       Effect.gen(function* () {

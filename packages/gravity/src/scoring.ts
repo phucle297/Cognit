@@ -218,7 +218,15 @@ export const rankHypotheses = (
     // (the schema already enforces [0,1], but stale or out-of-range
     // data should never break ranking).
     const aiRank = h.ai_rank_score;
-    if (aiRank !== null && Number.isFinite(aiRank)) {
+    // `Number.isFinite(Infinity)` returns true, so reject the ±Infinity
+    // sentinels explicitly and fall through to the rule-based formula
+    // (same behaviour as NaN — see the test "non-finite ai_rank_score").
+    if (
+      aiRank !== null &&
+      Number.isFinite(aiRank) &&
+      aiRank !== Number.POSITIVE_INFINITY &&
+      aiRank !== Number.NEGATIVE_INFINITY
+    ) {
       entries.push({ h, score: clamp(aiRank, 0, 1), source: "ai" });
       continue;
     }

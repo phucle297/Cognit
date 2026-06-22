@@ -164,7 +164,16 @@ export const rankActiveHypothesesFromState = (
     if (h.current_state !== "active") continue;
     // AI-rank override — see packages/gravity/src/scoring.ts.
     const aiRank = h.ai_rank_score;
-    if (aiRank !== null && Number.isFinite(aiRank)) {
+    // Reject ±Infinity explicitly: the ternary clamp below would map
+    // +Infinity → 1 and -Infinity → 0, which would silently accept
+    // malformed input as a "real" AI rank. Match the gravity package
+    // so both sites fall through to the rule-based formula together.
+    if (
+      aiRank !== null &&
+      Number.isFinite(aiRank) &&
+      aiRank !== Number.POSITIVE_INFINITY &&
+      aiRank !== Number.NEGATIVE_INFINITY
+    ) {
       const clamped = aiRank < 0 ? 0 : aiRank > 1 ? 1 : aiRank;
       entries.push({ h, score: clamped, source: "ai" });
       continue;

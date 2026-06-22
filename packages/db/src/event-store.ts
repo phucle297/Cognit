@@ -9,7 +9,7 @@ import {
   ValidationFailure,
   trySync,
 } from "./errors";
-import { CURRENT_VERSION, EVENT_TYPES, PAYLOAD_SCHEMAS_V1 } from "./event-schema";
+import { CURRENT_VERSION, EVENT_TYPES, PAYLOAD_SCHEMAS_CURRENT } from "./event-schema";
 import { redactEvent } from "./redaction";
 import type { EventRow } from "./schema/rows";
 import { Uuid } from "./ulid";
@@ -236,7 +236,7 @@ export const EventStoreLive: Layer.Layer<
           // `redaction_applied` events are system-emitted, not user-supplied,
           // so they skip user-side validation.
           if (input.type !== "redaction_applied") {
-            const schema = PAYLOAD_SCHEMAS_V1[input.type] as
+            const schema = PAYLOAD_SCHEMAS_CURRENT[input.type] as
               | Schema.Schema<any, any, never>
               | undefined;
             if (schema) {
