@@ -8,6 +8,12 @@
  *  3. SSE frame injection grows the table (uses StubEventSource from
  *     test/setup.ts)
  *  4. error envelope renders ErrorState
+ *  5. clicking a row opens the rank history sheet
+ *  6. dedup invariant: an SSE frame whose id matches a snapshot
+ *     row's `ai_rank_event_id` is dropped by the snapshot-id set
+ *     — table has exactly 1 row, no `(unranked)` badge
+ *  7. stream-only row: an SSE frame whose id is NOT in the
+ *     snapshot adds a new row with the `(unranked)` badge
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -258,5 +264,126 @@ describe("AiReasoningPage (C4)", () => {
     expect(row).toBeTruthy();
     await user.click(row!);
     expect(await screen.findByTestId("ai-reasoning-history-sheet")).toBeInTheDocument();
+  });
+
+  it("6. dedup invariant — SSE frame matching a snapshot event id is dropped", async () => {
+    // The snapshot already carries a ranked row whose ai_rank_event_id
+    // is "01SNAP0000000000000000000". An SSE frame with the SAME id
+    // must NOT add a duplicate row — the client-side snapshotIds set
+    // drops it (defence-in-depth: server-side `?last_event_id=` would
+    // also filter it, but the client check stays).
+    const sharedId = "01SNAP0000000000000000000";
+    const ranked = [
+      makeRanked({
+        hypothesis_id: "01RANKED",
+        source: "ai",
+        ai_score: 0.85,
+        rule_score: 0.32,
+        score: 0.85,
+        delta: 0.53,
+        reasoning: "strong evidence",
+        ai_rank_event_id: sharedId,
+      }),
+    ];
+    mockFetch((url) => {
+      if (url.includes("/ai-reasoning") && !url.endsWith("/stream")) {
+        return new Response(envelope({ session_id: "01S", ranked, decision_log: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/sessions/01S")) {
+        return new Response(
+          envelope({ session: { id: "01S", goal: "demo", status: "active" } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("{}", { status: 404 });
+    });
+    renderPage("?session=01S");
+    expect(await screen.findByTestId("ai-reasoning-page")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("ai-reasoning-source").length).toBe(1);
+    });
+
+    // Inject an SSE frame with the SAME ai_rank_event_id as the
+    // snapshot row. The page must NOT add a second row.
+    const Es = (globalThis as { EventSource: typeof EventSource }).EventSource;
+    const instance = (Es as unknown as {
+      lastInstance: { onmessage: ((ev: MessageEvent<string>) => void) | null };
+    }).lastInstance;
+    expect(instance).toBeTruthy();
+    const frame = {
+      id: sharedId,
+      session_id: "01S",
+      type: "hypothesis_ranked",
+      created_at: "2026-06-21T10:05:00.000Z",
+      payload: {
+        hypothesis_id: "01RANKED",
+        score: 0.99,
+        reasoning: "duplicate, must be dropped",
+        evaluator: "ai-supervisor",
+      },
+    };
+    instance.onmessage?.(
+      new MessageEvent("event", { data: JSON.stringify(frame), lastEventId: frame.id }),
+    );
+
+    // Give the React state update a tick to flush.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getAllByTestId("ai-reasoning-source").length).toBe(1);
+    expect(screen.queryByTestId("ai-reasoning-unranked")).not.toBeInTheDocument();
+  });
+
+  it("7. stream-only row — SSE frame with new event id adds a row with `(unranked)` badge", async () => {
+    const ranked = [makeRanked({ hypothesis_id: "01BASE" })];
+    mockFetch((url) => {
+      if (url.includes("/ai-reasoning") && !url.endsWith("/stream")) {
+        return new Response(envelope({ session_id: "01S", ranked, decision_log: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.endsWith("/sessions/01S")) {
+        return new Response(
+          envelope({ session: { id: "01S", goal: "demo", status: "active" } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response("{}", { status: 404 });
+    });
+    renderPage("?session=01S");
+    expect(await screen.findByTestId("ai-reasoning-page")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getAllByTestId("ai-reasoning-source").length).toBe(1);
+    });
+
+    const Es = (globalThis as { EventSource: typeof EventSource }).EventSource;
+    const instance = (Es as unknown as {
+      lastInstance: { onmessage: ((ev: MessageEvent<string>) => void) | null };
+    }).lastInstance;
+    expect(instance).toBeTruthy();
+    const frame = {
+      id: "01STREAM0000000000000000",
+      session_id: "01S",
+      type: "hypothesis_ranked",
+      created_at: "2026-06-21T10:05:00.000Z",
+      payload: {
+        hypothesis_id: "01LIVE",
+        score: 0.92,
+        reasoning: "fresh evidence just landed",
+        evaluator: "ai-supervisor",
+      },
+    };
+    instance.onmessage?.(
+      new MessageEvent("event", { data: JSON.stringify(frame), lastEventId: frame.id }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("ai-reasoning-source").length).toBe(2);
+    });
+    // The newly-streamed row carries the (unranked) badge so an
+    // operator can distinguish it from a fully-titled snapshot row.
+    expect(screen.getByTestId("ai-reasoning-unranked")).toBeInTheDocument();
   });
 });
