@@ -14,7 +14,9 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
-    "clean": "turbo run clean && rm -rf node_modules .turbo"
+    "clean": "turbo run clean && rm -rf node_modules .turbo",
+    "setup": "bash scripts/up.sh",
+    "remove": "bash scripts/down.sh"
   },
   "devDependencies": {
     "@typescript/native-preview": "7.0.0-dev.20260618.1",

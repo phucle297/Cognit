@@ -388,6 +388,9 @@ Pages:
 
 ## Docker
 
+One-command path: see [Installation](#installation) — `scripts/up.sh`
+does install + start in one shot.
+
 One-line local deploy. The stack is two services: a tsup-built
 server on an internal docker network, and an nginx front-end that
 serves the Vite dashboard on `:6970`.
@@ -414,10 +417,18 @@ on the internal docker network. Non-docker users
 ## Installation
 
 ```bash
-pnpm install
-pnpm build
-pnpm link --global
+scripts/up.sh
 ```
+
+One command: builds + links the `@cognit/cli` onto your `PATH`, then
+starts the backend server in Docker. Replaces the previous
+three-command flow (`pnpm install && pnpm build && cd apps/cli && pnpm link --global && docker compose up -d`).
+
+Server runs in Docker; the CLI runs natively on the host because its
+`better-sqlite3` native binding must match the host's libc. Plain
+`docker compose up -d` still works once the CLI is already linked.
+
+Requirements: **Node.js 24 LTS**, **pnpm 9**, **Docker**.
 
 ---
 

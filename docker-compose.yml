@@ -1,8 +1,19 @@
 # docker-compose.yml — Phase 6.8 one-line local deploy.
 #
-#   docker compose up -d              # server only (port 6971 internal)
-#   cognit dashboard                  # on-demand dashboard (port 6970)
+# Single-command entry point (CLI on host, server in Docker):
+#
+#   scripts/up.sh                     # installs + links CLI, starts server
+#   docker compose up -d              # server-only path (CLI already linked)
+#   cognit dashboard --docker         # on-demand dashboard (port 6970)
 #   docker compose --profile dashboard up -d   # alternative: explicit profile
+#
+# Why `scripts/up.sh` instead of pure `docker compose up -d`:
+# apps/cli depends on better-sqlite3, a native module. pnpm install
+# inside this Alpine image produces the musl prebuild, which will not
+# load on a glibc Linux host or on macOS. The wrapper runs the CLI
+# install/build/link on the host (correct libc) and only the server
+# in Docker. Plain `docker compose up -d` still works once the CLI is
+# already linked on the host.
 #
 # Port policy:
 #   - :6970 host-facing only (dashboard via nginx), started on demand
