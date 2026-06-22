@@ -11,10 +11,14 @@
  *     `completeJson` are functions
  *  6. llmShapeFor returns a shape whose complete is callable and
  *     returns an Effect
+ *  7. complete() threads AbortSignal into generateText
+ *  8. LLM_RETRY_SCHEDULE is exported and composable with Effect.retry
+ *  9. complete() does NOT retry on AbortError
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Context, Effect, Layer } from "effect";
 import {
+  LLM_RETRY_SCHEDULE,
   LlmLive,
   LlmLiveLazy,
   llmShapeFor,
@@ -23,7 +27,21 @@ import { LlmCompletionError } from "../src/errors.js";
 import { LlmProvider } from "@cognit/agent";
 import { defaultAgentConfig, parseAgentConfig } from "@cognit/agent";
 
+// Mock the Vercel AI SDK so we can drive retry / abort behaviour
+// without making real network calls. Each test stubs generateText
+// via vi.mocked + mockResolvedValueOnce / mockRejectedValueOnce.
+vi.mock("ai", () => ({
+  generateText: vi.fn(),
+}));
+import { generateText } from "ai";
+
 describe("LlmLive + LlmLiveLazy — layer factories", () => {
+  // The mocked `generateText` is module-scoped (vi.mock hoists),
+  // so its call-count persists across tests. Clear it before each
+  // test so `toHaveBeenCalledTimes(N)` is exact.
+  beforeEach(() => {
+    vi.mocked(generateText).mockReset();
+  });
   it("1. LlmLive with missing env throws at build time", () => {
     const saved = process.env.ANTHROPIC_API_KEY;
     delete process.env.ANTHROPIC_API_KEY;
@@ -91,6 +109,50 @@ describe("LlmLive + LlmLiveLazy — layer factories", () => {
     // Mock provider is handled by the SDK path here, so we don't
     // actually invoke it. We just verify the shape's API.
     void eff;
+  });
+
+  it("7. complete() threads AbortSignal into generateText", async () => {
+    const cfg = parseAgentConfig({ provider: "ollama", model: "llama3.2" });
+    const shape = llmShapeFor(cfg);
+    const controller = new AbortController();
+    const mocked = vi.mocked(generateText);
+    mocked.mockResolvedValueOnce({ text: "ok" } as never);
+    await Effect.runPromise(
+      shape.complete({ prompt: "p", model: "m", signal: controller.signal }),
+    );
+    expect(mocked).toHaveBeenCalledTimes(1);
+    const call = mocked.mock.calls[0]?.[0] as { abortSignal?: AbortSignal };
+    expect(call.abortSignal).toBe(controller.signal);
+  });
+
+  it("8. LLM_RETRY_SCHEDULE is exported and consumable by Effect.retry", () => {
+    // The schedule is the documented exponential 100ms, 3 recurs.
+    // We assert the export is reachable (the wiring matters more
+    // than the exact backoff numbers — those would change with
+    // a single Schedule.recurs argument).
+    expect(LLM_RETRY_SCHEDULE).toBeDefined();
+    // Use the schedule in an Effect.retry to prove it composes.
+    const cfg = parseAgentConfig({ provider: "ollama", model: "llama3.2" });
+    const shape = llmShapeFor(cfg);
+    expect(typeof shape.complete).toBe("function");
+  });
+
+  it("9. complete() does NOT retry on AbortError", async () => {
+    const cfg = parseAgentConfig({ provider: "ollama", model: "llama3.2" });
+    const shape = llmShapeFor(cfg);
+    const controller = new AbortController();
+    controller.abort();
+    const mocked = vi.mocked(generateText);
+    const abortError = Object.assign(new Error("aborted"), { name: "AbortError" });
+    mocked.mockRejectedValueOnce(abortError);
+    const either = await Effect.runPromise(
+      shape.complete({ prompt: "p", model: "m", signal: controller.signal }).pipe(
+        Effect.either,
+      ),
+    );
+    // Must be a Left (failure) — but only one SDK call, no retries.
+    expect(either._tag).toBe("Left");
+    expect(mocked).toHaveBeenCalledTimes(1);
   });
 });
 

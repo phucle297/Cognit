@@ -1,51 +1,29 @@
 /**
  * packages/llm/src/errors.ts — typed error surface for the LLM layer (C1).
  *
- * Three failure modes the supervisor loop cares about:
- *   - LlmCompletionError — the SDK call itself failed (network, auth,
- *     rate limit, model refused). The CLI should retry with
- *     exponential backoff; the dashboard surfaces it verbatim.
- *   - JsonParseError — the model returned something that is not
- *     valid JSON. Usually a "Sure! Here's the JSON: …" preamble or
- *     a markdown fence. The supervisor retries with a stronger
- *     prompt; the raw text is attached for diagnostics.
- *   - SchemaValidationError — the model returned valid JSON that
- *     fails the Effect Schema. The supervisor retries with the
- *     schema echoed back; the raw text is attached.
+ * The error classes are owned by `@cognit/agent` (which is upstream
+ * of `@cognit/llm` in the dep graph). `@cognit/llm` re-exports them
+ * here so:
  *
- * All three are tagged so `Effect.catchTag` discriminates cleanly.
+ *   1. Internal imports (`./json.js`, `./layer.js`, `./provider.js`)
+ *      have a local path to import from — keeps relative-path noise
+ *      out of `layer.ts`.
+ *   2. External callers can `import { LlmCompletionError } from "@cognit/llm"`
+ *      without caring which package owns the canonical class.
+ *
+ * These are NOT new classes — they are re-exports of the agent
+ * package's classes. `instanceof` checks against either import path
+ * succeed because they resolve to the same constructor.
+ *
+ * Retry semantics: `@cognit/llm`'s `LlmLive` layer wraps `generateText`
+ * in an `Effect.retry` policy (exponential backoff, 3 recurs). The
+ * CLI does not need to layer its own retry on top — if it does, the
+ * effective retry count is the product.
  */
 
-export class LlmCompletionError extends Error {
-  override readonly name = "LlmCompletionError";
-  constructor(
-    message: string,
-    override readonly cause?: unknown,
-  ) {
-    super(message);
-  }
-}
-
-export class JsonParseError extends Error {
-  override readonly name = "JsonParseError";
-  constructor(
-    message: string,
-    readonly raw: string,
-  ) {
-    super(message);
-  }
-}
-
-export class SchemaValidationError extends Error {
-  override readonly name = "SchemaValidationError";
-  constructor(
-    message: string,
-    readonly raw: string,
-    readonly issues: string,
-  ) {
-    super(message);
-  }
-}
-
-/** Error union the JSON completion path can fail with. */
-export type JsonCompletionError = LlmCompletionError | JsonParseError | SchemaValidationError;
+export {
+  LlmCompletionError,
+  JsonParseError,
+  SchemaValidationError,
+  type JsonCompletionError,
+} from "@cognit/agent";

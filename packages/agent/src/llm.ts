@@ -4,12 +4,13 @@
  * The supervisor loop needs an LLM to emit text per tick. We define
  * two methods on the provider:
  *
- *   - `complete({ prompt, model })` → Effect<string, LlmCompletionError>
+ *   - `complete({ prompt, model, signal? })` → Effect<string, LlmCompletionError>
  *       Raw text completion. The supervisor loop uses this when no
  *       schema-aware helper is available (mock provider, future
- *       non-AI backends).
+ *       non-AI backends). The optional `signal` aborts the SDK call
+ *       when the supervisor's per-tick budget is exceeded.
  *
- *   - `completeJson({ prompt, model, provider, schema })` → Effect<T, …>
+ *   - `completeJson({ prompt, model, provider, schema, signal? })` → Effect<T, …>
  *       Typed completion. The C1 concrete layer
  *       (`@cognit/llm`) wraps the model output with a JSON
  *       parse + Effect Schema validation step. The loop prefers
@@ -38,14 +39,20 @@ export interface LlmProviderShape {
    * route to multiple underlying models (e.g. anthropic's
    * claude-opus-4-8 vs claude-haiku-4-5-20251001). The provider
    * validates the model against its own allow-list.
+   *
+   * `signal` is forwarded to the underlying SDK call so the supervisor
+   * loop can cancel an in-flight request when its tick budget expires
+   * or the CLI is shutting down. Optional — providers without
+   * cancellation support ignore it.
    */
   readonly complete: (input: {
     readonly prompt: string;
     readonly model: string;
+    readonly signal?: AbortSignal;
   }) => Effect.Effect<string, LlmCompletionError>;
   /**
    * Typed JSON completion. Optional — providers that do not
-   * implement it (e.g. the mock layer used by tests) leave the
+   * implement it (e.g. the mock layer used in tests) leave the
    * supervisor loop to parse + validate from `complete()`. The C1
    * concrete layer (`@cognit/llm`) implements both methods.
    */
@@ -55,6 +62,7 @@ export interface LlmProviderShape {
       readonly model: string;
       readonly provider: AgentProvider;
       readonly schema: Schema.Schema<T>;
+      readonly signal?: AbortSignal;
     },
   ) => Effect.Effect<
     T,

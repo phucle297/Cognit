@@ -28,6 +28,12 @@ export class LlmCompletionError extends Error {
   constructor(
     message: string,
     override readonly cause?: unknown,
+    /**
+     * Raw model output when the SDK error message contains it.
+     * Most failures (network, auth, rate limit) leave this undefined;
+     * only "model refused" / malformed-output style errors populate it.
+     */
+    readonly raw?: string,
   ) {
     super(message);
   }

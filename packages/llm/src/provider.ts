@@ -41,11 +41,11 @@ import { LlmCompletionError } from "./errors.js";
  * not survive a JSON round-trip so we use undefined deliberately.
  */
 export const ENV_VAR_BY_PROVIDER: Readonly<
-  Record<AgentProvider, string | undefined>
+  Record<AgentProvider, string | string[] | undefined>
 > = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
-  google: "GOOGLE_GENERATIVE_AI_API_KEY",
+  google: ["GOOGLE_GENERATIVE_AI_API_KEY", "GOOGLE_API_KEY"],
   ollama: undefined, // local daemon, no key
   mock: undefined,
 };
@@ -87,12 +87,17 @@ export const modelFor = (provider: AgentProvider, modelId: string) => {
  * missing so the caller can include it in error messages.
  */
 export const requireEnvFor = (provider: AgentProvider): string | null => {
-  const name = ENV_VAR_BY_PROVIDER[provider];
-  if (name === undefined) return null;
-  if (typeof process === "undefined" || !process.env) return name;
-  return process.env[name] === undefined || process.env[name] === ""
-    ? name
-    : null;
+  const names = ENV_VAR_BY_PROVIDER[provider];
+  if (names === undefined) return null;
+  const list = Array.isArray(names) ? names : [names];
+  if (typeof process === "undefined" || !process.env) {
+    return list[0] ?? null;
+  }
+  for (const name of list) {
+    const value = process.env[name];
+    if (value !== undefined && value.trim() !== "") return null;
+  }
+  return list[0] ?? null;
 };
 
 /**

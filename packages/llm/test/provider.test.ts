@@ -27,15 +27,26 @@ const UNKEYED: ReadonlyArray<AgentProvider> = ["ollama", "mock"];
 
 describe("provider — env-var surface", () => {
   it("1. ENV_VAR_BY_PROVIDER table covers every AgentProvider", () => {
+    // Every keyed provider must point at either a string or a
+    // non-empty string-array of env vars (Google accepts both the
+    // canonical name and an alias).
     for (const p of KEYED) {
-      expect(ENV_VAR_BY_PROVIDER[p]).toBeTypeOf("string");
+      const v = ENV_VAR_BY_PROVIDER[p];
+      const ok =
+        typeof v === "string" ||
+        (Array.isArray(v) && v.every((n) => typeof n === "string"));
+      expect(ok).toBe(true);
     }
     for (const p of UNKEYED) {
       expect(ENV_VAR_BY_PROVIDER[p]).toBeUndefined();
     }
     expect(ENV_VAR_BY_PROVIDER.anthropic).toBe("ANTHROPIC_API_KEY");
     expect(ENV_VAR_BY_PROVIDER.openai).toBe("OPENAI_API_KEY");
-    expect(ENV_VAR_BY_PROVIDER.google).toBe("GOOGLE_GENERATIVE_AI_API_KEY");
+    // Google accepts both names; canonical first.
+    expect(ENV_VAR_BY_PROVIDER.google).toEqual([
+      "GOOGLE_GENERATIVE_AI_API_KEY",
+      "GOOGLE_API_KEY",
+    ]);
   });
 
   it("2. requireEnvFor returns the env name when key is missing", () => {
@@ -83,6 +94,41 @@ describe("provider — env-var surface", () => {
     } finally {
       if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
       else delete process.env.ANTHROPIC_API_KEY;
+    }
+  });
+
+  it("6b. GOOGLE_API_KEY alias is accepted when canonical is missing", () => {
+    // Clear both Google envs, then set only the alias. requireEnvFor
+    // must return null (env present) and assertEnvFor must not throw.
+    const savedCanonical = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const savedAlias = process.env.GOOGLE_API_KEY;
+    delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    process.env.GOOGLE_API_KEY = "alias-key";
+    try {
+      expect(requireEnvFor("google")).toBeNull();
+      expect(() => assertEnvFor("google")).not.toThrow();
+    } finally {
+      if (savedCanonical !== undefined) process.env.GOOGLE_GENERATIVE_AI_API_KEY = savedCanonical;
+      else delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      if (savedAlias !== undefined) process.env.GOOGLE_API_KEY = savedAlias;
+      else delete process.env.GOOGLE_API_KEY;
+    }
+  });
+
+  it("6c. whitespace-only env var is treated as missing", () => {
+    // A key set to "   " should NOT count as present — the user
+    // probably typoed and the SDK would fail downstream anyway.
+    const savedCanonical = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const savedAlias = process.env.GOOGLE_API_KEY;
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "   ";
+    delete process.env.GOOGLE_API_KEY;
+    try {
+      expect(requireEnvFor("google")).toBe("GOOGLE_GENERATIVE_AI_API_KEY");
+    } finally {
+      if (savedCanonical !== undefined) process.env.GOOGLE_GENERATIVE_AI_API_KEY = savedCanonical;
+      else delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      if (savedAlias !== undefined) process.env.GOOGLE_API_KEY = savedAlias;
+      else delete process.env.GOOGLE_API_KEY;
     }
   });
 });

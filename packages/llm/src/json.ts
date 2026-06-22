@@ -13,6 +13,13 @@
  *      with `JsonParseError`. The raw text is attached so the CLI
  *      can show what the model actually emitted.
  *
+ *      A size cap (`MAX_RAW_BYTES`) guards against pathological
+ *      responses (runaway generation, model echoing a long context
+ *      back). Anything over the cap fails fast with a
+ *      `JsonParseError("response too large")` carrying a truncated
+ *      `raw` (first 1KB + "...") so the diagnostics payload stays
+ *      bounded too.
+ *
  *   2. Schema.decodeUnknown on the parsed JSON. A model that returns
  *      well-formed JSON that does not match the schema fails here
  *      with `SchemaValidationError`. The raw text + the Effect
@@ -37,11 +44,28 @@ export const JSON_OUTPUT_INSTRUCTION =
   "\n\nReturn ONLY valid JSON matching the schema described above. " +
   "Do not wrap the response in markdown fences. Do not add commentary.";
 
+/**
+ * Maximum raw-completion size before we reject without parsing.
+ * 1 MiB is generous for a JSON-decoded AgentDecision (the schema
+ * has at most a handful of actions / overrides per tick) but
+ * small enough to keep `JsonParseError.raw` from bloating log
+ * payloads if a model echoes context back.
+ */
+export const MAX_RAW_BYTES = 1024 * 1024;
+
+/**
+ * Truncation length for `JsonParseError.raw` when the raw exceeds
+ * the cap. We keep the head (the part the model produced first,
+ * usually the actual JSON) and append an ellipsis marker.
+ */
+export const RAW_TRUNCATE_BYTES = 1024;
+
 export interface CompleteJsonInput<T> {
   readonly prompt: string;
   readonly model: string;
   readonly provider: AgentProvider;
   readonly schema: Schema.Schema<T>;
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -59,11 +83,27 @@ export const makeCompleteJson =
     Effect.gen(function* () {
       // Wrap prompt with the JSON-output instruction. The caller is
       // responsible for describing the schema; this appends the
-      // formatting instruction only.
+      // formatting instruction only. We conditionally include
+      // `signal` so undefined is not passed under
+      // `exactOptionalPropertyTypes: true`.
       const raw = yield* complete({
         prompt: input.prompt + JSON_OUTPUT_INSTRUCTION,
         model: input.model,
+        ...(input.signal ? { signal: input.signal } : {}),
       });
+
+      // Phase 0: size cap. A model that returns 1MB+ of text is
+      // almost certainly echoing context back or has gone off the
+      // rails — fail fast with a truncated raw so the supervisor
+      // can decide whether to retry with a stronger prompt.
+      if (raw.length > MAX_RAW_BYTES) {
+        return yield* Effect.fail(
+          new JsonParseError(
+            "response too large",
+            raw.slice(0, RAW_TRUNCATE_BYTES) + "...",
+          ),
+        );
+      }
 
       // Phase 1: JSON.parse.
       let parsed: unknown;

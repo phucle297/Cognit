@@ -76,6 +76,13 @@ export interface RunTickInput {
   readonly agent: AgentConfig;
   readonly actor: { readonly name: string; readonly type: "human" | "worker" | "system" };
   readonly tickId?: string;
+  /**
+   * Optional abort signal forwarded to the LLM SDK call. Used by the
+   * CLI / supervisor to cancel an in-flight tick when its budget
+   * expires or the process is shutting down. Optional — leaving it
+   * undefined preserves the prior "fire and forget" behaviour.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /** Errors a tick can produce. */
@@ -122,6 +129,12 @@ export const runTick = (
     //    `@cognit/llm` Layer does, the test mock does not. Falling
     //    back to raw `complete()` + manual parse keeps the loop
     //    honest with the test layer used in C2 unit tests.
+    //
+    //    The optional `input.signal` is forwarded so the supervisor
+    //    can cancel an in-flight LLM call when its tick budget
+    //    expires or the CLI is shutting down. We conditionally
+    //    include the field so it is not passed when undefined
+    //    (`exactOptionalPropertyTypes: true`).
     let decision: AgentDecision;
     if (llm.completeJson) {
       decision = (yield* llm.completeJson({
@@ -129,9 +142,14 @@ export const runTick = (
         model: input.agent.model,
         provider: input.agent.provider,
         schema: AgentDecision as Schema.Schema<AgentDecision>,
+        ...(input.signal ? { signal: input.signal } : {}),
       })) as AgentDecision;
     } else {
-      const raw = yield* llm.complete({ prompt, model: input.agent.model });
+      const raw = yield* llm.complete({
+        prompt,
+        model: input.agent.model,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
       let parsedJson: unknown;
       try {
         parsedJson = JSON.parse(raw);

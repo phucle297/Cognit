@@ -15,11 +15,15 @@
  *  9. extendWithJson attaches completeJson without dropping complete
  * 10. JSON_OUTPUT_INSTRUCTION constant is exactly the expected text
  *     (changing it changes model behaviour; pin it)
+ * 11. raw > MAX_RAW_BYTES → JsonParseError with truncated raw
+ * 12. signal is forwarded to underlying complete()
  */
 import { describe, it, expect } from "vitest";
 import { Effect, Schema } from "effect";
 import {
   JSON_OUTPUT_INSTRUCTION,
+  MAX_RAW_BYTES,
+  RAW_TRUNCATE_BYTES,
   extendWithJson,
   makeCompleteJson,
 } from "../src/json.js";
@@ -204,5 +208,49 @@ describe("completeJson — JSON completion + schema validation", () => {
       "\n\nReturn ONLY valid JSON matching the schema described above. " +
         "Do not wrap the response in markdown fences. Do not add commentary.",
     );
+  });
+
+  it("11. raw > MAX_RAW_BYTES → JsonParseError with truncated raw", async () => {
+    // Mock complete returns a string well over 1MB. We never want
+    // JSON.parse to run on it — the cap must reject first.
+    const oversized = "x".repeat(MAX_RAW_BYTES + 1);
+    const shape = mkShape(() => Effect.succeed(oversized));
+    const either = await Effect.runPromise(
+      makeCompleteJson(shape.complete)({
+        prompt: "p",
+        model: "m",
+        provider: "anthropic",
+        schema: Person,
+      }).pipe(Effect.either),
+    );
+    expect(either._tag).toBe("Left");
+    if (either._tag === "Left") {
+      expect(either.left).toBeInstanceOf(JsonParseError);
+      const e = either.left as JsonParseError;
+      // Truncated raw must be head + ellipsis, and must NOT be the
+      // full oversized payload (that's the whole point of the cap).
+      expect(e.raw.length).toBe(RAW_TRUNCATE_BYTES + 3);
+      expect(e.raw.endsWith("...")).toBe(true);
+      expect(e.raw.length).toBeLessThan(oversized.length);
+    }
+  });
+
+  it("12. signal is forwarded to underlying complete()", async () => {
+    let captured: AbortSignal | undefined;
+    const shape = mkShape(({ signal }) => {
+      captured = signal;
+      return Effect.succeed('{"name":"a","age":1}');
+    });
+    const controller = new AbortController();
+    await Effect.runPromise(
+      makeCompleteJson(shape.complete)({
+        prompt: "p",
+        model: "m",
+        provider: "anthropic",
+        schema: Person,
+        signal: controller.signal,
+      }),
+    );
+    expect(captured).toBe(controller.signal);
   });
 });
