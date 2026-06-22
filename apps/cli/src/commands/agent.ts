@@ -37,11 +37,11 @@ import {
 import {
   consumeStop,
   clearPidfile,
+  claimPidfile,
   probeAgent,
   readAgentState,
   requestStop,
   writeAgentState,
-  writePidfile,
 } from "../agent-state.js";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
@@ -162,11 +162,25 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
     ...(opts.model !== undefined ? { model: opts.model } : {}),
   });
 
-  // Conflict guard. If a pidfile points at a live process, refuse.
-  const existing = await probeAgent(root, sessionId);
-  if (existing.running && existing.pid !== null) {
+  // Conflict guard. Two `cognit agent run` processes for the same
+  // session at the same time is a user error (and a corruption risk
+  // for state.json). We claim the pidfile slot first with
+  // `O_CREAT|O_EXCL` (atomic) — if the claim fails, we lost the race
+  // and re-probe to report the winning pid. This closes the
+  // pre-fix TOCTOU window where two processes could both pass
+  // `probeAgent`'s liveness check (no pidfile) and both proceed.
+  const claimed = await claimPidfile(root, sessionId);
+  if (!claimed) {
+    // Race-loser. The other process is mid-claim or already owns
+    // the slot — re-probe to give the operator the live pid in the
+    // error message.
+    const existing = await probeAgent(root, sessionId);
+    const detail =
+      existing.pid !== null
+        ? `pid ${existing.pid}${existing.running ? "" : " (stale pidfile)"}`
+        : "another agent is starting up";
     process.stderr.write(
-      `cognit: agent already running for session ${sessionId} (pid ${existing.pid})\n`,
+      `cognit: agent already running for session ${sessionId} (${detail})\n`,
     );
     process.exitCode = 1;
     return;
@@ -201,8 +215,9 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
   const onSignal = (sig: NodeJS.Signals): void => {
     if (stoppedBySignal !== null) {
       // Second signal — abort hard. Don't await the loop body.
+      // POSIX exit codes: 130 = SIGINT, 143 = SIGTERM.
       process.stderr.write(`cognit: received ${sig} twice, exiting\n`);
-      process.exit(130);
+      process.exit(sig === "SIGINT" ? 130 : 143);
     }
     stoppedBySignal = sig;
     process.stderr.write(`cognit: received ${sig}, finishing current tick and exiting\n`);
@@ -210,7 +225,6 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
 
-  await writePidfile(root, sessionId);
   const clearOnExit = async (): Promise<void> => {
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
@@ -226,7 +240,6 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
   try {
     let ticksCompleted = 0;
     let lastTickId: string | null = null;
-    let requestedStop = false;
     // eslint-disable-next-line no-constant-condition
     while (true) {
       if (stoppedBySignal !== null) {
@@ -234,7 +247,6 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
         break;
       }
       if (await consumeStop(root, sessionId)) {
-        requestedStop = true;
         exitReason = "stop_decision";
         break;
       }
@@ -321,20 +333,19 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
           break;
         }
         if (await consumeStop(root, sessionId)) {
-          requestedStop = true;
           exitReason = "stop_decision";
           break;
         }
         if (Date.now() >= sleepDeadline) break;
         await sleep(Math.min(250, Math.max(0, sleepDeadline - Date.now())));
       }
-      if (exitReason !== "max_ticks") {
-        // We set a more-specific reason above; break out of the tick loop.
-        if (stoppedBySignal !== null || requestedStop) break;
-        // Otherwise we're just past the sleep interval — continue.
+      // If the inner sleep loop set a more-specific reason (signal or
+      // sentinel), break out of the tick loop now. Otherwise we're
+      // just past the sleep interval — continue.
+      if (exitReason === "stop_signal" || exitReason === "stop_decision") {
+        break;
       }
     }
-    void requestedStop; // referenced for clarity in future logging
 
     if (json) {
       emit("json", "agent.run", {
@@ -430,19 +441,22 @@ const stopCommand = async (opts: StopOptions): Promise<void> => {
   const live = await probeAgent(root, sessionId);
   await requestStop(root, sessionId);
   const requestedAt = new Date().toISOString();
+  const warning =
+    live.pid === null
+      ? `no agent pidfile for session ${sessionId}; stop sentinel written anyway`
+      : null;
   if (getOutputMode() === "json") {
     emit("json", "agent.stop", {
       sessionId,
       requestedAt,
       wasRunning: live.running,
       pid: live.pid,
+      warning,
     });
     return;
   }
-  if (live.pid === null) {
-    process.stderr.write(
-      `cognit: warning — no agent pidfile for session ${sessionId}; stop sentinel written anyway\n`,
-    );
+  if (warning !== null) {
+    process.stderr.write(`cognit: warning — ${warning}\n`);
   }
   process.stdout.write(`stop signal written for session ${sessionId}\n`);
 };
@@ -468,7 +482,7 @@ export function registerAgent(program: Command): void {
     .option("--once", "run a single tick and exit (default: loop until stop)")
     .option(
       "--max-ticks <n>",
-      "stop after N ticks (default: unlimited; requires --once-style behaviour)",
+      "stop after N ticks (default: unlimited)",
       (v: string) => Number(v),
     )
     .option(

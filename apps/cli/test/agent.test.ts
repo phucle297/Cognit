@@ -75,6 +75,9 @@ const STATEFILE = (sid: string): string =>
   path.join(tmp, ".cognit", `agent.${sid}.state.json`);
 const STOPFILE = (sid: string): string => path.join(tmp, ".cognit", `agent.${sid}.stop`);
 
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
 describe("cognit agent status", () => {
   it("1. prints empty state when no agent has run", () => {
     const { sessionId } = setupProjectAndSession();
@@ -264,6 +267,127 @@ describe("cognit agent run", () => {
     // the error formatter does not use that word.
     expect(r.stderr).toMatch(/actual "bogus"/);
   });
+
+  it("13. concurrent run: second process fails with conflict (pidfile race closed)", { timeout: 30_000 }, async () => {
+    const { sessionId } = setupProjectAndSession();
+    // Spawn a long-lived agent loop in the background — no --once,
+    // long tick interval so it stays alive for the duration of the
+    // second invocation.
+    const first = spawn(TSX, [
+      CLI_ENTRY,
+      "agent",
+      "run",
+      "--session",
+      sessionId,
+      "--tick-interval-ms",
+      "2000",
+    ], { cwd: tmp }) as import("node:child_process").ChildProcessWithoutNullStreams;
+    // Wait for the first process to claim its pidfile before
+    // spawning the second. The first line of text output appears
+    // only after the first tick finishes, so poll for the pidfile
+    // directly (cheaper, race-free).
+    const pidfile = PIDFILE(sessionId);
+    const startDeadline = Date.now() + 5000;
+    while (Date.now() < startDeadline && !fs.existsSync(pidfile)) {
+      await sleep(20);
+    }
+    expect(fs.existsSync(pidfile)).toBe(true);
+
+    // Second process should lose the race and exit non-zero with the
+    // conflict error.
+    const second = runCli(tmp, [
+      "agent",
+      "run",
+      "--once",
+      "--session",
+      sessionId,
+    ]);
+    expect(second.status).toBe(1);
+    expect(second.stderr).toMatch(/agent already running/);
+
+    // Clean up: stop the first loop and wait for it to exit so the
+    // pidfile disappears.
+    first.kill("SIGTERM");
+    await new Promise<void>((resolve) => first.on("exit", () => resolve()));
+  });
+
+  it("14. second SIGTERM exits 143 (not 130)", async () => {
+    const { sessionId } = setupProjectAndSession();
+    // Start the loop in the background, send SIGTERM twice, verify
+    // the second-signal exit code follows POSIX (143 for SIGTERM).
+    const child = spawn(TSX, [
+      CLI_ENTRY,
+      "agent",
+      "run",
+      "--session",
+      sessionId,
+      "--tick-interval-ms",
+      "2000",
+    ], { cwd: tmp }) as import("node:child_process").ChildProcessWithoutNullStreams;
+    const pidfile = PIDFILE(sessionId);
+    const startDeadline = Date.now() + 5000;
+    while (Date.now() < startDeadline && !fs.existsSync(pidfile)) {
+      await sleep(20);
+    }
+    expect(fs.existsSync(pidfile)).toBe(true);
+    // First signal: graceful drain.
+    child.kill("SIGTERM");
+    // Second signal before the graceful drain finishes: hard exit
+    // with the signal-specific code. Send quickly so we hit the
+    // second-signal branch.
+    await sleep(20);
+    child.kill("SIGTERM");
+    const code = await new Promise<number | null>((resolve) => {
+      const t = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve(-1);
+      }, 5000);
+      child.on("exit", (c) => {
+        clearTimeout(t);
+        resolve(c);
+      });
+    });
+    expect(code).toBe(143);
+  });
+
+  it("15. probeLiveness treats EPERM as alive (refuses to clobber foreign pid)", async () => {
+    // A pid owned by another user (EPERM) must be reported alive so
+    // the CLI refuses to clobber it. We simulate the syscall by
+    // monkey-patching `process.kill` for the duration of the probe.
+    // `probeLiveness` reads `process.kill` at call time, so the
+    // monkey-patch is observed.
+    const { probeLiveness } = await import("../src/agent-state.js");
+    const real = process.kill.bind(process);
+    const fake = ((pid: number, sig: number | NodeJS.Signals): boolean => {
+      if (sig === 0) {
+        const e = new Error("EPERM") as NodeJS.ErrnoException;
+        e.code = "EPERM";
+        throw e;
+      }
+      return real(pid, sig);
+    }) as typeof process.kill;
+    process.kill = fake;
+    try {
+      expect(probeLiveness(1)).toBe(true);
+    } finally {
+      process.kill = real;
+    }
+    // And the negative case: ESRCH should still be dead.
+    const fakeDead = ((pid: number, sig: number | NodeJS.Signals): boolean => {
+      if (sig === 0) {
+        const e = new Error("ESRCH") as NodeJS.ErrnoException;
+        e.code = "ESRCH";
+        throw e;
+      }
+      return real(pid, sig);
+    }) as typeof process.kill;
+    process.kill = fakeDead;
+    try {
+      expect(probeLiveness(1)).toBe(false);
+    } finally {
+      process.kill = real;
+    }
+  });
 });
 
 describe("cognit agent stop", () => {
@@ -291,11 +415,18 @@ describe("cognit agent stop", () => {
     expect(r.status).toBe(0);
     const env = JSON.parse(r.stdout) as {
       kind: string;
-      data: { sessionId: string; requestedAt: string };
+      data: {
+        sessionId: string;
+        requestedAt: string;
+        warning: string | null;
+      };
     };
     expect(env.kind).toBe("agent.stop");
     expect(env.data.sessionId).toBe(sessionId);
     expect(typeof env.data.requestedAt).toBe("string");
+    // No prior pidfile → warning should be surfaced in the JSON
+    // envelope (not just stderr) so automation can detect it.
+    expect(env.data.warning).toMatch(/no agent pidfile/);
   });
 });
 

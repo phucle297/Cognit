@@ -60,7 +60,9 @@ export const probeLiveness = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "EPERM") return true;
     return false;
   }
 };
@@ -90,6 +92,91 @@ export const writePidfile = async (
   await fs.writeFile(agentPidPath(projectRoot, sessionId), String(pid), {
     mode: 0o600,
   });
+};
+
+/**
+ * Atomic pidfile claim. Writes to `<path>.tmp` first with the
+ * `O_CREAT | O_EXCL | O_WRONLY` flags (Node's `"wx"`), fsyncs, then
+ * renames over the final path. This is the same pattern as
+ * `packages/wrap/src/atomic-write.ts` and `current-session.ts`.
+ *
+ * Returns `true` if this process now owns the pidfile, `false` if
+ * another process raced ahead of us and the pidfile is held by
+ * someone else (the caller should re-probe to surface the conflict).
+ *
+ * EEXIST on the temp write is the race-loser case — the other
+ * process is mid-claim. We also refuse the claim when the final
+ * pidfile already exists (POSIX `rename(2)` would atomically
+ * clobber it, which would mask a live agent); the caller treats
+ * that as "another agent holds the slot" and the re-probe will
+ * surface the live pid.
+ */
+export const claimPidfile = async (
+  projectRoot: string,
+  sessionId: string,
+  pid: number = process.pid,
+): Promise<boolean> => {
+  const final = agentPidPath(projectRoot, sessionId);
+  // Pre-check the final path. The `wx` flag on the temp guarantees
+  // we don't race with another claimer, but `fs.rename` would
+  // silently clobber a pre-existing final pidfile — and that
+  // pre-existing file is the whole point of the conflict guard.
+  if (existsSync(final)) return false;
+  const tmp = `${final}.tmp`;
+  let fd: number | null = null;
+  try {
+    // Mode 0o600: only the owner can read the pidfile (which holds
+    // our process pid — not secret, but the principal-of-least-
+    // privilege default). `"wx"` refuses to open an existing file,
+    // so a stale `.tmp` from a crashed prior claim cannot be silently
+    // truncated. Concurrent claimers race on this open; exactly one
+    // wins, the rest get EEXIST.
+    fd = await fs.open(tmp, "wx", 0o600);
+    await fd.writeFile(String(pid));
+    await fd.sync();
+    await fd.close();
+    fd = null;
+  } catch (e) {
+    if (fd !== null) {
+      try {
+        await fd.close();
+      } catch {
+        /* swallow */
+      }
+    }
+    try {
+      await fs.unlink(tmp);
+    } catch {
+      /* swallow */
+    }
+    if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+    throw e;
+  }
+  // Re-check the final path after the temp write completes. The
+  // window between `existsSync(final)` above and this `rename` is
+  // small but non-zero — another claimer could have created the
+  // final in the meantime. The `wx` flag on the temp file is what
+  // actually prevents the race: only one claimer can ever produce
+  // a `.tmp` to rename from.
+  if (existsSync(final)) {
+    try {
+      await fs.unlink(tmp);
+    } catch {
+      /* swallow */
+    }
+    return false;
+  }
+  try {
+    await fs.rename(tmp, final);
+  } catch (e) {
+    try {
+      await fs.unlink(tmp);
+    } catch {
+      /* swallow */
+    }
+    throw e;
+  }
+  return true;
 };
 
 /** Remove the pidfile. Silent when already gone. */
