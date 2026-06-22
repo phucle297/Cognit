@@ -414,3 +414,56 @@ The four sub-beads in `plan.xml` phase 4:
   `migratePayload` on read (the v1.0.0 → v1.1.0 and v1.1.0 → v1.2.0
   transforms are both identity — v1.2.0 adds the `hypothesis_ranked`
   event type purely additively).
+
+## AI supervisor epic (A1, A2, C1–C5) — what landed
+
+The AI supervisor replaces manual hypothesis authoring with an
+LLM-driven loop. Six packages / subcommands, in two waves:
+
+- **Wave 1 — gravity override (A1, A2)**:
+  - `HypothesisRankedPayload` schema (v1.2.0): `hypothesis_id`,
+    `score ∈ [0, 1]`, `reasoning`, `evaluator: "ai-supervisor"`,
+    `override_rule_based`, optional `context_event_ids`.
+  - `HypothesisState` gains `ai_rank_score` + `ai_rank_reasoning` +
+    `ai_rank_evaluator` + `ai_rank_at` + `ai_rank_event_id` (set
+    immutably by the reducer on each `hypothesis_ranked` event).
+  - `packages/gravity::rankHypotheses` consults `ai_rank_score` first
+    when present, falls back to the 5-axis formula otherwise. Each
+    `RankedHypothesis` carries `source: "ai" | "rule"`.
+  - `apps/server::rankActiveHypothesesFromState` mirrors the override
+    so the state-aware API ranker agrees with the package default.
+
+- **Wave 2 — supervisor loop (C1–C5)**:
+  - **`packages/llm`** — Vercel AI SDK provider layer.
+    `provider.modelFor({provider, model})` returns an AI SDK model
+    (`anthropic` / `openai` / `google` / `ollama` via `@ai-sdk/*`).
+    `LlmLive` (eager env check) and `LlmLiveLazy` (deferred, errors
+    surface on first call) compose with `completeJson<T>()` for typed
+    output + `Effect.Schema` validation. Errors are tagged
+    `LlmCompletionError` / `JsonParseError` / `SchemaValidationError`.
+  - **`packages/agent`** — Effect supervisor.
+    `AgentConfig` schema (`provider`, `model`, `max_actions_per_tick`
+    default 5, `max_prompt_hypotheses` default 50); `AgentDecision`
+    schema (5 action variants + `rank_overrides` + `stop`); pure
+    `prompt.ts` (deterministic, golden-snapshot tested);
+    `loop.ts::runTick` (read events → reduce state → prompt → LLM →
+    parse → apply); `apply.ts` translates decisions to
+    `EventStore.append` with action cap + idempotent ULIDs.
+  - **`apps/cli::cognit agent {run,status,stop}`** — supervisor
+    reachable from the operator terminal. `agent-state.ts` runs a
+    pidfile + stop sentinel + per-tick state JSON under `.cognit/`,
+    with atomic writes and liveness probes. SIGINT flips a flag the
+    loop checks between ticks; second SIGINT hard-exits. Each
+    subcommand emits a stable v1 `--json` envelope.
+  - **`apps/dashboard::AI Reasoning`** — live SSE feed of
+    `hypothesis_ranked` events; renders AI rank history vs rule-based
+    score per hypothesis, plus the supervisor decision log.
+  - **E2E** — `apps/cli/test/agent.test.ts` + `agent.e2e.test.ts`
+    exercise commander → layer-build → runTick → state.json end-to-end
+    via `tsx`.
+
+The single ingest boundary (`appendEvent` in `@cognit/db`) is unchanged:
+the supervisor's emitted events flow through the same redaction +
+constraint + atomic-write pipeline as every other writer. The AI score
+is clamped defensively to `[0, 1]`; non-finite values fall back to the
+formula.

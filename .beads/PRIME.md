@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: test: Cognit-3ru.2 add atomic-write race tests (wx EEXIST, mode 0o600 temp, mode 0o700 parent)
+search: feat: AI supervisor — AI-driven gravity ranking (epic)
 queue: 
-next: Cognit-e3a
+next: 

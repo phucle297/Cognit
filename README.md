@@ -381,6 +381,7 @@ Pages:
 - **Decision Graph** — decisions with `based_on` edges to conclusions, and `caused` edges to experiments
 - **Verification** — all verifications with their final state, with rerun history per hypothesis
 - **Recovery Center** — related sessions, rejected hypotheses (with reason type), verified conclusions, accepted decisions, suggested next steps
+- **AI Reasoning** — live SSE feed of `hypothesis_ranked` events, AI rank history vs rule-based, supervisor decision log (only visible when a supervisor is active or has run on the session)
 - **Settings** — project config, redaction patterns, cleanup policy, storage usage, export/import buttons
 
 ---
@@ -420,7 +421,92 @@ pnpm link --global
 
 ---
 
-## Quick Start
+## AI-Driven Flow (canonical)
+
+> **You do not write hypotheses — the AI supervisor does.**
+> The canonical loop is observation in, AI reasoning out.
+
+1. Init the project and create a session (steps 1–3 of [Quick Start](#quick-start-manual-fallback-debug-only) below).
+2. Capture observations via `cognit wrap`, `cognit observation add`, or worker hooks (`PostToolUse: cognit observation add`).
+3. Run the supervisor. It reads `SessionState`, reasons about observations, and emits typed events into `.cognit/inbox/` (or directly into the store):
+
+   ```bash
+   # mock LLM (no API keys, deterministic canned decisions)
+   cognit agent run --session <id> --provider mock
+
+   # real provider — set the matching env var
+   export ANTHROPIC_API_KEY=...   # anthropic
+   # or OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_KEY / OLLAMA_BASE_URL
+   cognit agent run --session <id> --provider anthropic --model claude-sonnet-4-6
+   cognit agent run --session <id> --provider openai    --model gpt-4o
+   cognit agent run --session <id> --provider google    --model gemini-2.5-pro
+   cognit agent run --session <id> --provider ollama    --model llama3.1
+
+   # bounded / one-shot
+   cognit agent run --session <id> --once
+   cognit agent run --session <id> --max-ticks 5 --tick-interval-ms 2000
+
+   # supervise from another terminal
+   cognit agent status --session <id>
+   cognit agent stop   --session <id>      # idempotent
+   ```
+
+   Each tick: tail events → replay state → build prompt (capped at 50 hypotheses) → call LLM → parse `AgentDecision` → apply (up to 5 actions per tick). SIGINT flips a flag the loop checks between ticks; a second SIGINT hard-exits.
+
+4. The supervisor emits `hypothesis_ranked` events. The Gravity Engine (v1.2.0) consults `ai_rank_score` first; the 5-axis rule-based score is the fallback for hypotheses the AI has not yet scored. Each `RankedHypothesis` carries `source: "ai" | "rule"`.
+5. Inspect the recovery surface:
+
+   ```bash
+   cognit recovery <session-id>            # full v0.2 envelope
+   cognit recovery search "memory leak"    # fuzzy across sessions
+   cognit session show <id-or-goal>        # raw reducer output
+   cognit events --type hypothesis_ranked --follow
+   ```
+
+6. Steer by sending new observations or by manually rejecting the AI's choice (manual CLI is a debug tool, not the main path).
+
+### `hypothesis_ranked` payload (v1.2.0)
+
+```ts
+{
+  hypothesis_id: string,                   // required, non-empty
+  score: number,                            // required, [0, 1]
+  reasoning: string,                        // required, non-empty
+  evaluator: "ai-supervisor",               // literal — only the supervisor emits these today
+  override_rule_based: boolean,             // true = AI wins, false = fallback only
+  context_event_ids?: string[],             // optional, prior events the AI saw
+}
+```
+
+If you do not want to use the built-in loop, write `hypothesis_ranked` events directly into `.cognit/inbox/` from your AI tool of choice. Atomic write protocol:
+
+```bash
+cat > event.json.tmp <<'JSON'
+{
+  "schema_version": "1.2.0",
+  "type": "hypothesis_ranked",
+  "session_id": "01HXY...",
+  "actor": { "type": "worker", "name": "ai-supervisor" },
+  "payload": {
+    "hypothesis_id": "01HXY...",
+    "score": 0.82,
+    "reasoning": "Strongest reproducer; matches 3 supporting findings.",
+    "evaluator": "ai-supervisor",
+    "override_rule_based": true,
+    "context_event_ids": []
+  }
+}
+JSON
+sync && mv event.json.tmp event.json
+```
+
+The reducer applies the AI score to the target hypothesis; `linked_hypothesis_id` is not used (reserved for verification events). Score is clamped to `[0, 1]`; non-finite values fall back to the rule-based formula.
+
+---
+
+## Quick Start (manual fallback / debug only)
+
+The commands below still work for seeding state, inspecting, and one-off debugging. The AI supervisor is the canonical writer of these events in production.
 
 ### 1. Initialize Cognit in a repository
 
@@ -703,6 +789,9 @@ cognit session pause
 cognit session close
 cognit session show <id-or-goal>
 
+cognit recovery <session-id>
+cognit recovery search "<query>"
+
 cognit snapshot
 
 cognit append --type <event-type> --payload <json|file> [--session <id>] [--actor name:type]
@@ -754,6 +843,14 @@ cognit inbox [--watch|--process]
 cognit schema-dump
 
 cognit server [--host <ip>] [--port <n>] [--root <p>]
+
+# AI supervisor
+cognit agent run    [--session <id>] [--provider mock|anthropic|openai|google|ollama]
+                    [--model <name>] [--once] [--max-ticks N] [--tick-interval-ms N]
+cognit agent status [--session <id>]
+cognit agent stop   [--session <id>]
+
+cognit wrap -- <command> [args...]
 
 cognit --json <command>             # emit the v1 JSON envelope
 ```
@@ -853,6 +950,9 @@ Cognit v0.1 is complete when it can:
 
 - create and resume sessions locally (resume forks by default; pass `--fork=false` to append); the resume block returns rejected hypotheses, verified conclusions, and accepted decisions
 - record observations, findings, hypotheses, experiments, decisions, conclusions, and verifications through first-class `cognit observe / finding / hypothesis / theory / experiment / decision / conclusion / verify / artifact / edge` subcommands
+- accept `hypothesis_ranked` (v1.2.0) events from AI workers, persist `ai_rank_score` + `ai_rank_reasoning` + `ai_rank_evaluator` on the target hypothesis, and have the Gravity Engine consult that score first (with the 5-axis formula as fallback for hypotheses the AI has not yet scored)
+- drive the AI supervisor loop via `cognit agent {run,status,stop}` against any Vercel-AI-SDK provider (`mock` / `anthropic` / `openai` / `google` / `ollama`); `run` reads state, calls the LLM, parses an `AgentDecision` schema, and applies up to `max_actions_per_tick` actions per tick
+- render the AI Reasoning dashboard tab (live SSE of `hypothesis_ranked`, AI rank history, decision log) so the user can compare AI scores against the rule-based fallback
 - resolve a sticky `current-session` pointer so entity commands can run with no `--session` flag; `--session` always overrides the pointer
 - emit a stable `--json` envelope (`{ version: 1, kind, data }`) for every command, parseable by `jq`
 - enforce typed constraint rules via `cognit constraint {add,list,test}` (closed v1 predicate set of 13); non-violating events still produce a `constraint_rule_applied` audit row in the same tx
@@ -885,7 +985,7 @@ Future directions include:
 - plugin adapters for Claude Code, Codex, OpenCode, Gemini CLI, and custom workers
 - trust engine: per-actor trust with history and override
 - stronger Gravity Engine with learned weights
-- supervisor mode: a long-running worker that observes, ranks, assigns, verifies, prunes, and resumes investigations
+- supervisor mode: a long-running worker that observes, ranks, assigns, verifies, prunes, and resumes investigations — **shipped**. The `cognit agent {run,status,stop}` loop reads session state, calls the LLM, parses an `AgentDecision`, applies it, and emits `hypothesis_ranked` events that the Gravity Engine consults first. Providers: `mock` / `anthropic` / `openai` / `google` / `ollama` via `@cognit/llm` (Vercel AI SDK).
 - remote sync for team usage while keeping local-first mode
 - shared project cognition with per-actor write permissions
 - event compaction and archival beyond the simple gc
