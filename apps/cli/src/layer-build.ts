@@ -184,11 +184,13 @@ export const withAppLayerAndConfig = async <A, E, R>(
 /**
  * Build an `LlmProvider` Layer from an `AgentConfig`.
  *
- * - `provider: "mock"` → canned stop-only decision via
- *   `@cognit/agent`'s `llmProviderFrom`. `@cognit/llm`'s `modelFor`
- *   throws for `mock` by design, so we cannot route through the
- *   real provider factory. The canned response keeps tests and
- *   smoke runs working without API keys.
+ * - `provider: undefined` or `provider: "mock"` → canned stop-only
+ *   decision via `@cognit/agent`'s `llmProviderFrom`. The schema
+ *   relaxed `provider` to optional in Cognit-l06/005, so callers
+ *   that omit the flag land here. `@cognit/llm`'s `modelFor` throws
+ *   for `mock` by design, so we cannot route through the real
+ *   provider factory — the canned response keeps tests and smoke
+ *   runs working without API keys.
  * - Real providers (`anthropic` / `openai` / `google` / `ollama`)
  *   → `@cognit/llm`'s `LlmLiveLazy`. Missing env vars surface as
  *   `LlmCompletionError` on the first call rather than crashing
@@ -196,7 +198,7 @@ export const withAppLayerAndConfig = async <A, E, R>(
  *   error message.
  */
 export const buildLlmLayer = (cfg: AgentConfig): Layer.Layer<LlmProvider> => {
-  if (cfg.provider === "mock") {
+  if (cfg.provider === undefined || cfg.provider === "mock") {
     // Mock decision: no actions, no rank overrides, stop=false so
     // the supervisor keeps ticking (tests for `--once` and for the
     // stop sentinel both rely on the loop actually looping). The

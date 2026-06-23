@@ -63,7 +63,14 @@ export const RAW_TRUNCATE_BYTES = 1024;
 export interface CompleteJsonInput<T> {
   readonly prompt: string;
   readonly model: string;
-  readonly provider: AgentProvider;
+  /**
+   * Optional. Legacy closed-literal provider; the Gateway path
+   * ignores it (the model id carries the provider prefix). Kept
+   * here only because the interface signature is shared with
+   * `@cognit/agent`'s `LlmProviderShape` which the supervisor loop
+   * satisfies from `agent.provider` (itself optional post-relax).
+   */
+  readonly provider?: AgentProvider;
   readonly schema: Schema.Schema<T>;
   readonly signal?: AbortSignal;
 }
