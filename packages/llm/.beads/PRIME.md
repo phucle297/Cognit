@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Cognit-l06/003 Multimodal input handler
+search: Cognit-l06/006 cognit ask command
 queue: 
-next: Cognit-9qe
+next: Cognit-1z3
