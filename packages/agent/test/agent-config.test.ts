@@ -19,7 +19,6 @@ import {
   AgentProvider,
   parseAgentConfig,
   defaultAgentConfig,
-  type AgentConfig,
 } from "../src/agent-config.js";
 
 describe("AgentConfig — provider relaxation (Cognit-l06/005)", () => {

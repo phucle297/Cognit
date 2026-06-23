@@ -137,10 +137,14 @@ export const runTick = (
     //    (`exactOptionalPropertyTypes: true`).
     let decision: AgentDecision;
     if (llm.completeJson) {
+      // `provider` is optional on both sides post-Cognit-l06/005
+      // relaxation, so we conditionally include the field to satisfy
+      // `exactOptionalPropertyTypes: true` (a missing field is not
+      // assignable to an explicit `undefined` value).
       decision = (yield* llm.completeJson({
         prompt,
         model: input.agent.model,
-        provider: input.agent.provider,
+        ...(input.agent.provider !== undefined ? { provider: input.agent.provider } : {}),
         schema: AgentDecision as Schema.Schema<AgentDecision>,
         ...(input.signal ? { signal: input.signal } : {}),
       })) as AgentDecision;

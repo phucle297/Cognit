@@ -31,7 +31,7 @@
  */
 
 import { generateText } from "ai";
-import type { AgentConfig, LlmProviderShape } from "@cognit/agent";
+import type { AgentConfig, AgentProvider, LlmProviderShape } from "@cognit/agent";
 import { LlmProvider } from "@cognit/agent";
 import { Effect, Layer, Schedule } from "effect";
 import type { LlmConfig } from "@cognit/core";
@@ -102,11 +102,29 @@ const generateTextEffect = (
  * through `modelFor`. Back-compat for `--provider <name>` grace
  * period. Removed once `cognit agent run` no longer accepts
  * `--provider`.
+ *
+ * The schema relaxed `provider` to optional in Cognit-l06/005; the
+ * legacy `modelFor` switch requires a concrete value. We throw a
+ * typed error here rather than silently falling back to mock so
+ * misconfigured callers see exactly what's wrong. The Gateway path
+ * (`gatewayShapeFor`) is the recommended route when provider is unset.
  */
-export const llmShapeFor = (cfg: AgentConfig): LlmProviderShape => ({
-  complete: ({ prompt, model, signal }) =>
-    generateTextEffect(() => modelFor(cfg.provider, model), prompt, signal),
-});
+export const llmShapeFor = (cfg: AgentConfig): LlmProviderShape => {
+  // Capture once at construction so the closure sees the narrowed
+  // type. The schema relaxed `provider` to optional in
+  // Cognit-l06/005; the legacy path requires a concrete value.
+  if (cfg.provider === undefined) {
+    throw new LlmCompletionError(
+      "llmShapeFor: legacy --provider path requires agent.provider " +
+        "(set provider explicitly or use the Gateway route via @cognit/llm/gateway)",
+    );
+  }
+  const provider: AgentProvider = cfg.provider;
+  return {
+    complete: ({ prompt, model, signal }) =>
+      generateTextEffect(() => modelFor(provider, model), prompt, signal),
+  };
+};
 
 /**
  * Gateway-routed shape. Resolves the API key per call from
@@ -126,6 +144,12 @@ export const gatewayShapeFor = (llm: LlmConfig): LlmProviderShape => ({
  * path.
  */
 export const LlmLive = (cfg: AgentConfig): Layer.Layer<LlmProvider, never, never> => {
+  if (cfg.provider === undefined) {
+    throw new LlmCompletionError(
+      "LlmLive: legacy --provider path requires agent.provider " +
+        "(set provider explicitly or use the Gateway route via @cognit/llm/gateway)",
+    );
+  }
   assertEnvFor(cfg.provider);
   const shape = extendWithJson(llmShapeFor(cfg));
   return Layer.succeed(LlmProvider)(shape);
