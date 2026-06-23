@@ -57,7 +57,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Person,
       }),
     );
@@ -75,7 +74,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "describe person",
         model: "m",
-        provider: "anthropic",
         schema: Person,
       }),
     );
@@ -88,7 +86,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Person,
       }).pipe(Effect.either),
     );
@@ -105,7 +102,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Person,
       }).pipe(Effect.either),
     );
@@ -126,7 +122,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Person,
       }).pipe(Effect.either),
     );
@@ -145,7 +140,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Nested,
       }),
     );
@@ -160,7 +154,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Empty,
       }),
     );
@@ -174,7 +167,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: NumList,
       }),
     );
@@ -196,7 +188,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       ext.completeJson({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Person,
       }),
     );
@@ -219,7 +210,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Person,
       }).pipe(Effect.either),
     );
@@ -246,7 +236,6 @@ describe("completeJson — JSON completion + schema validation", () => {
       makeCompleteJson(shape.complete)({
         prompt: "p",
         model: "m",
-        provider: "anthropic",
         schema: Person,
         signal: controller.signal,
       }),

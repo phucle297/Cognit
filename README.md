@@ -445,13 +445,14 @@ Requirements: **Node.js 24 LTS**, **pnpm 9**, **Docker**.
    # mock LLM (no API keys, deterministic canned decisions)
    cognit agent run --session <id> --provider mock
 
-   # real provider — set the matching env var
-   export ANTHROPIC_API_KEY=...   # anthropic
-   # or OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_KEY / OLLAMA_BASE_URL
-   cognit agent run --session <id> --provider anthropic --model claude-sonnet-4-6
-   cognit agent run --session <id> --provider openai    --model gpt-4o
-   cognit agent run --session <id> --provider google    --model gemini-2.5-pro
-   cognit agent run --session <id> --provider ollama    --model llama3.1
+   # Gateway route — model resolved from llm.default_model in cognit.yaml
+   cognit agent run --session <id>
+
+   # Override the model from the CLI
+   cognit agent run --session <id> --model anthropic/claude-sonnet-4-6
+   cognit agent run --session <id> --model openai/gpt-4o
+   cognit agent run --session <id> --model google/gemini-2.5-pro
+   cognit agent run --session <id> --model ollama/llama3.1
 
    # bounded / one-shot
    cognit agent run --session <id> --once
@@ -462,7 +463,56 @@ Requirements: **Node.js 24 LTS**, **pnpm 9**, **Docker**.
    cognit agent stop   --session <id>      # idempotent
    ```
 
-   Each tick: tail events → replay state → build prompt (capped at 50 hypotheses) → call LLM → parse `AgentDecision` → apply (up to 5 actions per tick). SIGINT flips a flag the loop checks between ticks; a second SIGINT hard-exits.
+   Real-LLM calls go through the **Vercel AI Gateway**. Set `AI_GATEWAY_API_KEY` (or a per-model `api_key_env` in `cognit.yaml`) before running without `--provider mock`. Each tick: tail events → replay state → build prompt (capped at 50 hypotheses) → call LLM → parse `AgentDecision` → apply (up to 5 actions per tick). SIGINT flips a flag the loop checks between ticks; a second SIGINT hard-exits.
+
+### One-shot ask with multimodal
+
+For a single prompt (no supervisor loop), use `cognit ask`. Same Gateway routing, no reducer / apply step:
+
+```bash
+export AI_GATEWAY_API_KEY=...
+
+# Plain text — model from cognit.yaml → llm.default_model or --model
+cognit ask --prompt "explain the difference between <details> and <summary> in HTML"
+
+# Override the model
+cognit ask --model anthropic/claude-sonnet-4-6 --prompt "explain <details>"
+
+# Multimodal: attach a local image, a URL, a file, or a clipboard snapshot
+cognit ask --prompt "what's in this diagram?" --input ./diagram.png
+cognit ask --prompt "describe"           --input https://example.com/photo.jpg
+cat diagram.png | cognit ask --prompt "what does this show?"
+echo "explain ENOSPC" | cognit ask
+cognit ask --prompt "what's on my clipboard?" --input clipboard
+
+# Stable JSON envelope for downstream tooling
+cognit ask --json --prompt "explain <details>"
+```
+
+See `guide/en.md` §4.4 for the full resolution order, exit codes, and clipboard platform matrix.
+
+### Minimal `cognit.yaml` for real LLM calls
+
+```yaml
+project:
+  name: my-app
+
+llm:
+  api_key_env: AI_GATEWAY_API_KEY
+  default_model: anthropic/claude-sonnet-4-6
+  # Per-model override — uses a direct key instead of the Gateway key
+  models:
+    openai/gpt-4o:
+      api_key_env: OPENAI_API_KEY
+  # Per-command override — different model for `cognit ask` vs `cognit agent run`
+  commands:
+    ask:
+      model: anthropic/claude-sonnet-4-6
+    agent_run:
+      model: openai/gpt-4o
+```
+
+Mock runs (`--provider mock` or no `llm.default_model` configured) do not read `AI_GATEWAY_API_KEY`, so smoke tests stay green without a key.
 
 4. The supervisor emits `hypothesis_ranked` events. The Gravity Engine (v1.2.0) consults `ai_rank_score` first; the 5-axis rule-based score is the fallback for hypotheses the AI has not yet scored. Each `RankedHypothesis` carries `source: "ai" | "rule"`.
 5. Inspect the recovery surface:

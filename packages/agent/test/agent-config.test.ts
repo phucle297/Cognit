@@ -1,60 +1,46 @@
 /**
- * packages/agent/test/agent-config.test.ts — relaxed AgentConfig schema.
- *
- * Cognit-l06/005 relaxed `AgentConfig.provider` to truly optional
- * (no implicit `"mock"` default). Spec §4. The literal
- * `AgentProvider` stays exported for the `--provider` back-compat
- * grace period.
+ * packages/agent/test/agent-config.test.ts — AgentConfig schema.
  *
  * Cases:
- *   1. `parseAgentConfig({})` no longer defaults provider to "mock"
- *   2. `parseAgentConfig({ provider: "mock" })` still works
- *   3. `parseAgentConfig({ provider: "anthropic" })` still works
- *   4. unknown provider rejected (literal unchanged)
- *   5. `defaultAgentConfig.provider` is "mock" (explicit, not schema-defaulted)
- *   6. AgentProvider literal still exported with the same union
+ *   1. `parseAgentConfig({})` defaults model to "mock-1"
+ *   2. `parseAgentConfig({ model: "anthropic/claude-sonnet-4-6" })` preserves full Gateway id
+ *   3. empty model string rejected by minLength(1)
+ *   4. `defaultAgentConfig.model` is "mock-1"
+ *   5. max_actions_per_tick defaults to 5, accepts 0 for rank-only ticks
+ *   6. max_prompt_hypotheses defaults to 50, requires positive int
  */
 import { describe, it, expect } from "vitest";
 import {
-  AgentProvider,
   parseAgentConfig,
   defaultAgentConfig,
 } from "../src/agent-config.js";
 
-describe("AgentConfig — provider relaxation (Cognit-l06/005)", () => {
-  it("1. parseAgentConfig({}) no longer defaults provider to 'mock'", () => {
+describe("AgentConfig — model-only schema (post --provider removal)", () => {
+  it("1. parseAgentConfig({}) defaults model to 'mock-1'", () => {
     const cfg = parseAgentConfig({});
-    expect(cfg.provider).toBeUndefined();
+    expect(cfg.model).toBe("mock-1");
   });
 
-  it("2. parseAgentConfig({ provider: 'mock' }) works", () => {
-    const cfg = parseAgentConfig({ provider: "mock" });
-    expect(cfg.provider).toBe("mock");
+  it("2. parseAgentConfig({ model: 'anthropic/claude-sonnet-4-6' }) preserves full Gateway id", () => {
+    const cfg = parseAgentConfig({ model: "anthropic/claude-sonnet-4-6" });
+    expect(cfg.model).toBe("anthropic/claude-sonnet-4-6");
   });
 
-  it("3. parseAgentConfig({ provider: 'anthropic' }) works", () => {
-    const cfg = parseAgentConfig({ provider: "anthropic", model: "claude-3-haiku-20240307" });
-    expect(cfg.provider).toBe("anthropic");
-    expect(cfg.model).toBe("claude-3-haiku-20240307");
+  it("3. empty model string rejected by minLength(1)", () => {
+    expect(() => parseAgentConfig({ model: "" })).toThrow();
   });
 
-  it("4. unknown provider rejected (literal union unchanged)", () => {
-    expect(() => parseAgentConfig({ provider: "unknown" })).toThrow();
+  it("4. defaultAgentConfig.model is 'mock-1'", () => {
+    expect(defaultAgentConfig.model).toBe("mock-1");
   });
 
-  it("5. defaultAgentConfig.provider is 'mock' (explicit, not schema-defaulted)", () => {
-    expect(defaultAgentConfig.provider).toBe("mock");
+  it("5. max_actions_per_tick defaults to 5 and accepts 0 (rank-only ticks)", () => {
+    expect(parseAgentConfig({}).max_actions_per_tick).toBe(5);
+    expect(parseAgentConfig({ max_actions_per_tick: 0 }).max_actions_per_tick).toBe(0);
   });
 
-  it("6. AgentProvider literal still exported with the same union", () => {
-    // Type-level: the literal accepts exactly these five strings.
-    // Run-time: parseAgentConfig round-trips each one.
-    const names: AgentProvider[] = ["anthropic", "openai", "google", "ollama", "mock"];
-    for (const n of names) {
-      const cfg = parseAgentConfig({ provider: n });
-      expect(cfg.provider).toBe(n);
-    }
-    // Confirm export is the schema (so consumers can decode manually).
-    expect(AgentProvider).toBeDefined();
+  it("6. max_prompt_hypotheses defaults to 50 and requires positive int", () => {
+    expect(parseAgentConfig({}).max_prompt_hypotheses).toBe(50);
+    expect(() => parseAgentConfig({ max_prompt_hypotheses: 0 })).toThrow();
   });
 });

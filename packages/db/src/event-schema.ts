@@ -367,10 +367,16 @@ export const PAYLOAD_SCHEMAS_BY_VERSION: Readonly<
  * newly-introduced event types (e.g. `hypothesis_ranked` in v1.2.0)
  * are caught by the per-type Schema gate instead of being silently
  * accepted because their type only exists in the v1.2.0 schema map.
+ *
+ * Non-null assertion: `CURRENT_VERSION` is a constant defined in this
+ * module and is also a key of `PAYLOAD_SCHEMAS_BY_VERSION` by
+ * construction. The index lookup returns `T | undefined` per TS's
+ * `noUncheckedIndexedAccess` semantics; the assertion documents the
+ * invariant rather than hiding it.
  */
 export const PAYLOAD_SCHEMAS_CURRENT: Readonly<
   Record<string, Schema.Schema<any, any, never>>
-> = PAYLOAD_SCHEMAS_BY_VERSION[CURRENT_VERSION];
+> = PAYLOAD_SCHEMAS_BY_VERSION[CURRENT_VERSION]!;
 
 /**
  * Convenience: the same map typed as a record of Schemas.

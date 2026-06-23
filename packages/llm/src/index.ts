@@ -2,15 +2,16 @@
  * @cognit/llm — Vercel AI SDK provider layer (C1).
  *
  * Public surface:
- *   - `LlmLive(cfg)` / `LlmLiveLazy(cfg)` — Layers satisfying
- *     `@cognit/agent`'s `LlmProvider` Tag
- *   - `modelFor(provider, modelId)` — pure SDK model factory
- *   - `assertEnvFor` / `requireEnvFor` / `ENV_VAR_BY_PROVIDER` —
- *     env-var surface for boot-time checks
+ *   - `LlmLiveFromRoute(llm)` / `LlmLiveLazyFromRoute(llm)` —
+ *     Gateway-routed Layers satisfying `@cognit/agent`'s
+ *     `LlmProvider` Tag
+ *   - `gatewayModel(llm, modelId)` — Vercel AI Gateway factory
  *   - `makeCompleteJson` / `extendWithJson` / `JSON_OUTPUT_INSTRUCTION` —
  *     typed JSON completion helper (re-exported by tests)
  *   - `LlmCompletionError` / `JsonParseError` / `SchemaValidationError`
  *     — typed error surface
+ *   - Multimodal input resolution + clipboard helpers used by
+ *     `cognit ask`
  *
  * Dependency direction: `packages/agent` defines the `LlmProvider`
  * Tag and the prompt builder. `packages/llm` provides a concrete
@@ -20,6 +21,7 @@
  *   - the Vercel AI SDK wrapper (`generateText`)
  *   - the JSON parse + Effect Schema validation step
  *   - the env-var boot check
+ *   - multimodal input classification
  *
  * The agent package keeps ownership of:
  *   - the `AgentDecision` schema
@@ -27,11 +29,8 @@
  *   - the loop orchestration
  */
 export {
-  LlmLive,
-  LlmLiveLazy,
   LlmLiveFromRoute,
   LlmLiveLazyFromRoute,
-  llmShapeFor,
   gatewayShapeFor,
 } from "./layer.js";
 
@@ -41,13 +40,6 @@ export {
   resolveGatewayRoute,
   type GatewayRoute,
 } from "./gateway.js";
-
-export {
-  modelFor,
-  ENV_VAR_BY_PROVIDER,
-  requireEnvFor,
-  assertEnvFor,
-} from "./provider.js";
 
 export {
   makeCompleteJson,

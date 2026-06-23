@@ -29,12 +29,10 @@ export {
 
 export {
   AgentConfig,
-  AgentProvider,
   DEFAULT_MAX_PROMPT_HYPOTHESES,
   defaultAgentConfig,
   parseAgentConfig,
   type AgentConfig as AgentConfigT,
-  type AgentProvider as AgentProviderT,
 } from "./agent-config.js";
 
 export {

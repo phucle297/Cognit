@@ -27,10 +27,17 @@ export interface EventBusShape {
    * Subscribe to event rows. Returns:
    *  - a queue that the subscriber drains, and
    *  - an `unsub` effect to remove the subscription.
+   *
+   * Errors are typed `unknown` (not `never`) so the SSE handler's
+   * `Effect.catchAllCause` in `apps/server/src/sse.ts` can observe
+   * subscribe failures — DB init errors, queue creation races, etc.
+   * The no-op default (`EventBusNoop`) and the production
+   * `EventBusLive` both succeed; the `unknown` channel exists for
+   * defensive boundaries, not as a frequent failure mode.
    */
   readonly subscribe: () => Effect.Effect<
     { queue: Queue.Queue<EventRow>; unsub: Effect.Effect<void, never, never> },
-    never,
+    unknown,
     never
   >;
   /**

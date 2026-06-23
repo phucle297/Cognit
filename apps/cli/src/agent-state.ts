@@ -123,7 +123,7 @@ export const claimPidfile = async (
   // pre-existing file is the whole point of the conflict guard.
   if (existsSync(final)) return false;
   const tmp = `${final}.tmp`;
-  let fd: number | null = null;
+  let fd: import("node:fs/promises").FileHandle | null = null;
   try {
     // Mode 0o600: only the owner can read the pidfile (which holds
     // our process pid — not secret, but the principal-of-least-

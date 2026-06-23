@@ -25,15 +25,27 @@
  *   - default (text): key/value lines, one per tick in `run` mode.
  *   - `--json`: stable v1 envelopes (`agent.tick`, `agent.run`,
  *     `agent.status`, `agent.stop`).
+ *
+ * Gateway migration (Cognit-l06/007):
+ *   The supervisor loop routes every real-LLM call through the
+ *   Vercel AI Gateway. `--model` is the canonical flag and is
+ *   resolved by `resolveModel(config, "agent_run", opts.model)`
+ *   (flag > llm.commands.agent_run.model > llm.default_model).
+ *   The model id format is `<provider>/<id>` (e.g.
+ *   `anthropic/claude-sonnet-4-6`). The canned layer is reached
+ *   when the resolved model id is `mock-1` (the default).
  */
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
-import { defaultConfig } from "@cognit/core/config";
-import { runTick } from "@cognit/agent";
+import { defaultConfig, type CognitConfig } from "@cognit/core/config";
 import {
-  agentConfigFromFlags,
-  withAppLayerAndConfigAndAgent,
-} from "../layer-build.js";
+  runTick,
+  type AgentConfig,
+  defaultAgentConfig,
+  parseAgentConfig,
+} from "@cognit/agent";
+import { withAppLayerAndConfigAndAgent } from "../layer-build.js";
+import { resolveModel } from "../config-resolver.js";
 import {
   consumeStop,
   clearPidfile,
@@ -43,13 +55,13 @@ import {
   requestStop,
   writeAgentState,
 } from "../agent-state.js";
-import { findProjectRoot } from "../paths.js";
+import { findProjectRoot, projectPaths } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { emit, getOutputMode } from "../output.js";
+import { readConfig } from "../yaml-io.js";
 
 interface RunOptions {
   session?: string;
-  provider?: string;
   model?: string;
   once?: boolean;
   maxTicks?: string;
@@ -145,8 +157,77 @@ const printTickError = (e: unknown): void => {
 };
 
 /**
- * `cognit agent run --session <id> [--provider] [--model] [--once]
- *                        [--max-ticks N] [--tick-interval-ms N]`
+ * Outcome of resolving CLI flags + config into a runnable
+ * `AgentConfig`. Exposed for tests that want to assert the routing
+ * logic without booting the supervisor loop.
+ *
+ * - `agentCfg` — the `AgentConfig` handed to `runTick` + the layer
+ *   builder. `model === "mock-1"` → canned layer; any other model
+ *   id → Vercel AI Gateway route.
+ * - `stateProvider` / `stateModel` — the values written into
+ *   `agent.<sid>.state.json`. `stateProvider` is `"mock"` when the
+ *   canned layer is used, otherwise `"gateway"`. `stateModel` is
+ *   the resolved model id.
+ */
+export interface ResolvedAgentRun {
+  readonly agentCfg: AgentConfig;
+  readonly stateProvider: string;
+  readonly stateModel: string;
+}
+
+/**
+ * Resolve the `AgentConfig` + state-recording fields from CLI flags
+ * + `cognit.yaml`. Pure function — no I/O, no side effects. Order
+ * (spec §4):
+ *
+ *   1. `--model <m>` → Gateway route when `<m>` is anything other
+ *      than `mock-1`. Canned layer when `<m>` is `mock-1`.
+ *   2. No flag → `resolveModel(config, "agent_run")` for the
+ *      Gateway id. Falls back to `defaultAgentConfig` (mock canned)
+ *      when no model is configured anywhere — preserves the
+ *      pre-migration behaviour for `cognit init`-only smoke runs.
+ *
+ * Exported for tests that want to assert the routing without
+ * booting the supervisor loop.
+ */
+export const resolveAgentRun = (
+  config: CognitConfig,
+  opts: RunOptions,
+): ResolvedAgentRun => {
+  // 1. --model <m>: Gateway route unless it's the canned marker.
+  if (opts.model !== undefined && opts.model.length > 0) {
+    const canned = opts.model === "mock-1";
+    return {
+      agentCfg: parseAgentConfig({ model: opts.model }),
+      stateProvider: canned ? "mock" : "gateway",
+      stateModel: opts.model,
+    };
+  }
+
+  // 2. No flag: try config resolution. Fall back to the mock
+  // canned layer when nothing is configured so `cognit init` +
+  // `cognit agent run --once` continues to work without an llm:
+  // block (the pre-migration default).
+  try {
+    const resolved = resolveModel(config, "agent_run");
+    const canned = resolved === "mock-1";
+    return {
+      agentCfg: parseAgentConfig({ model: resolved }),
+      stateProvider: canned ? "mock" : "gateway",
+      stateModel: resolved,
+    };
+  } catch {
+    return {
+      agentCfg: defaultAgentConfig,
+      stateProvider: "mock",
+      stateModel: defaultAgentConfig.model,
+    };
+  }
+};
+
+/**
+ * `cognit agent run --session <id> [--model <provider/id>]
+ *                        [--once] [--max-ticks N] [--tick-interval-ms N]`
  *
  * Drives the supervisor loop. See file-level docstring for the full
  * state-machine. Exit codes: 0 normal, 1 runtime error, 130 SIGINT,
@@ -157,10 +238,28 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
   const sessionId = resolveRequiredSession(root, opts.session);
   if (!sessionId) return;
 
-  const agentCfg = agentConfigFromFlags({
-    ...(opts.provider !== undefined ? { provider: opts.provider } : {}),
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
-  });
+  // Read cognit.yaml so `resolveModel(config, "agent_run", …)` can
+  // honour `llm.commands.agent_run.model` and `llm.default_model`.
+  // Schema failures here exit 2 — the file is malformed; we surface
+  // the error early rather than half-building the layer.
+  let config: CognitConfig;
+  try {
+    config = await readConfig(projectPaths(root).config);
+  } catch (e) {
+    const tag = e instanceof Error ? e.name : "Error";
+    process.stderr.write(
+      `cognit: failed to read config: ${tag}: ${(e as Error).message ?? String(e)}\n`,
+    );
+    process.exitCode = 2;
+    return;
+  }
+
+  const resolved = resolveAgentRun(config, opts);
+  const agentCfg = resolved.agentCfg;
+  // Capture the recorded (provider, model) pair ONCE so every tick
+  // writes the same shape into state.json.
+  const stateProvider = resolved.stateProvider;
+  const stateModel = resolved.stateModel;
 
   // Conflict guard. Two `cognit agent run` processes for the same
   // session at the same time is a user error (and a corruption risk
@@ -200,8 +299,8 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
       last_tick_id: null,
       tick_count: 0,
       last_decision_kind: "empty",
-      provider: agentCfg.provider,
-      model: agentCfg.model,
+      provider: stateProvider,
+      model: stateModel,
       started_at: startedAt,
       updated_at: startedAt,
     };
@@ -297,8 +396,8 @@ const runCommand = async (opts: RunOptions): Promise<void> => {
         last_tick_id: result.tickId,
         tick_count: state.tick_count + 1,
         last_decision_kind: summarizeDecision(result.decision),
-        provider: agentCfg.provider,
-        model: agentCfg.model,
+        provider: stateProvider,
+        model: stateModel,
         started_at: state.started_at,
         updated_at: updatedAt,
       };
@@ -475,10 +574,9 @@ export function registerAgent(program: Command): void {
     .description("run the supervisor loop on a session (foreground)")
     .option("--session <id>", "session id (ULID). Defaults to the sticky current-session pointer.")
     .option(
-      "--provider <p>",
-      "LLM provider: anthropic|openai|google|ollama|mock (default: mock)",
+      "--model <id>",
+      "Gateway model id (e.g. anthropic/claude-sonnet-4-6). Defaults to llm.default_model / llm.commands.agent_run.model, or mock-1 when none is set.",
     )
-    .option("--model <id>", "model id for the chosen provider (default: mock-1)")
     .option("--once", "run a single tick and exit (default: loop until stop)")
     .option(
       "--max-ticks <n>",

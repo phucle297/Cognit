@@ -1,23 +1,25 @@
 /**
  * packages/llm/src/layer.ts — LlmLive factory (C1).
  *
- * Builds an `LlmProvider` Layer. Two paths:
+ * Builds an `LlmProvider` Layer. Two factories:
  *
- *   1. Legacy (back-compat): `LlmLive(cfg)` / `LlmLiveLazy(cfg)` /
- *      `llmShapeFor(cfg)` take an `AgentConfig` (closed-literal
- *      `provider`) and route through `modelFor`. Kept for the
- *      grace period so `--provider anthropic --model claude-...`
- *      still works. Removed in task Cognit-l06/007.
+ *   - `LlmLiveFromRoute(llm)` — env-checked at build time. Throws
+ *     `LlmCompletionError` when `AI_GATEWAY_API_KEY` (or the
+ *     per-model override) is missing.
+ *   - `LlmLiveLazyFromRoute(llm)` — env check deferred to first
+ *     `complete()` call. Used by `cognit ask` so a misconfigured
+ *     operator gets the canonical env-missing stderr message at
+ *     runtime instead of a process-start crash.
  *
- *   2. Gateway (default for new commands): `LlmLiveFromRoute(llm)`
- *      / `LlmLiveLazyFromRoute(llm)` / `gatewayShapeFor(llm)` take
- *      an `LlmConfig` and route every model through Vercel AI
- *      Gateway via `gatewayModel`. The model id is resolved from
- *      the per-call `model` argument — the layer itself does not
- *      carry a single model; the supervisor loop decides per tick.
+ * Both paths route every model call through the Vercel AI Gateway
+ * via `gatewayModel(llm, modelId)`. The model id (e.g.
+ * `anthropic/claude-sonnet-4-6`) is supplied per call — the layer
+ * does not carry a single model; the supervisor loop decides per
+ * tick.
  *
- * Both paths share the same retry / abort / JSON-extension
- * machinery (`extendWithJson`, `LLM_RETRY_SCHEDULE`).
+ * The canned `mock-1` model id is handled separately in
+ * `apps/cli/src/layer-build.ts → buildLlmLayer`, which short-
+ * circuits before the Gateway layer is built.
  *
  * Cancellation: the caller's `AbortSignal` is threaded through to
  * `generateText({ abortSignal })`. The retry schedule does NOT
@@ -31,11 +33,10 @@
  */
 
 import { generateText } from "ai";
-import type { AgentConfig, AgentProvider, LlmProviderShape } from "@cognit/agent";
+import type { LlmProviderShape } from "@cognit/agent";
 import { LlmProvider } from "@cognit/agent";
 import { Effect, Layer, Schedule } from "effect";
 import type { LlmConfig } from "@cognit/core";
-import { assertEnvFor, modelFor } from "./provider.js";
 import { gatewayModel } from "./gateway.js";
 import { extendWithJson } from "./json.js";
 import { LlmCompletionError } from "./errors.js";
@@ -55,15 +56,17 @@ export const LLM_RETRY_SCHEDULE = Schedule.exponential("100 millis").pipe(
 
 /**
  * Inner Effect that wraps `generateText` with retry + abort
- * filtering. Shared between legacy and Gateway paths so the retry
- * semantics are identical regardless of which factory built the
- * layer.
+ * filtering. The model factory runs inside `Effect.try` so a
+ * synchronous throw from `buildModel()` (e.g. the Gateway layer's
+ * env-key check failing on first call) surfaces as a typed
+ * `LlmCompletionError` instead of escaping as an uncaught exception.
  *
- * The model factory is wrapped in `Effect.sync` and then `flatMap`'d
- * so the model is built lazily inside the Effect — not at
- * `complete()` invocation time. This matters for tests that build
- * a shape but never call `complete()`: calling `complete()` and
- * discarding the returned Effect must not throw.
+ * The model is built lazily inside the Effect — not at
+ * `complete()` invocation time — so tests that build a shape but
+ * never call `complete()` do not pay the SDK-construction cost, and
+ * consumers that wrap the Effect in `Effect.catchAll` /
+ * `Effect.either` see the env-missing failure uniformly with SDK
+ * failures.
  */
 const generateTextEffect = (
   buildModel: () => Parameters<typeof generateText>[0]["model"],
@@ -71,7 +74,16 @@ const generateTextEffect = (
   signal: AbortSignal | undefined,
 ) =>
   Effect.gen(function* () {
-    const sdkModel = buildModel();
+    const sdkModel = yield* Effect.try({
+      try: () => buildModel(),
+      catch: (e) =>
+        e instanceof LlmCompletionError
+          ? e
+          : new LlmCompletionError(
+              `llm: model build failed: ${(e as Error).message ?? String(e)}`,
+              e,
+            ),
+    });
     return yield* Effect.tryPromise({
       try: async () => {
         const result = await generateText({
@@ -98,35 +110,6 @@ const generateTextEffect = (
   });
 
 /**
- * Legacy provider-based shape. Reads `cfg.provider` and routes
- * through `modelFor`. Back-compat for `--provider <name>` grace
- * period. Removed once `cognit agent run` no longer accepts
- * `--provider`.
- *
- * The schema relaxed `provider` to optional in Cognit-l06/005; the
- * legacy `modelFor` switch requires a concrete value. We throw a
- * typed error here rather than silently falling back to mock so
- * misconfigured callers see exactly what's wrong. The Gateway path
- * (`gatewayShapeFor`) is the recommended route when provider is unset.
- */
-export const llmShapeFor = (cfg: AgentConfig): LlmProviderShape => {
-  // Capture once at construction so the closure sees the narrowed
-  // type. The schema relaxed `provider` to optional in
-  // Cognit-l06/005; the legacy path requires a concrete value.
-  if (cfg.provider === undefined) {
-    throw new LlmCompletionError(
-      "llmShapeFor: legacy --provider path requires agent.provider " +
-        "(set provider explicitly or use the Gateway route via @cognit/llm/gateway)",
-    );
-  }
-  const provider: AgentProvider = cfg.provider;
-  return {
-    complete: ({ prompt, model, signal }) =>
-      generateTextEffect(() => modelFor(provider, model), prompt, signal),
-  };
-};
-
-/**
  * Gateway-routed shape. Resolves the API key per call from
  * `llm.models[<model>].api_key_env` or `llm.api_key_env`. The model
  * id flows through per-call so the supervisor loop can switch
@@ -136,34 +119,6 @@ export const gatewayShapeFor = (llm: LlmConfig): LlmProviderShape => ({
   complete: ({ prompt, model, signal }) =>
     generateTextEffect(() => gatewayModel(llm, model), prompt, signal),
 });
-
-/**
- * Legacy Layer factory. Throws synchronously on `Layer.succeed`
- * construction if the provider's env var is missing. Same
- * `Layer.Layer<LlmProvider, never, never>` shape as the Gateway
- * path.
- */
-export const LlmLive = (cfg: AgentConfig): Layer.Layer<LlmProvider, never, never> => {
-  if (cfg.provider === undefined) {
-    throw new LlmCompletionError(
-      "LlmLive: legacy --provider path requires agent.provider " +
-        "(set provider explicitly or use the Gateway route via @cognit/llm/gateway)",
-    );
-  }
-  assertEnvFor(cfg.provider);
-  const shape = extendWithJson(llmShapeFor(cfg));
-  return Layer.succeed(LlmProvider)(shape);
-};
-
-/**
- * Legacy lazy Layer factory. Env check deferred to first
- * `complete()` call. Kept for tests that want to assert the missing-
- * env path without crashing at build.
- */
-export const LlmLiveLazy = (cfg: AgentConfig): Layer.Layer<LlmProvider, never, never> => {
-  const shape = extendWithJson(llmShapeFor(cfg));
-  return Layer.succeed(LlmProvider)(shape);
-};
 
 /**
  * Gateway Layer factory. Reads `AI_GATEWAY_API_KEY` (or per-model

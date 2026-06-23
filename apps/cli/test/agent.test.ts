@@ -1,8 +1,8 @@
 /**
  * apps/cli/test/agent.test.ts — `cognit agent (run | status | stop)`.
  *
- * All tests use the mock provider (no API keys). The tests boot a
- * full CLI process via tsx against a tempdir project, so they
+ * All tests use the canned `mock-1` model (no API keys). The tests
+ * boot a full CLI process via tsx against a tempdir project, so they
  * exercise the wiring end-to-end (commander → layer-build →
  * runTick → state.json).
  *
@@ -16,9 +16,10 @@
  *  7. stop with stale pidfile → exits 0
  *  8. status after run --once → running: false, tick_count: 1
  *  9. status --json → envelope shape
- * 10. --provider mock --model mock-1 flags override defaults
  * 11. conflict guard: a fake live pid blocks start
- * 12. unknown --provider → commander error before layer build
+ * 13. concurrent run: second process fails with conflict (pidfile race closed)
+ * 14. second SIGTERM exits 143 (not 130)
+ * 15. probeLiveness treats EPERM as alive (refuses to clobber foreign pid)
  */
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
@@ -214,7 +215,7 @@ describe("cognit agent run", () => {
     expect(fs.existsSync(PIDFILE(sessionId))).toBe(false); // cleaned up
   });
 
-  it("10. --provider mock --model mock-1 flags work end-to-end", () => {
+  it("10. --model mock-1 flag triggers the canned layer end-to-end", () => {
     const { sessionId } = setupProjectAndSession();
     const r = runCli(tmp, [
       "agent",
@@ -222,8 +223,6 @@ describe("cognit agent run", () => {
       "--once",
       "--session",
       sessionId,
-      "--provider",
-      "mock",
       "--model",
       "mock-1",
     ]);
@@ -248,24 +247,6 @@ describe("cognit agent run", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/agent already running/);
     fs.unlinkSync(PIDFILE(sessionId));
-  });
-
-  it("12. unknown --provider is rejected by schema validation", () => {
-    const { sessionId } = setupProjectAndSession();
-    const r = runCli(tmp, [
-      "agent",
-      "run",
-      "--once",
-      "--session",
-      sessionId,
-      "--provider",
-      "bogus",
-    ]);
-    expect(r.status).not.toBe(0);
-    // Effect Schema prints the bad value verbatim; we check for
-    // `actual "bogus"` rather than the generic word "invalid" because
-    // the error formatter does not use that word.
-    expect(r.stderr).toMatch(/actual "bogus"/);
   });
 
   it("13. concurrent run: second process fails with conflict (pidfile race closed)", { timeout: 30_000 }, async () => {
@@ -460,3 +441,86 @@ function extractEnvelopes(stream: string): Array<{
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Gateway routing (Cognit-l06/007, spec §4)
+//
+// Unit tests for `resolveAgentRun` — pure helper that turns CLI flags +
+// `cognit.yaml` into a runnable `AgentConfig` + (state.provider, state.model)
+// tuple. End-to-end Gateway calls require a real `AI_GATEWAY_API_KEY`;
+// we exercise the routing here and leave the network round-trip to
+// manual smoke runs.
+// ---------------------------------------------------------------------------
+
+import { resolveAgentRun } from "../src/commands/agent.js";
+import { parseCognitConfig } from "@cognit/core/config";
+
+describe("resolveAgentRun — Gateway routing (spec §4)", () => {
+  const cfgNoLlm = parseCognitConfig({ project: { name: "x" } });
+  const cfgDefaultModel = parseCognitConfig({
+    project: { name: "x" },
+    llm: { default_model: "anthropic/claude-sonnet-4-6" },
+  });
+  const cfgCommandModel = parseCognitConfig({
+    project: { name: "x" },
+    llm: {
+      commands: { agent_run: { model: "openai/gpt-4o" } },
+    },
+  });
+
+  it("--model alone (Gateway route) — model preserved, canned when mock-1", () => {
+    const r = resolveAgentRun(cfgNoLlm, { model: "anthropic/claude-sonnet-4-6" });
+    expect(r.agentCfg.model).toBe("anthropic/claude-sonnet-4-6");
+    expect(r.stateProvider).toBe("gateway");
+    expect(r.stateModel).toBe("anthropic/claude-sonnet-4-6");
+  });
+
+  it("--model mock-1 routes to the canned layer (state.provider = 'mock')", () => {
+    const r = resolveAgentRun(cfgNoLlm, { model: "mock-1" });
+    expect(r.agentCfg.model).toBe("mock-1");
+    expect(r.stateProvider).toBe("mock");
+    expect(r.stateModel).toBe("mock-1");
+  });
+
+  it("no flags + llm.default_model — Gateway route from config", () => {
+    const r = resolveAgentRun(cfgDefaultModel, {});
+    expect(r.agentCfg.model).toBe("anthropic/claude-sonnet-4-6");
+    expect(r.stateProvider).toBe("gateway");
+    expect(r.stateModel).toBe("anthropic/claude-sonnet-4-6");
+  });
+
+  it("no flags + llm.commands.agent_run.model — command-scoped config wins over default_model", () => {
+    const cfgBoth = parseCognitConfig({
+      project: { name: "x" },
+      llm: {
+        default_model: "anthropic/claude-sonnet-4-6",
+        commands: { agent_run: { model: "openai/gpt-4o" } },
+      },
+    });
+    const r = resolveAgentRun(cfgBoth, {});
+    expect(r.agentCfg.model).toBe("openai/gpt-4o");
+    expect(r.stateModel).toBe("openai/gpt-4o");
+  });
+
+  it("no flags + no llm config — mock canned fallback (smoke runs)", () => {
+    const r = resolveAgentRun(cfgNoLlm, {});
+    expect(r.agentCfg.model).toBe("mock-1");
+    expect(r.stateProvider).toBe("mock");
+    expect(r.stateModel).toBe("mock-1");
+  });
+
+  it("--model alone takes precedence over llm.commands.agent_run.model", () => {
+    const r = resolveAgentRun(cfgCommandModel, { model: "anthropic/claude-sonnet-4-6" });
+    expect(r.agentCfg.model).toBe("anthropic/claude-sonnet-4-6");
+  });
+
+  it("config-resolved mock-1 routes to the canned layer (state.provider = 'mock')", () => {
+    const cfgMock = parseCognitConfig({
+      project: { name: "x" },
+      llm: { default_model: "mock-1" },
+    });
+    const r = resolveAgentRun(cfgMock, {});
+    expect(r.agentCfg.model).toBe("mock-1");
+    expect(r.stateProvider).toBe("mock");
+  });
+});

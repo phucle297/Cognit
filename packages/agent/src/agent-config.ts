@@ -7,13 +7,13 @@
  * reading `cognit.yaml → agent.*` and producing a Layer that satisfies
  * the `AgentConfig` tag defined here.
  *
- * `AgentProvider` is a DEPRECATED closed literal — kept for the
- * `--provider` back-compat grace period on `cognit agent run`
- * (spec §4). New commands (`cognit ask`) and the migrated supervisor
- * route through the Vercel AI Gateway via `gatewayModel(...)`, not
- * through the closed-literal switch in `@cognit/llm`. After one
- * minor release the literal is removed and the `provider` field
- * is deleted from `AgentConfig`.
+ * Routing decision: model id is the only signal. The legacy
+ * closed-literal `provider` field was removed along with the
+ * `--provider` CLI flag (Cognit-l06/007). All real-LLM calls go
+ * through the Vercel AI Gateway using the full model id
+ * (`<provider>/<id>`, e.g. `anthropic/claude-sonnet-4-6`). The
+ * canned mock layer is reached when `model === "mock-1"` (the
+ * default `model` value below).
  */
 
 import { Schema } from "effect";
@@ -21,29 +21,7 @@ import { Schema } from "effect";
 const PositiveInt = Schema.Number.pipe(Schema.int(), Schema.greaterThan(0));
 const NonNegativeInt = Schema.Number.pipe(Schema.int(), Schema.greaterThanOrEqualTo(0));
 
-/**
- * @deprecated Retained for `--provider` back-compat. New code must
- * use the Vercel AI Gateway model id format (`<provider>/<id>`)
- * instead — see `LlmConfig` in `@cognit/core/config`.
- *
- * Removing this literal is the second half of the migration
- * (Cognit-l06/007). Until then, every reference must include a
- * `@deprecated` JSDoc so new callers don't reach for it.
- */
-export const AgentProvider = Schema.Literal("anthropic", "openai", "google", "ollama", "mock");
-export type AgentProvider = Schema.Schema.Type<typeof AgentProvider>;
-
-/**
- * Relaxed: `provider` is truly optional (no implicit `"mock"`
- * default). Callers that want the mock path now set it explicitly
- * (`{ provider: "mock", ... }`); callers migrating to the Gateway
- * leave it unset. The supervisor loop reads `provider` and passes
- * it through to the LLM layer, which is responsible for either
- * routing through `modelFor(provider, ...)` (legacy) or routing
- * through `gatewayModel(...)` (preferred, post-migration).
- */
 export const AgentConfig = Schema.Struct({
-  provider: Schema.optional(AgentProvider),
   model: Schema.optionalWith(Schema.String.pipe(Schema.minLength(1)), {
     default: () => "mock-1",
   }),
@@ -73,11 +51,9 @@ export const parseAgentConfig = Schema.decodeUnknownSync(AgentConfig);
 
 /**
  * Default config used by tests + smoke runs that don't supply one.
- * Explicitly sets `provider: "mock"` so the legacy `buildLlmLayer`
- * path still routes to the canned layer — the schema relaxation
- * removed the implicit default; this literal re-establishes it for
- * callers that depended on the smoke-friendly behaviour.
+ * `model: "mock-1"` routes to the canned layer in
+ * `apps/cli/src/layer-build.ts → buildLlmLayer`, so `cognit init`
+ * + `cognit agent run --once` works without an `llm:` block in
+ * `cognit.yaml` and without any API key.
  */
-export const defaultAgentConfig: AgentConfig = parseAgentConfig({
-  provider: "mock",
-});
+export const defaultAgentConfig: AgentConfig = parseAgentConfig({});

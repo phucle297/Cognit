@@ -32,9 +32,9 @@ import {
   LlmCompletionError,
   LlmProvider,
   llmProviderFrom,
-  parseAgentConfig,
 } from "@cognit/agent";
-import { LlmLiveLazy } from "@cognit/llm";
+import { LlmLiveLazyFromRoute } from "@cognit/llm";
+import type { LlmConfig } from "@cognit/core";
 import { readConfig } from "./yaml-io.js";
 import { projectPaths } from "./paths.js";
 
@@ -182,23 +182,30 @@ export const withAppLayerAndConfig = async <A, E, R>(
 };
 
 /**
- * Build an `LlmProvider` Layer from an `AgentConfig`.
+ * Build an `LlmProvider` Layer from an `AgentConfig` + `LlmConfig`.
  *
- * - `provider: undefined` or `provider: "mock"` → canned stop-only
- *   decision via `@cognit/agent`'s `llmProviderFrom`. The schema
- *   relaxed `provider` to optional in Cognit-l06/005, so callers
- *   that omit the flag land here. `@cognit/llm`'s `modelFor` throws
- *   for `mock` by design, so we cannot route through the real
- *   provider factory — the canned response keeps tests and smoke
- *   runs working without API keys.
- * - Real providers (`anthropic` / `openai` / `google` / `ollama`)
- *   → `@cognit/llm`'s `LlmLiveLazy`. Missing env vars surface as
- *   `LlmCompletionError` on the first call rather than crashing
- *   at process start, so a misconfigured operator gets a usable
- *   error message.
+ * Routing:
+ *
+ * - `cfg.model === "mock-1"` (the default) → canned stop-only
+ *   decision via `@cognit/agent`'s `llmProviderFrom`. No Gateway,
+ *   no API key. Lets `cognit init` + `cognit agent run --once`
+ *   work in smoke runs and CI without configuration.
+ * - Any other model id → Vercel AI Gateway route via
+ *   `LlmLiveLazyFromRoute(llm)`. The full model id
+ *   (`<provider>/<id>`) flows through `gatewayModel(llm, cfg.model)`
+ *   per call. Env check is deferred to the first `complete()` call
+ *   so a missing key surfaces as a friendly stderr message at
+ *   runtime, not a process-start crash.
+ *
+ * Mock detection keys off the model id (`mock-1`), not a separate
+ * provider literal — the `--provider` flag and the
+ * `agent.provider` config field were removed.
  */
-export const buildLlmLayer = (cfg: AgentConfig): Layer.Layer<LlmProvider> => {
-  if (cfg.provider === undefined || cfg.provider === "mock") {
+export const buildLlmLayer = (
+  cfg: AgentConfig,
+  llm: LlmConfig,
+): Layer.Layer<LlmProvider> => {
+  if (cfg.model === "mock-1") {
     // Mock decision: no actions, no rank overrides, stop=false so
     // the supervisor keeps ticking (tests for `--once` and for the
     // stop sentinel both rely on the loop actually looping). The
@@ -208,7 +215,7 @@ export const buildLlmLayer = (cfg: AgentConfig): Layer.Layer<LlmProvider> => {
       Effect.succeed(
         JSON.stringify({
           schema_version: "1",
-          rationale: "mock: no LLM available; loop continues without actions",
+          rationale: "mock-1: canned layer, loop continues without actions",
           actions: [],
           rank_overrides: [],
           stop: false,
@@ -216,7 +223,10 @@ export const buildLlmLayer = (cfg: AgentConfig): Layer.Layer<LlmProvider> => {
       ),
     );
   }
-  return LlmLiveLazy(cfg);
+  // Gateway route. Env check is lazy (inside LlmLiveLazyFromRoute),
+  // so a missing key surfaces as LlmCompletionError on the first
+  // complete() call rather than crashing the layer build.
+  return LlmLiveLazyFromRoute(llm);
 };
 
 /**
@@ -230,6 +240,7 @@ export const buildLlmLayer = (cfg: AgentConfig): Layer.Layer<LlmProvider> => {
 export const buildAppLayerWithAgent = (
   root: string,
   agentCfg: AgentConfig,
+  llm: LlmConfig,
   policy: Layer.Layer<SessionPolicy> = SessionPolicyDefault,
   redactionConfig: Layer.Layer<RedactionConfig> = RedactionConfigDefault,
   actorDefaults: Layer.Layer<ActorDefaults> = actorDefaultsLayer(ActorDefaultsBuiltIn),
@@ -243,7 +254,7 @@ export const buildAppLayerWithAgent = (
       buildAppLayer(root, policy, redactionConfig, actorDefaults),
       UuidLive,
     ),
-    buildLlmLayer(agentCfg),
+    buildLlmLayer(agentCfg, llm),
   ) as Layer.Layer<AppServices, DbError | DbCorrupted | LlmCompletionError, never>;
 
 /**
@@ -272,9 +283,16 @@ export const withAppLayerAndConfigAndAgent = async <A, E, R>(
     worker: config.actors.defaults.worker,
     system: config.actors.defaults.system,
   });
+  // `llm:` block from cognit.yaml — routed through
+  // `LlmLiveLazyFromRoute` in `buildLlmLayer` when
+  // `agentCfg.model !== "mock-1"`. Reading the block here (instead
+  // of re-reading inside the layer) keeps the "no model configured"
+  // error path visible to the CLI so we can surface a clean stderr
+  // message before the first tick.
   const fullLayer = buildAppLayerWithAgent(
     root,
     agentCfg,
+    config.llm,
     policy,
     redactionCfg,
     actorDefaults,
@@ -282,18 +300,3 @@ export const withAppLayerAndConfigAndAgent = async <A, E, R>(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return eff.pipe(Effect.provide(fullLayer)) as any;
 };
-
-/**
- * Convenience: parse an `AgentConfig` from partial CLI flags. Accepts
- * `provider` / `model` as overrides; the rest falls back to
- * `defaultAgentConfig`. Throws via `parseAgentConfig` if the input
- * is malformed (e.g. unknown provider).
- */
-export const agentConfigFromFlags = (flags: {
-  provider?: string;
-  model?: string;
-}): AgentConfig =>
-  parseAgentConfig({
-    ...(flags.provider !== undefined ? { provider: flags.provider } : {}),
-    ...(flags.model !== undefined ? { model: flags.model } : {}),
-  });
