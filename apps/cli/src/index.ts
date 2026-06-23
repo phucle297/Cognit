@@ -27,6 +27,7 @@ import { registerExport } from "./commands/export.js";
 import { registerImport } from "./commands/import.js";
 import { registerRecovery } from "./commands/recovery.js";
 import { registerAgent } from "./commands/agent.js";
+import { registerAsk } from "./commands/ask.js";
 import { setOutputMode, type OutputMode } from "./output.js";
 
 const program = new Command();
@@ -85,6 +86,7 @@ registerExport(program);
 registerImport(program);
 registerRecovery(program);
 registerAgent(program);
+registerAsk(program);
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`cognit: ${(err as Error).message}\n`);

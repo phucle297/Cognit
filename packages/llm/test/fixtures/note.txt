@@ -1,0 +1,2 @@
+hello from a text note
+this is plain utf-8 text

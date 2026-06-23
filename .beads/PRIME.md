@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: 8g.5 Dashboard real SuggestedNextStepsCard + Constraint Rules CRUD page dashboard phase-8 rules ui
+search: Cognit-l06/006 cognit ask command
 queue: 
-next: Cognit-9qe
+next: Cognit-1z3

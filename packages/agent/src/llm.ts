@@ -60,7 +60,13 @@ export interface LlmProviderShape {
     input: {
       readonly prompt: string;
       readonly model: string;
-      readonly provider: AgentProvider;
+      /**
+       * Optional. Legacy closed-literal provider; the Gateway path
+       * ignores it (the model id carries the provider prefix). The
+       * supervisor passes through `agent.provider` which is itself
+       * optional post-Cognit-l06/005 relaxation.
+       */
+      readonly provider?: AgentProvider;
       readonly schema: Schema.Schema<T>;
       readonly signal?: AbortSignal;
     },

@@ -66,3 +66,21 @@ export {
   SchemaValidationError,
   type JsonCompletionError,
 } from "./errors.js";
+
+export {
+  resolveInput,
+  autoDetectInput,
+  classifyStdin,
+  sniffMime,
+  MultimodalError,
+  type InputSource,
+  type Attachment,
+} from "./multimodal.js";
+
+export {
+  readClipboardImage,
+  isClipboardSupported,
+  platformClipboardName,
+  detectPlatform,
+  type Platform,
+} from "./clipboard.js";
