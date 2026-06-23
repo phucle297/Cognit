@@ -76,3 +76,11 @@ export {
   type InputSource,
   type Attachment,
 } from "./multimodal.js";
+
+export {
+  readClipboardImage,
+  isClipboardSupported,
+  platformClipboardName,
+  detectPlatform,
+  type Platform,
+} from "./clipboard.js";
