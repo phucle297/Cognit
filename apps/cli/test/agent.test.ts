@@ -443,11 +443,11 @@ function extractEnvelopes(stream: string): Array<{
 }
 
 // ---------------------------------------------------------------------------
-// Gateway routing (Cognit-l06/007, spec §4)
+// Proxy routing (Cognit-to3, spec §4)
 //
 // Unit tests for `resolveAgentRun` — pure helper that turns CLI flags +
 // `cognit.yaml` into a runnable `AgentConfig` + (state.provider, state.model)
-// tuple. End-to-end Gateway calls require a real `AI_GATEWAY_API_KEY`;
+// tuple. End-to-end proxy calls require a real LiteLLM proxy + env key;
 // we exercise the routing here and leave the network round-trip to
 // manual smoke runs.
 // ---------------------------------------------------------------------------
@@ -455,7 +455,7 @@ function extractEnvelopes(stream: string): Array<{
 import { resolveAgentRun } from "../src/commands/agent.js";
 import { parseCognitConfig } from "@cognit/core/config";
 
-describe("resolveAgentRun — Gateway routing (spec §4)", () => {
+describe("resolveAgentRun — proxy routing (spec §4)", () => {
   const cfgNoLlm = parseCognitConfig({ project: { name: "x" } });
   const cfgDefaultModel = parseCognitConfig({
     project: { name: "x" },
@@ -468,10 +468,10 @@ describe("resolveAgentRun — Gateway routing (spec §4)", () => {
     },
   });
 
-  it("--model alone (Gateway route) — model preserved, canned when mock-1", () => {
+  it("--model alone (proxy route) — model preserved, canned when mock-1", () => {
     const r = resolveAgentRun(cfgNoLlm, { model: "anthropic/claude-sonnet-4-6" });
     expect(r.agentCfg.model).toBe("anthropic/claude-sonnet-4-6");
-    expect(r.stateProvider).toBe("gateway");
+    expect(r.stateProvider).toBe("proxy");
     expect(r.stateModel).toBe("anthropic/claude-sonnet-4-6");
   });
 
@@ -482,10 +482,10 @@ describe("resolveAgentRun — Gateway routing (spec §4)", () => {
     expect(r.stateModel).toBe("mock-1");
   });
 
-  it("no flags + llm.default_model — Gateway route from config", () => {
+  it("no flags + llm.default_model — proxy route from config", () => {
     const r = resolveAgentRun(cfgDefaultModel, {});
     expect(r.agentCfg.model).toBe("anthropic/claude-sonnet-4-6");
-    expect(r.stateProvider).toBe("gateway");
+    expect(r.stateProvider).toBe("proxy");
     expect(r.stateModel).toBe("anthropic/claude-sonnet-4-6");
   });
 

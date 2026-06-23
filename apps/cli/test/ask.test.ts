@@ -8,18 +8,19 @@
  *   Exit codes (spec §3):
  *     1. missing project root → exit 2 with canonical "Run cognit init" message
  *     2. missing model → exit 2 with "no model configured (set llm.default_model or pass --model)"
- *     3. missing env → exit 2 with "required env <NAME> not set (model <M>, source: llm.api_key_env)"
+ *     3. missing env → exit 2 with "required env <NAME> not set (source: llm.api_key_env)"
  *     4. file source: path not found → exit 2 (MultimodalError)
  *     5. stdin ambiguous → exit 2 with "stdin: cannot determine text vs binary"
  *     6. clipboard unsupported → exit 2 with platform name
  *     7. --prompt required when no text source → exit 2
- *     8. generateText network error → exit 1
+ *     8. proxy network error → exit 1
  *     9. SIGINT received → exit 130
  *
  *   Output (spec §3):
  *    10. text mode prints model response on stdout
  *    11. --json emits stable v1 envelope with schema_version, model,
- *         prompt_tokens, completion_tokens, text, attachments
+ *         text, attachments (token counts are 0 — direct fetch path
+ *         doesn't expose them)
  *    12. attachments list is empty when no attachment
  *    13. attachments list includes image mime+size when image present
  *    14. attachments list includes file mime+filename when file present
@@ -60,8 +61,9 @@ import { setOutputMode } from "../src/output.js";
  * `resolveApiKey` (called from runAsk via config-resolver) reads
  * `process.env` directly. Tests manage `process.env` for the env-
  * related cases so the resolved key matches what the command sees.
+ * The new schema defaults `llm.api_key_env` to `LITELLM_MASTER_KEY`.
  */
-const ENV_KEY = "AI_GATEWAY_API_KEY";
+const ENV_KEY = "LITELLM_MASTER_KEY";
 const SAVED_ENV: Record<string, string | undefined> = {};
 
 const setEnv = (val: string | undefined): void => {
@@ -72,7 +74,7 @@ const setEnv = (val: string | undefined): void => {
 beforeEach(() => {
   SAVED_ENV[ENV_KEY] = process.env[ENV_KEY];
   // Default: env set. Individual tests that need missing-env clear it.
-  setEnv("sk-test-fake");
+  setEnv("sk-litellm-fake");
 });
 
 afterEach(() => {
@@ -89,34 +91,6 @@ const PNG_BYTES = Buffer.from([
 ]);
 const TEXT_BYTES = Buffer.from("hello, multimodal\n", "utf-8");
 
-/** Minimal `GenerateTextResult` shape — only the fields runAsk reads.
- *  AI SDK v6 renamed `promptTokens`→`inputTokens`, `completionTokens`→
- *  `outputTokens`. The fake matches the real `LanguageModelUsage`. */
-const fakeResult = (text: string) => ({
-  text,
-  content: [],
-  reasoning: [],
-  reasoningText: undefined,
-  files: [],
-  sources: [],
-  toolCalls: [],
-  toolResults: [],
-  finishReason: "stop",
-  usage: { inputTokens: 11, outputTokens: 22 },
-  warnings: [],
-  request: {},
-  response: {
-    id: "fake",
-    modelId: "fake-model",
-    timestamp: new Date(),
-    headers: {},
-    messages: [],
-    body: {},
-  },
-  providerMetadata: {},
-  experimental: {},
-});
-
 /** Record bag that mirrors what `makeDeps` collects. */
 interface TestRig {
   deps: AskDeps;
@@ -127,7 +101,7 @@ interface TestRig {
   calls: {
     resolveInput: Array<[unknown, unknown?]>;
     classifyStdin: Array<[Buffer]>;
-    generateText: Array<[unknown]>;
+    complete: Array<[unknown]>;
   };
 }
 
@@ -146,8 +120,7 @@ const makeRig = (overrides: {
   resolveInput?: AskMultimodalDeps["resolveInput"];
   classifyStdin?: AskMultimodalDeps["classifyStdin"];
   isClipboardSupported?: AskMultimodalDeps["isClipboardSupported"];
-  generateText?: AskDeps["generateText"];
-  gatewayModel?: AskDeps["gatewayModel"];
+  openaiComplete?: AskDeps["openaiComplete"];
   readConfig?: AskDeps["readConfig"];
 } = {}): TestRig => {
   const stdoutLines: string[] = [];
@@ -157,12 +130,12 @@ const makeRig = (overrides: {
   const calls: TestRig["calls"] = {
     resolveInput: [],
     classifyStdin: [],
-    generateText: [],
+    complete: [],
   };
 
   const configWithModel = parseCognitConfig({
     project: { name: "ask-test" },
-    llm: { default_model: "MiniMax/MiniMax-M3" },
+    llm: { default_model: "claude-sonnet-4-6" },
   });
 
   const multimodal: AskMultimodalDeps = {
@@ -175,7 +148,7 @@ const makeRig = (overrides: {
     classifyStdin: overrides.classifyStdin ?? (() => "unknown" as const),
     isClipboardSupported: overrides.isClipboardSupported ?? (() => false),
   };
-  // Wrap the resolveInput / classifyStdin / generateText so we can
+  // Wrap the resolveInput / classifyStdin / complete so we can
   // record the call args for tests that assert on input resolution.
   const wrappedResolveInput = (
     src: Parameters<AskMultimodalDeps["resolveInput"]>[0],
@@ -189,11 +162,24 @@ const makeRig = (overrides: {
     return multimodal.classifyStdin(b);
   };
 
-  const generateText = ((args: unknown) => {
-    calls.generateText.push([args]);
-    if (overrides.generateText) return (overrides.generateText as unknown as (a: unknown) => Promise<unknown>)(args);
-    return Promise.resolve(fakeResult("fake-model-response"));
-  }) as AskDeps["generateText"];
+  // The factory returns a completion closure; tests that need to
+  // assert on the call args read `calls.complete` instead of
+  // inspecting the closure. `openaiComplete(llm)` returns
+  // `(args) => Promise<string>` so we record the args the runAsk
+  // path passes in.
+  type CompleteArgs = { prompt: string; model: string; signal?: AbortSignal };
+  const recording = (inner: (a: CompleteArgs) => Promise<string>) =>
+    (args: CompleteArgs) => {
+      calls.complete.push([args]);
+      return inner(args);
+    };
+  // `AskDeps.openaiComplete` is `(llm) => (args) => Promise<string>`.
+  // Build a recording wrapper around it (default + override).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wrapped = ((cfg: any) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recording(((overrides.openaiComplete as any) ?? (() => async () => "fake-model-response"))(cfg))) as AskDeps["openaiComplete"];
+  void wrapped;
 
   const deps: AskDeps = {
     readConfig: overrides.readConfig ?? (async () => configWithModel),
@@ -214,8 +200,7 @@ const makeRig = (overrides: {
       currentSessionTmp: `${root}/.cognit/current-session.tmp`,
     })) as AskDeps["projectPaths"],
     readStdin: overrides.readStdin ?? (async () => ({ bytes: Buffer.alloc(0), piped: false })),
-    gatewayModel: overrides.gatewayModel ?? (() => ({ modelId: "fake" }) as never),
-    generateText,
+    openaiComplete: wrapped,
     multimodal: {
       autoDetectInput: multimodal.autoDetectInput,
       resolveInput: wrappedResolveInput as AskMultimodalDeps["resolveInput"],
@@ -262,7 +247,10 @@ describe("runAsk — exit codes (spec §3)", () => {
   });
 
   it("2. missing model → exit 2 with canonical 'no model configured' message", async () => {
-    const cfgNoModel = parseCognitConfig({ project: { name: "x" } });
+    const cfgNoModel = parseCognitConfig({
+      project: { name: "x" },
+      llm: { default_model: undefined },
+    });
     const rig = makeRig({ readConfig: async () => cfgNoModel });
     const code = await runAsk({ prompt: "x" }, rig.deps);
     expect(code).toBe(2);
@@ -277,7 +265,7 @@ describe("runAsk — exit codes (spec §3)", () => {
     const code = await runAsk({ prompt: "x" }, rig.deps);
     expect(code).toBe(2);
     expect(rig.stderrLines.join("")).toMatch(
-      "required env AI_GATEWAY_API_KEY not set (model MiniMax/MiniMax-M3, source: llm.api_key_env)",
+      "required env LITELLM_MASTER_KEY not set (source: llm.api_key_env)",
     );
   });
 
@@ -323,8 +311,6 @@ describe("runAsk — exit codes (spec §3)", () => {
   });
 
   it("7. --prompt required when no text source → exit 2", async () => {
-    // No --prompt, no stdin, no --input, no clipboard probe → text-only
-    // empty path → exit 2.
     const rig = makeRig({
       isClipboardSupported: () => false,
     });
@@ -333,11 +319,12 @@ describe("runAsk — exit codes (spec §3)", () => {
     expect(rig.stderrLines.join("")).toMatch(/--prompt is required/);
   });
 
-  it("8. generateText network error → exit 1", async () => {
+  it("8. proxy network error → exit 1", async () => {
     const rig = makeRig({
-      generateText: (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      openaiComplete: (() => async () => {
         throw new Error("ECONNREFUSED");
-      }) as AskDeps["generateText"],
+      }) as any,
     });
     const code = await runAsk({ prompt: "x" }, rig.deps);
     expect(code).toBe(1);
@@ -346,10 +333,11 @@ describe("runAsk — exit codes (spec §3)", () => {
 
   it("9. SIGINT received during call → exit 130", async () => {
     const rig = makeRig({
-      generateText: (async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      openaiComplete: (() => async () => {
         rig.fireSigint();
-        return fakeResult("after-sigint");
-      }) as unknown as AskDeps["generateText"],
+        return "after-sigint";
+      }) as any,
     });
     const code = await runAsk({ prompt: "x" }, rig.deps);
     expect(code).toBe(130);
@@ -379,9 +367,12 @@ describe("runAsk — output (spec §3)", () => {
     expect(env.version).toBe(1);
     expect(env.kind).toBe("ask");
     expect(env.data.schema_version).toBe("1");
-    expect(env.data.model).toBe("MiniMax/MiniMax-M3");
-    expect(env.data.prompt_tokens).toBe(11);
-    expect(env.data.completion_tokens).toBe(22);
+    expect(env.data.model).toBe("claude-sonnet-4-6");
+    // Token counts are 0 because the direct `/v1/chat/completions`
+    // fetch path doesn't expose them; downstream consumers should
+    // treat them as best-effort.
+    expect(env.data.prompt_tokens).toBe(0);
+    expect(env.data.completion_tokens).toBe(0);
     expect(env.data.text).toBe("fake-model-response");
     expect(env.data.attachments).toEqual([]);
   });
@@ -476,19 +467,14 @@ describe("runAsk — input resolution (spec §3)", () => {
     });
     await runAsk({ prompt: "explain" }, rig.deps);
     expect(rig.calls.resolveInput).toHaveLength(0);
-    const args = rig.calls.generateText[0]?.[0] as {
-      messages: Array<{ content: Array<{ type: string; text?: string }> }>;
-    };
-    const textPart = args.messages[0]?.content[0];
-    expect(textPart?.type).toBe("text");
-    expect(textPart?.text).toBe(`explain\n\nhello, multimodal\n`);
+    const args = rig.calls.complete[0]?.[0] as { prompt: string };
+    expect(args.prompt).toBe(`explain\n\nhello, multimodal\n`);
   });
 
   it("19. no --input + TTY + clipboard supported → clipboard source", async () => {
     const rig = makeRig({
-      // TTY (not piped), no --input
       readStdin: async () => ({ bytes: Buffer.alloc(0), piped: false }),
-      autoDetectInput: async () => null, // no explicit + no stdin
+      autoDetectInput: async () => null,
       isClipboardSupported: () => true,
     });
     await runAsk({ prompt: "what is this" }, rig.deps);
@@ -513,10 +499,8 @@ describe("runAsk — prompt assembly", () => {
   it("21. --prompt alone → prompt as-is", async () => {
     const rig = makeRig();
     await runAsk({ prompt: "just-prompt" }, rig.deps);
-    const args = rig.calls.generateText[0]?.[0] as {
-      messages: Array<{ content: Array<{ type: string; text?: string }> }>;
-    };
-    expect(args.messages[0]?.content[0]?.text).toBe("just-prompt");
+    const args = rig.calls.complete[0]?.[0] as { prompt: string };
+    expect(args.prompt).toBe("just-prompt");
   });
 
   it("22. --prompt + stdin text → joined with \\n\\n", async () => {
@@ -526,12 +510,8 @@ describe("runAsk — prompt assembly", () => {
       classifyStdin: () => "text" as const,
     });
     await runAsk({ prompt: "explain" }, rig.deps);
-    const args = rig.calls.generateText[0]?.[0] as {
-      messages: Array<{ content: Array<{ type: string; text?: string }> }>;
-    };
-    expect(args.messages[0]?.content[0]?.text).toBe(
-      "explain\n\nhello, multimodal\n",
-    );
+    const args = rig.calls.complete[0]?.[0] as { prompt: string };
+    expect(args.prompt).toBe("explain\n\nhello, multimodal\n");
   });
 
   it("23. stdin text alone (no --prompt) → text becomes prompt", async () => {
@@ -541,10 +521,8 @@ describe("runAsk — prompt assembly", () => {
       classifyStdin: () => "text" as const,
     });
     await runAsk({}, rig.deps);
-    const args = rig.calls.generateText[0]?.[0] as {
-      messages: Array<{ content: Array<{ type: string; text?: string }> }>;
-    };
-    expect(args.messages[0]?.content[0]?.text).toBe("hello, multimodal\n");
+    const args = rig.calls.complete[0]?.[0] as { prompt: string };
+    expect(args.prompt).toBe("hello, multimodal\n");
   });
 });
 
@@ -562,7 +540,5 @@ describe("cognit ask — CLI registration", () => {
     expect(r.stdout).toMatch(/--prompt/);
     expect(r.stdout).toMatch(/--input/);
     expect(r.stdout).toMatch(/--model/);
-    // --json is a global flag on the root program, NOT on the `ask`
-    // subcommand, so it doesn't appear in `ask --help`.
   });
 });

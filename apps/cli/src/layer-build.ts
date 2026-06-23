@@ -33,7 +33,7 @@ import {
   LlmProvider,
   llmProviderFrom,
 } from "@cognit/agent";
-import { LlmLiveLazyFromRoute } from "@cognit/llm";
+import { LlmLive } from "@cognit/llm";
 import type { LlmConfig } from "@cognit/core";
 import { readConfig } from "./yaml-io.js";
 import { projectPaths } from "./paths.js";
@@ -187,15 +187,17 @@ export const withAppLayerAndConfig = async <A, E, R>(
  * Routing:
  *
  * - `cfg.model === "mock-1"` (the default) → canned stop-only
- *   decision via `@cognit/agent`'s `llmProviderFrom`. No Gateway,
+ *   decision via `@cognit/agent`'s `llmProviderFrom`. No proxy,
  *   no API key. Lets `cognit init` + `cognit agent run --once`
  *   work in smoke runs and CI without configuration.
- * - Any other model id → Vercel AI Gateway route via
- *   `LlmLiveLazyFromRoute(llm)`. The full model id
- *   (`<provider>/<id>`) flows through `gatewayModel(llm, cfg.model)`
- *   per call. Env check is deferred to the first `complete()` call
- *   so a missing key surfaces as a friendly stderr message at
- *   runtime, not a process-start crash.
+ * - Any other model id → LiteLLM-proxy route via
+ *   `LlmLive(llm)`. The supervisor loop passes the resolved model
+ *   id per call (alias/literal resolved upstream via
+ *   `resolveModel`). Boot check verifies
+ *   `process.env[llm.api_key_env]` is present at build time and
+ *   throws `LlmCompletionError` with the exact var name when
+ *   missing — the supervisor catches the throw via
+ *   `withAppLayerAndConfigAndAgent` and surfaces it cleanly.
  *
  * Mock detection keys off the model id (`mock-1`), not a separate
  * provider literal — the `--provider` flag and the
@@ -223,10 +225,12 @@ export const buildLlmLayer = (
       ),
     );
   }
-  // Gateway route. Env check is lazy (inside LlmLiveLazyFromRoute),
-  // so a missing key surfaces as LlmCompletionError on the first
-  // complete() call rather than crashing the layer build.
-  return LlmLiveLazyFromRoute(llm);
+  // Eager boot check at build time. Throws LlmCompletionError with
+  // the exact env var name (matches the schema's `llm.api_key_env`).
+  // The CLI surfaces the throw via `withAppLayerAndConfigAndAgent`'s
+  // catch block so the operator sees a clean stderr message + exit 1
+  // before any tick runs.
+  return LlmLive(llm);
 };
 
 /**
@@ -284,7 +288,7 @@ export const withAppLayerAndConfigAndAgent = async <A, E, R>(
     system: config.actors.defaults.system,
   });
   // `llm:` block from cognit.yaml — routed through
-  // `LlmLiveLazyFromRoute` in `buildLlmLayer` when
+  // `LlmLive` in `buildLlmLayer` when
   // `agentCfg.model !== "mock-1"`. Reading the block here (instead
   // of re-reading inside the layer) keeps the "no model configured"
   // error path visible to the CLI so we can surface a clean stderr

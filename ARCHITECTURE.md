@@ -434,13 +434,7 @@ LLM-driven loop. Six packages / subcommands, in two waves:
     so the state-aware API ranker agrees with the package default.
 
 - **Wave 2 — supervisor loop (C1–C5)**:
-  - **`packages/llm`** — Vercel AI SDK provider layer.
-    `provider.modelFor({provider, model})` returns an AI SDK model
-    (`anthropic` / `openai` / `google` / `ollama` via `@ai-sdk/*`).
-    `LlmLive` (eager env check) and `LlmLiveLazy` (deferred, errors
-    surface on first call) compose with `completeJson<T>()` for typed
-    output + `Effect.Schema` validation. Errors are tagged
-    `LlmCompletionError` / `JsonParseError` / `SchemaValidationError`.
+  - **`packages/llm`** provides direct HTTP fetch to an OpenAI-compatible endpoint (typically a self-hosted LiteLLM proxy). No external SDK middleman. The LlmProvider Tag (`packages/agent/src/llm.ts`) defines the contract; the concrete Layer in `@cognit/llm` satisfies it.
   - **`packages/agent`** — Effect supervisor.
     `AgentConfig` schema (`provider`, `model`, `max_actions_per_tick`
     default 5, `max_prompt_hypotheses` default 50); `AgentDecision`

@@ -41,17 +41,49 @@ cognit ask --help      # confirms the one-shot Gateway command is wired
 
 > Tip: workspace exec also works. From repo root: `pnpm exec cognit <subcommand>`.
 
-### 2.1 Gateway key (for real LLM calls)
+### 2.1 LiteLLM proxy (for real LLM calls)
 
-`cognit agent run` and `cognit ask` route real-LLM calls through the **Vercel AI Gateway**. Set one env var:
+`cognit agent run` and `cognit ask` route real-LLM calls through a self-hosted **LiteLLM proxy** (OpenAI-compatible HTTP endpoint). Set it up once:
+
+**Run the proxy** (pick one):
 
 ```bash
-export AI_GATEWAY_API_KEY=...    # required by Gateway for every provider
+# pip / pypi
+pip install 'litellm[proxy]'
+litellm --config litellm.config.yaml
+
+# or docker
+docker run -p 4000:4000 \
+  -v $(pwd)/litellm.config.yaml:/app/config.yaml \
+  ghcr.io/berriai/litellm:main-stable --config /app/config.yaml
 ```
 
-If you prefer a different env var name (e.g. to keep per-project keys separate), set `api_key_env` in `cognit.yaml → llm`. Per-model overrides also work — see §16.
+See <https://docs.litellm.ai/docs/proxy/configs> for the LiteLLM config schema. LiteLLM owns provider mapping — you only configure upstream providers in `litellm.config.yaml`.
 
-Mock runs (`--model mock-1`) do **not** read `AI_GATEWAY_API_KEY`, so smoke tests stay green without a key.
+**Set the master key**:
+
+```bash
+export LITELLM_MASTER_KEY=sk-...   # must match `general_settings.master_key` in your config
+```
+
+**Cognit config** (`cognit.yaml → llm`):
+
+```yaml
+llm:
+  base_url: http://localhost:4000
+  api_key_env: LITELLM_MASTER_KEY
+  default_model: <your-default-model>
+  model_aliases:
+    quick: <fast-model>
+    deep: <strong-model>
+  commands:
+    ask: { alias: quick }
+    agent_run: { alias: deep }
+```
+
+> Note: `model_aliases` is free-form — you pick the names. `base_url`, `api_key_env`, `default_model`, and `commands` keys are reserved; everything else under `model_aliases` is yours to define. If you prefer explicit models per command, set `commands.<cmd>.model: <provider>/<id>` instead of using aliases.
+
+Mock runs (`--model mock-1`) do **not** hit the proxy or read `LITELLM_MASTER_KEY`, so smoke tests stay green without a key.
 
 ---
 
@@ -821,18 +853,17 @@ gravity:
     freshness: 0.10
   freshness_half_life_days: 14
 
-# Gateway routing for `cognit ask` + `cognit agent run` (spec §1)
+# LiteLLM proxy routing for `cognit ask` + `cognit agent run` (spec §1)
 llm:
-  api_key_env: AI_GATEWAY_API_KEY  # default; per-model override available
-  default_model: anthropic/claude-sonnet-4-6
-  models:
-    openai/gpt-4o:
-      api_key_env: OPENAI_API_KEY   # this model uses a direct key
+  base_url: http://localhost:4000        # self-hosted LiteLLM proxy
+  api_key_env: LITELLM_MASTER_KEY        # default; per-model override available
+  default_model: <your-default-model>
+  model_aliases:                         # free-form names you pick
+    quick: <fast-model>
+    deep: <strong-model>
   commands:
-    ask:
-      model: anthropic/claude-sonnet-4-6  # used by `cognit ask`
-    agent_run:                            # used by `cognit agent run`
-      model: openai/gpt-4o
+    ask: { alias: quick }                # used by `cognit ask`
+    agent_run: { alias: deep }           # used by `cognit agent run`
 
 # supervisor loop config (C2) — applied AFTER the Gateway layer is built.
 agent:
@@ -847,7 +878,7 @@ cognit config --edit    # opens $EDITOR
 cognit config --show    # prints effective config
 ```
 
-> **Back-compat:** the legacy `agent.provider: mock` form is no longer accepted. The canned layer is reached via `model: "mock-1"` (or `--model mock-1` on the CLI). Real LLM calls always go through the Vercel AI Gateway using the full model id format.
+> **Back-compat:** the legacy `agent.provider: mock` form is no longer accepted. The canned layer is reached via `model: "mock-1"` (or `--model mock-1` on the CLI). Real LLM calls always go through the LiteLLM proxy using either a `model_aliases` name or a full model id.
 
 ---
 
@@ -930,11 +961,11 @@ docker compose down -v && docker compose up -d
 | Worker events not picked up               | File written without atomic rename                          | Write `.tmp`, `fsync`, then `mv` to `.json`                    |
 | `hypothesis_ranked` ignored               | Target hypothesis missing (orphan rank)                     | Check session state; ensure `hypothesis_created` precedes rank |
 | AI score clamped or fallback used         | Out-of-range or non-finite `score`                          | Verify LLM output is finite number in `[0, 1]`                 |
-| `required env AI_GATEWAY_API_KEY not set (model ..., source: ...)` | Gateway key missing for the resolved model | `export AI_GATEWAY_API_KEY=...`, or set `api_key_env` / per-model override in `cognit.yaml → llm` (see §16) |
+| `required env LITELLM_MASTER_KEY not set (model ..., source: ...)` | Proxy key missing for the resolved model | `export LITELLM_MASTER_KEY=...`, or set `api_key_env` / per-model override in `cognit.yaml → llm` (see §16) |
 | `no model configured (set llm.default_model or pass --model)` | No flag, no `llm.default_model`, no `llm.commands.<cmd>.model` | Set `llm.default_model: anthropic/claude-sonnet-4-6` in `cognit.yaml`, or pass `--model <provider>/<id>` |
 | `clipboard image read not supported on this platform` | `cognit ask --input clipboard` on plan9 / unsupported OS | Save the image to a file and use `--input <path>` instead |
 | `cannot determine text vs binary (first bytes: ...)` | Stdin is not valid UTF-8 and not a known magic number | Use `--input <path>` to force the source, or pipe UTF-8 text |
-| Supervisor errors on first tick           | Missing API key for chosen provider                         | `export AI_GATEWAY_API_KEY=...` (Gateway) or use `--model mock-1` for canned |
+| Supervisor errors on first tick           | Missing API key for chosen provider                         | `export LITELLM_MASTER_KEY=...` (LiteLLM proxy) or use `--model mock-1` for canned |
 | Secret in old event                       | Redaction is ingest-only                                    | Restore from earlier `cognit export`, re-import                |
 | `cognit recovery --session <id>` rejected | Subcommand takes positional `<session-id>`, not `--session` | `cognit recovery <session-id>`                                 |
 | Migration error on start                  | Schema version drift                                        | Inspect `.cognit/cognit.db`; re-init if local-only             |
@@ -949,7 +980,7 @@ docker compose down -v && docker compose up -d
 | `@cognit/db`           | Drizzle ORM, `appendEvent` (single redaction boundary), inbox watcher.                       |
 | `@cognit/gravity`      | Pure scoring fn + AI-rank override (v1.2.0).                                                 |
 | `@cognit/agent`        | Effect supervisor loop, prompt builder, `AgentDecision` schema, apply step.                  |
-| `@cognit/llm`          | Vercel AI SDK provider layer (Anthropic / OpenAI / Google / Ollama).                         |
+| `@cognit/llm`          | Direct HTTP client to an OpenAI-compatible endpoint (typically a self-hosted LiteLLM proxy). No external SDK middleman. The LlmProvider Tag in `@cognit/agent` defines the contract. |
 | `@cognit/verification` | Subprocess engine: spawn, capture, 1 MB truncation, sha256 artifact, terminal-event mapping. |
 | `@cognit/wrap`         | Producer of inbox envelopes for `cognit wrap -- <cmd>`.                                      |
 | `@cognit/sdk`          | Programmatic API for workers.                                                                |

@@ -26,14 +26,17 @@
  *   - `--json`: stable v1 envelopes (`agent.tick`, `agent.run`,
  *     `agent.status`, `agent.stop`).
  *
- * Gateway migration (Cognit-l06/007):
+ * LlmConfig migration (LiteLLM-proxy variant):
  *   The supervisor loop routes every real-LLM call through the
- *   Vercel AI Gateway. `--model` is the canonical flag and is
- *   resolved by `resolveModel(config, "agent_run", opts.model)`
- *   (flag > llm.commands.agent_run.model > llm.default_model).
- *   The model id format is `<provider>/<id>` (e.g.
- *   `anthropic/claude-sonnet-4-6`). The canned layer is reached
- *   when the resolved model id is `mock-1` (the default).
+ *   LiteLLM proxy (`llm.base_url` + `llm.api_key_env`). `--model`
+ *   is the canonical flag and is resolved by
+ *   `resolveModel(llm, "agent_run", opts.model)` from
+ *   `@cognit/llm` (flag > llm.commands.agent_run.model >
+ *   llm.model_aliases[llm.commands.agent_run.alias] >
+ *   llm.default_model). The model id format is the upstream id
+ *   (e.g. `claude-sonnet-4-6`, `gpt-4o-mini`). The canned layer
+ *   is reached when the resolved model id is `mock-1` (the
+ *   default).
  */
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
@@ -163,10 +166,10 @@ const printTickError = (e: unknown): void => {
  *
  * - `agentCfg` — the `AgentConfig` handed to `runTick` + the layer
  *   builder. `model === "mock-1"` → canned layer; any other model
- *   id → Vercel AI Gateway route.
+ *   id → LiteLLM-proxy route.
  * - `stateProvider` / `stateModel` — the values written into
  *   `agent.<sid>.state.json`. `stateProvider` is `"mock"` when the
- *   canned layer is used, otherwise `"gateway"`. `stateModel` is
+ *   canned layer is used, otherwise `"proxy"`. `stateModel` is
  *   the resolved model id.
  */
 export interface ResolvedAgentRun {
@@ -194,12 +197,12 @@ export const resolveAgentRun = (
   config: CognitConfig,
   opts: RunOptions,
 ): ResolvedAgentRun => {
-  // 1. --model <m>: Gateway route unless it's the canned marker.
+  // 1. --model <m>: proxy route unless it's the canned marker.
   if (opts.model !== undefined && opts.model.length > 0) {
     const canned = opts.model === "mock-1";
     return {
       agentCfg: parseAgentConfig({ model: opts.model }),
-      stateProvider: canned ? "mock" : "gateway",
+      stateProvider: canned ? "mock" : "proxy",
       stateModel: opts.model,
     };
   }
@@ -209,11 +212,11 @@ export const resolveAgentRun = (
   // `cognit agent run --once` continues to work without an llm:
   // block (the pre-migration default).
   try {
-    const resolved = resolveModel(config, "agent_run");
+    const resolved = resolveModel(config.llm, "agent_run");
     const canned = resolved === "mock-1";
     return {
       agentCfg: parseAgentConfig({ model: resolved }),
-      stateProvider: canned ? "mock" : "gateway",
+      stateProvider: canned ? "mock" : "proxy",
       stateModel: resolved,
     };
   } catch {
@@ -575,7 +578,7 @@ export function registerAgent(program: Command): void {
     .option("--session <id>", "session id (ULID). Defaults to the sticky current-session pointer.")
     .option(
       "--model <id>",
-      "Gateway model id (e.g. anthropic/claude-sonnet-4-6). Defaults to llm.default_model / llm.commands.agent_run.model, or mock-1 when none is set.",
+      "Upstream model id (e.g. claude-sonnet-4-6, gpt-4o-mini). Defaults to llm.default_model / llm.commands.agent_run.model / llm.model_aliases[llm.commands.agent_run.alias], or mock-1 when none is set.",
     )
     .option("--once", "run a single tick and exit (default: loop until stop)")
     .option(

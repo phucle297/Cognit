@@ -1,51 +1,53 @@
 /**
  * packages/llm/src/layer.ts — LlmLive factory (C1).
  *
- * Builds an `LlmProvider` Layer. Two factories:
+ * Builds an `LlmProvider` Layer on top of `openaiComplete` (plain
+ * `fetch` against `cfg.base_url + "/v1/chat/completions"`). Two
+ * factories:
  *
- *   - `LlmLiveFromRoute(llm)` — env-checked at build time. Throws
- *     `LlmCompletionError` when `AI_GATEWAY_API_KEY` (or the
- *     per-model override) is missing.
- *   - `LlmLiveLazyFromRoute(llm)` — env check deferred to first
- *     `complete()` call. Used by `cognit ask` so a misconfigured
- *     operator gets the canonical env-missing stderr message at
- *     runtime instead of a process-start crash.
+ *   - `LlmLive(llm)` — env-checked at build time. Throws
+ *     `LlmCompletionError` when `llm.api_key_env` is missing.
+ *     Used by the supervisor loop / CLI bootstrap so a
+ *     misconfigured operator fails fast with the canonical
+ *     env-missing stderr message.
  *
- * Both paths route every model call through the Vercel AI Gateway
- * via `gatewayModel(llm, modelId)`. The model id (e.g.
- * `anthropic/claude-sonnet-4-6`) is supplied per call — the layer
- * does not carry a single model; the supervisor loop decides per
- * tick.
+ *   - `LlmLiveLazy(llm)` — env check deferred to first `complete()`
+ *     call. Used by `cognit ask` so the same friendly env-var
+ *     error surfaces from the prompt path rather than at process
+ *     start.
  *
- * The canned `mock-1` model id is handled separately in
- * `apps/cli/src/layer-build.ts → buildLlmLayer`, which short-
- * circuits before the Gateway layer is built.
+ * Retry policy (`LLM_RETRY_SCHEDULE`):
+ *   Exponential backoff starting at 100ms, doubling each tick,
+ *   capped at 3 recurs. Applied to every `LlmCompletionError` from
+ *   the wrapped `openaiComplete` call.
  *
- * Cancellation: the caller's `AbortSignal` is threaded through to
- * `generateText({ abortSignal })`. The retry schedule does NOT
- * retry aborted calls — `Effect.retry`'s `while` predicate skips
- * when the underlying cause has `name === "AbortError"`.
+ *   Abort handling: when the underlying fetch is aborted (the
+ *   caller's `AbortSignal` fires, or `AbortSignal.timeout` fires),
+ *   the cause carries `name === "AbortError"`. The retry `while`
+ *   predicate skips those — aborts should propagate immediately,
+ *   not retry.
  *
  * The Layer's R-channel is `never`: no runtime deps after the
- * factory returns. This is intentional — by the time the layer
- * is built, the env vars are checked and the model object is
- * captured in the closure.
+ * factory returns. By the time the layer is built, the env vars
+ * are checked and the `openaiComplete` closure is captured.
  */
 
-import { generateText } from "ai";
 import type { LlmProviderShape } from "@cognit/agent";
 import { LlmProvider } from "@cognit/agent";
 import { Effect, Layer, Schedule } from "effect";
 import type { LlmConfig } from "@cognit/core";
-import { gatewayModel } from "./gateway.js";
+import { openaiComplete } from "./openai.js";
 import { extendWithJson } from "./json.js";
 import { LlmCompletionError } from "./errors.js";
 
 /**
- * Retry policy for transient SDK failures. Exponential backoff
- * starting at 100ms, doubling each time, capped at 3 recurs.
- * Applies only to `LlmCompletionError` — abort / cancellation
- * bypasses the retry (handled inside the wrapped Effect).
+ * Retry policy for transient HTTP / proxy failures. Exponential
+ * backoff starting at 100ms, doubling each time, capped at 3 recurs.
+ *
+ * Applies only to `LlmCompletionError`. Aborts (caller cancellation
+ * or per-call timeout) bypass the retry — handled inside the
+ * wrapped Effect via the `while` predicate on the cause's
+ * `name === "AbortError"` check.
  *
  * Exported so tests can pin it (changing the schedule changes
  * observed retry counts in the retry test).
@@ -55,104 +57,118 @@ export const LLM_RETRY_SCHEDULE = Schedule.exponential("100 millis").pipe(
 );
 
 /**
- * Inner Effect that wraps `generateText` with retry + abort
- * filtering. The model factory runs inside `Effect.try` so a
- * synchronous throw from `buildModel()` (e.g. the Gateway layer's
- * env-key check failing on first call) surfaces as a typed
- * `LlmCompletionError` instead of escaping as an uncaught exception.
+ * Inner Effect that wraps `openaiComplete` with retry + abort
+ * filtering. The factory runs inside `Effect.tryPromise` so a
+ * synchronous throw from the closure (env-key missing, malformed
+ * response, HTTP non-2xx) surfaces as a typed `LlmCompletionError`
+ * instead of escaping as an uncaught exception.
  *
- * The model is built lazily inside the Effect — not at
- * `complete()` invocation time — so tests that build a shape but
- * never call `complete()` do not pay the SDK-construction cost, and
- * consumers that wrap the Effect in `Effect.catchAll` /
- * `Effect.either` see the env-missing failure uniformly with SDK
- * failures.
+ * Abort skip: when the fetch is aborted, `Effect.tryPromise` rejects
+ * with the underlying DOMException (`name === "AbortError"`). The
+ * `while` predicate on `Effect.retry` short-circuits so the abort
+ * propagates on the first attempt without delay.
  */
-const generateTextEffect = (
-  buildModel: () => Parameters<typeof generateText>[0]["model"],
+const openaiCompleteEffect = (
+  complete: ReturnType<typeof openaiComplete>,
   prompt: string,
+  model: string,
   signal: AbortSignal | undefined,
 ) =>
-  Effect.gen(function* () {
-    const sdkModel = yield* Effect.try({
-      try: () => buildModel(),
-      catch: (e) =>
-        e instanceof LlmCompletionError
-          ? e
-          : new LlmCompletionError(
-              `llm: model build failed: ${(e as Error).message ?? String(e)}`,
-              e,
-            ),
-    });
-    return yield* Effect.tryPromise({
-      try: async () => {
-        const result = await generateText({
-          model: sdkModel,
-          prompt,
-          ...(signal ? { abortSignal: signal } : {}),
-        });
-        return result.text;
-      },
-      catch: (e) =>
-        new LlmCompletionError(
-          `llm: generateText failed: ${(e as Error).message ?? String(e)}`,
-          e,
-        ),
-    }).pipe(
-      Effect.retry({
-        schedule: LLM_RETRY_SCHEDULE,
-        while: (e) =>
-          !(e instanceof LlmCompletionError) ||
-          !(e.cause instanceof Error) ||
-          e.cause.name !== "AbortError",
-      }),
-    );
-  });
+  Effect.tryPromise({
+    try: () => complete({ prompt, model, ...(signal ? { signal } : {}) }),
+    catch: (e) =>
+      e instanceof LlmCompletionError
+        ? e
+        : new LlmCompletionError(
+            "llm: openai-compat completion failed: " +
+              ((e as Error).message ?? String(e)),
+            e,
+          ),
+  }).pipe(
+    Effect.retry({
+      schedule: LLM_RETRY_SCHEDULE,
+      while: (e) =>
+        !(e instanceof LlmCompletionError) ||
+        !(e.cause instanceof Error) ||
+        e.cause.name !== "AbortError",
+    }),
+  );
 
 /**
- * Gateway-routed shape. Resolves the API key per call from
- * `llm.models[<model>].api_key_env` or `llm.api_key_env`. The model
- * id flows through per-call so the supervisor loop can switch
- * models between ticks without rebuilding the layer.
+ * OpenAI-compat shape. The model id flows through per-call so the
+ * supervisor loop can switch models between ticks without rebuilding
+ * the layer.
+ *
+ * Exported (not internal) so the layer test can exercise the shape
+ * directly without spinning up an Effect program for every case.
  */
-export const gatewayShapeFor = (llm: LlmConfig): LlmProviderShape => ({
-  complete: ({ prompt, model, signal }) =>
-    generateTextEffect(() => gatewayModel(llm, model), prompt, signal),
-});
+export const openaiShapeFor = (llm: LlmConfig): LlmProviderShape => {
+  const complete = openaiComplete(llm);
+  return {
+    complete: ({ prompt, model, signal }) =>
+      openaiCompleteEffect(complete, prompt, model, signal),
+  };
+};
 
 /**
- * Gateway Layer factory. Reads `AI_GATEWAY_API_KEY` (or per-model
- * override) at build time; throws `LlmCompletionError` if missing.
- * The model id is captured as `llm.default_model` if set so that
- * a bare `LlmLiveFromRoute(llm)` works for the common case where
- * the supervisor uses a single configured model. The supervisor
- * can still pass a different model per call via `complete({ model
- * })` — the per-model key override path handles that.
+ * OpenAI-compat Layer factory. Reads `llm.api_key_env` at build time;
+ * throws `LlmCompletionError` if missing. The actual fetch is
+ * deferred to first `complete()` call — the build-time check is
+ * purely an env-var presence probe so a misconfigured operator
+ * crashes the process with a clean error rather than a confusing
+ * network failure on the first tick.
  */
-export const LlmLiveFromRoute = (
+export const LlmLive = (
   llm: LlmConfig,
 ): Layer.Layer<LlmProvider, never, never> => {
-  // Validate the boot model so a missing key fails at build time.
-  // Pick llm.default_model when set; otherwise probe with an empty
-  // string to surface env-missing in the canonical form. We use a
-  // throwaway model id ("") for the probe because we only need the
-  // env check, not a real SDK call.
-  const probeModel = llm.default_model ?? "";
-  // Force env read at build. Throws when missing.
-  gatewayModel(llm, probeModel);
-  const shape = extendWithJson(gatewayShapeFor(llm));
+  // Probe env read at build. Throws when missing. We don't make a
+  // real fetch — just the synchronous env check inside the closure.
+  openaiComplete(llm);
+  const shape = extendWithJson(openaiShapeFor(llm));
   return Layer.succeed(LlmProvider)(shape);
 };
 
 /**
- * Lazy Gateway Layer factory. Env check deferred to first call —
- * the `cognit ask` command uses this so a missing key prints the
- * friendly env-var error to stderr with the right exit code rather
- * than crashing the process.
+ * Lazy OpenAI-compat Layer factory. Env check deferred to first
+ * `complete()` call — the `cognit ask` command uses this so a
+ * missing key prints the friendly env-var error to stderr with the
+ * right exit code rather than crashing the process at startup.
  */
-export const LlmLiveLazyFromRoute = (
+export const LlmLiveLazy = (
   llm: LlmConfig,
 ): Layer.Layer<LlmProvider, never, never> => {
-  const shape = extendWithJson(gatewayShapeFor(llm));
+  const shape = extendWithJson(openaiShapeFor(llm));
   return Layer.succeed(LlmProvider)(shape);
+};
+
+/**
+ * Pick a model id from `LlmConfig.commands[<cmd>]`:
+ *   1. If the command block pins an `alias`, resolve via
+ *      `llm.model_aliases[alias]`.
+ *   2. Else if the command block pins a literal `model`, use it.
+ *   3. Else fall back to `llm.default_model`.
+ *
+ * When `cmd` is undefined (or no command block matches), the alias
+ * / literal steps are skipped and only `default_model` is consulted.
+ *
+ * Note: this helper only handles command-level resolution. Per-call
+ * overrides (e.g. `--model <id>`) are layered on top by the CLI
+ * command (see `apps/cli/src/config-resolver.ts → resolveModel`).
+ */
+export const resolveModel = (
+  llm: LlmConfig,
+  cmd?: "ask" | "agent_run",
+): string => {
+  const cfg = cmd ? llm.commands[cmd] : undefined;
+  if (cfg?.alias) {
+    const aliased = llm.model_aliases[cfg.alias];
+    if (aliased) return aliased;
+  }
+  if (cfg?.model) return cfg.model;
+  if (llm.default_model) return llm.default_model;
+  throw new LlmCompletionError(
+    cmd
+      ? `llm: no model resolved for command '${cmd}' (set llm.default_model, commands.${cmd}.model, or commands.${cmd}.alias)`
+      : `llm: no default_model configured (set llm.default_model)`,
+  );
 };

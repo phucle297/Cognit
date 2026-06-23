@@ -1,8 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import YAML from "yaml";
-import { Schema } from "effect";
-import { CognitConfigSchema, type CognitConfig } from "@cognit/core/config";
+import { parseCognitConfig, type CognitConfig } from "@cognit/core/config";
 
 /**
  * Read a `.cognit/cognit.yaml` from disk, parse it, and Effect-Schema-validate it.
@@ -12,7 +11,7 @@ import { CognitConfigSchema, type CognitConfig } from "@cognit/core/config";
 export async function readConfig(configPath: string): Promise<CognitConfig> {
   const text = await fs.readFile(configPath, "utf8");
   const parsed = YAML.parse(text);
-  return Schema.decodeUnknownSync(CognitConfigSchema)(parsed);
+  return parseCognitConfig(parsed);
 }
 
 /**
@@ -22,7 +21,7 @@ export async function readConfig(configPath: string): Promise<CognitConfig> {
 export async function writeConfig(configPath: string, config: CognitConfig): Promise<void> {
   // validate the round-trip; the caller already has a typed value, but
   // this guards against accidental shape drift.
-  Schema.decodeUnknownSync(CognitConfigSchema)(config);
+  parseCognitConfig(config);
   const text = YAML.stringify(config, {
     indent: 2,
     sortMapEntries: true,

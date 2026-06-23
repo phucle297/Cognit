@@ -163,76 +163,99 @@ export const GravityConfig = GravityConfigBase.pipe(
 );
 type GravityConfig = Schema.Schema.Type<typeof GravityConfig>;
 
-// --- llm (Gateway routing, phase 9) -------------------------------------
+// --- llm (LiteLLM proxy, phase 9) ---------------------------------------
 
 /**
- * Env-var name (must be a non-empty string, max 256 chars). The
- * Gateway SDK reads `AI_GATEWAY_API_KEY` by default; per-model
- * overrides point at direct provider keys (Anthropic, OpenAI,
- * Google, DashScope, etc.) but routing still flows through
- * `gateway(model)` from `@ai-sdk/gateway`.
+ * Env-var name (must be a non-empty string, max 256 chars). Used to
+ * resolve the LLM proxy auth credential at call time.
  */
 const EnvVarName = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256));
 
 /**
- * Gateway model id (e.g. `MiniMax/MiniMax-M3`,
- * `anthropic/claude-sonnet-4-6`). Format: `<provider>/<id>`.
- * Free-form — the Gateway catalog validates at call time.
+ * Model id (e.g. `gpt-4o-mini`, `claude-sonnet-4-6`,
+ * `dashscope/qwen-max`). Format is provider-defined; the LiteLLM
+ * catalog validates at call time.
  */
 const ModelId = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(256));
 
 /**
- * Per-model override. Currently only `api_key_env` — routing still
- * flows through Gateway regardless of which key is used. Add fields
- * here as new per-model options appear (temperature cap, region,
- * etc.) without touching the top-level `LlmConfig`.
- */
-const LlmModelOverride = Schema.Struct({
-  api_key_env: EnvVarName,
-});
-type LlmModelOverride = Schema.Schema.Type<typeof LlmModelOverride>;
-
-/**
- * Per-command model override. Fall back to `llm.default_model` when
- * absent. Optional so commands can be added one at a time without a
- * schema migration.
- */
-const LlmCommandConfig = Schema.Struct({
-  model: Schema.optional(ModelId),
-});
-type LlmCommandConfig = Schema.Schema.Type<typeof LlmCommandConfig>;
-
-/**
- * Top-level LLM block. All fields optional — a project with no LLM
- * config simply errors at first call (see config-resolver). Defaults
- * baked here so the most common case (`AI_GATEWAY_API_KEY` env,
- * no default model) needs zero YAML.
+ * Top-level LLM block.
+ *
+ * The design is model- and tool-agnostic: commands and aliases refer
+ * to logical names (`ask`, `agent_run`, user-defined aliases) rather
+ * than to a specific provider SDK. All requests are routed through
+ * a LiteLLM proxy (`base_url`) speaking the OpenAI-compatible
+ * `/chat/completions` (and multimodal) format. The proxy translates
+ * per-provider to the upstream model, so the CLI/SDK code stays
+ * provider-neutral.
+ *
+ * `api_key_env` is the env var holding the LiteLLM master key
+ * (default `LITELLM_MASTER_KEY`). `default_model` is the fallback
+ * used by any command that does not specify its own. `model_aliases`
+ * maps user-friendly short names (e.g. `fast`, `smart`) to upstream
+ * model ids; commands may reference either an alias or a literal
+ * model id. `commands.ask` and `commands.agent_run` further pin a
+ * specific model/alias for those two CLI entry points.
  *
  * Spec: docs/superpowers/specs/2026-06-22-gateway-multimodal-design.md §1.
  */
 export const LlmConfig = Schema.Struct({
-  api_key_env: Schema.optionalWith(EnvVarName, { default: () => "AI_GATEWAY_API_KEY" }),
+  base_url: Schema.optional(Schema.String.pipe(Schema.minLength(1))),
+  api_key_env: Schema.optional(EnvVarName),
+  format: Schema.optional(Schema.Literal("openai")),
   default_model: Schema.optional(ModelId),
-  models: Schema.optionalWith(
-    Schema.Record({ key: Schema.String, value: LlmModelOverride }),
-    { default: () => ({}) as Record<string, LlmModelOverride> },
-  ),
-  commands: Schema.optionalWith(
+  model_aliases: Schema.optional(Schema.Record({ key: Schema.String, value: ModelId })),
+  timeout_ms: Schema.optional(Schema.Number),
+  commands: Schema.optional(
     Schema.Struct({
-      ask: Schema.optional(LlmCommandConfig),
-      agent_run: Schema.optional(LlmCommandConfig),
+      ask: Schema.optional(Schema.Struct({
+        alias: Schema.optional(Schema.String),
+        model: Schema.optional(ModelId),
+      })),
+      agent_run: Schema.optional(Schema.Struct({
+        alias: Schema.optional(Schema.String),
+        model: Schema.optional(ModelId),
+      })),
     }),
-    {
-      default: () => ({}) as {
-        ask?: LlmCommandConfig;
-        agent_run?: LlmCommandConfig;
-      },
-    },
   ),
 });
-export type LlmConfig = Schema.Schema.Type<typeof LlmConfig>;
+
+/**
+ * Resolved `LlmConfig` — the shape consumers see AFTER `parseCognitConfig`
+ * fills defaults. Schema-level fields are all `optional` (so partial
+ * YAML doesn't crash decode), but this exported type asserts every
+ * consumer-facing field is present.
+ *
+ * `default_model` is optional at the schema level so a config that
+ * supplies per-command models only (e.g. `commands.ask.model`) still
+ * parses. Consumers that need a concrete model id MUST use
+ * `resolveModel(llm, command)` which walks the alias → command.model
+ * → default_model fallback chain and throws when nothing resolves.
+ */
+export interface LlmConfig {
+  base_url: string;
+  api_key_env: string;
+  format: "openai";
+  default_model: string | undefined;
+  model_aliases: Record<string, string>;
+  timeout_ms: number;
+  commands: {
+    ask?: { alias?: string | undefined; model?: string | undefined } | undefined;
+    agent_run?: { alias?: string | undefined; model?: string | undefined } | undefined;
+  };
+}
 
 // --- top-level -----------------------------------------------------------
+
+type RawCognitConfig = Schema.Schema.Type<typeof CognitConfigSchema>;
+
+/**
+ * Resolved `CognitConfig` — overrides the schema-inferred type so
+ * `llm` is the strict `LlmConfig` shape (post-defaults) rather than
+ * the schema's all-optional version. Consumers always see the
+ * resolved shape.
+ */
+export type CognitConfig = Omit<RawCognitConfig, "llm"> & { llm: LlmConfig };
 
 export const CognitConfigSchema = Schema.Struct({
   project: ProjectConfig,
@@ -274,17 +297,47 @@ export const CognitConfigSchema = Schema.Struct({
       }) as const,
   }),
   llm: Schema.optionalWith(LlmConfig, {
-    default: () => ({ api_key_env: "AI_GATEWAY_API_KEY", models: {}, commands: {} }) as LlmConfig,
+    default: () =>
+      ({
+        base_url: "http://localhost:4000",
+        api_key_env: "LITELLM_MASTER_KEY",
+        format: "openai" as const,
+        default_model: undefined,
+        model_aliases: {},
+        commands: {},
+      }) as LlmConfig,
   }),
 });
 
-export type CognitConfig = Schema.Schema.Type<typeof CognitConfigSchema>;
-export type { RedactionPattern, UnreferencedAction, ActorKnown, LlmModelOverride, LlmCommandConfig };
+export type { RedactionPattern, UnreferencedAction, ActorKnown };
 
 /**
  * Parse and validate unknown input as a Cognit config. Throws on bad input.
+ *
+ * Post-process: `Schema.optionalWith({ default })` only fills defaults
+ * for keys omitted at decode time. When a nested `llm` block is
+ * partially supplied (e.g. `{ commands: { ask: { model: "x" } } }`),
+ * inner optional fields like `format`, `timeout_ms`, etc. would stay
+ * `undefined` after the raw decode. This wrapper re-applies the
+ * documented defaults so every consumer sees a fully-populated
+ * `LlmConfig`.
  */
-export const parseCognitConfig = Schema.decodeUnknownSync(CognitConfigSchema);
+export const parseCognitConfig = (input: unknown): CognitConfig => {
+  const decoded = Schema.decodeUnknownSync(CognitConfigSchema)(input);
+  if (!decoded.llm) return decoded as CognitConfig;
+  return {
+    ...decoded,
+    llm: {
+      base_url: decoded.llm.base_url ?? "http://localhost:4000",
+      api_key_env: decoded.llm.api_key_env ?? "LITELLM_MASTER_KEY",
+      format: decoded.llm.format ?? "openai",
+      default_model: decoded.llm.default_model,
+      model_aliases: decoded.llm.model_aliases ?? {},
+      timeout_ms: decoded.llm.timeout_ms ?? 300000,
+      commands: decoded.llm.commands ?? {},
+    },
+  };
+};
 
 /**
  * The default config written by `cognit init` when no file is present.

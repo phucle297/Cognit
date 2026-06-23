@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Cognit-l06/006 cognit ask command
+search: Cognit-XXX: llm: drop Vercel AI SDK, LiteLLM proxy OpenAI-compat
 queue: 
-next: 
+next: Cognit-to3

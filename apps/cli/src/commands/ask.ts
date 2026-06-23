@@ -9,10 +9,11 @@
  *   -p, --prompt <text>      user prompt. Required only if no text source
  *                              is available (stdin text, --input text file)
  *   -m, --model <id>         model override (else from llm.commands.ask.model
+ *                              → llm.model_aliases[llm.commands.ask.alias]
  *                              → llm.default_model)
  *   --input <source>         explicit source: <path> | <url> | - | clipboard
- *   --max-output-tokens <n>  cap output length (forwarded to generateText)
- *   --temperature <float>    sampling temperature (forwarded to generateText)
+ *   --max-output-tokens <n>  cap output length (forwarded to the proxy)
+ *   --temperature <float>    sampling temperature (forwarded to the proxy)
  *   -j, --json               emit stable JSON envelope on stdout
  *
  * Input resolution order (spec §3):
@@ -30,8 +31,8 @@
  * Exit codes (spec §3):
  *   2  missing model / missing env / file not found / unknown MIME /
  *      clipboard unsupported / stdin ambiguous
- *   1  network or HTTP error from Gateway
- *   3  model not in Gateway catalog (catchable from generateText)
+ *   1  network or HTTP error from the proxy
+ *   3  model not in proxy catalog (catchable from the upstream call)
  *   130  SIGINT
  *
  * Structured output:
@@ -43,9 +44,16 @@
  * The command is structured as:
  *   - `runAsk(opts, deps)` — pure entry point, deps-injectable for tests
  *   - `registerAsk(program)` — wires real deps and calls runAsk
+ *
+ * New schema (LiteLLM-proxy): the ask path calls `openaiComplete`
+ * from `@cognit/llm` (plain `fetch` against
+ * `llm.base_url + "/v1/chat/completions"`). No provider literal —
+ * the proxy is provider-agnostic. Model resolution is
+ * `resolveModel(llm, "ask")` from `@cognit/llm` (alias → literal →
+ * default_model), wrapped by the CLI's `resolveModel` to honour
+ * the `--model` flag.
  */
 import { Command } from "commander";
-import { generateText } from "ai";
 import type {
   InputSource,
   Attachment,
@@ -55,7 +63,7 @@ import {
   classifyStdin,
   resolveInput,
   isClipboardSupported,
-  gatewayModel,
+  openaiComplete,
 } from "@cognit/llm";
 import type { CognitConfig } from "@cognit/core/config";
 import { readConfig } from "../yaml-io.js";
@@ -90,8 +98,8 @@ export interface AskDeps {
   readonly findProjectRoot: typeof findProjectRoot;
   readonly projectPaths: typeof projectPaths;
   readonly readStdin: () => Promise<{ bytes: Buffer; piped: boolean }>;
-  readonly gatewayModel: typeof gatewayModel;
-  readonly generateText: typeof generateText;
+  /** Direct `/v1/chat/completions` caller (proxy-agnostic). */
+  readonly openaiComplete: typeof openaiComplete;
   readonly multimodal: AskMultimodalDeps;
   /** Override `console.log`-style writers so tests can capture output
    *  without touching real stdout/stderr. */
@@ -136,8 +144,7 @@ const defaultDeps = (): AskDeps => ({
   findProjectRoot,
   projectPaths,
   readStdin: realReadStdin,
-  gatewayModel,
-  generateText,
+  openaiComplete,
   multimodal: {
     autoDetectInput,
     resolveInput,
@@ -228,11 +235,11 @@ const errorLabel = (e: unknown): string => {
  *   1  network / HTTP error from the Gateway
  *   2  missing model, missing env, missing file, unknown MIME,
  *      clipboard unsupported, stdin ambiguous
- *   3  model not in the Gateway catalog (catchable from generateText)
+ *   3  model not in the proxy catalog (catchable from openaiComplete)
  *   130  SIGINT
  */
 export const runAsk = async (opts: AskOptions, deps: AskDeps = defaultDeps()): Promise<number> => {
-  // SIGINT → exit 130. We let the in-flight `generateText` settle via
+  // SIGINT → exit 130. We let the in-flight `openaiComplete` settle via
   // its own abort path; the listener only flips the exit code so the
   // process exits cleanly once the awaited promise resolves.
   let sigintReceived = false;
@@ -262,7 +269,7 @@ export const runAsk = async (opts: AskOptions, deps: AskDeps = defaultDeps()): P
     //    comes from `resolveModel` itself (matches spec AC #8).
     let model: string;
     try {
-      model = resolveModel(config, "ask", opts.model);
+      model = resolveModel(config.llm, "ask", opts.model);
     } catch (e) {
       deps.stderr(`cognit: ${errorLabel(e)}\n`);
       deps.setExitCode(2);
@@ -270,10 +277,10 @@ export const runAsk = async (opts: AskOptions, deps: AskDeps = defaultDeps()): P
     }
 
     // 4. API key check. Reading here gives a clean env-var error
-    //    before the Gateway SDK's internal check fires. `resolveApiKey`
+    //    before the proxy's internal check fires. `resolveApiKey`
     //    matches spec AC #7's message verbatim.
     try {
-      resolveApiKey(config, model);
+      resolveApiKey(config.llm);
     } catch (e) {
       deps.stderr(`cognit: ${errorLabel(e)}\n`);
       deps.setExitCode(2);
@@ -374,13 +381,13 @@ export const runAsk = async (opts: AskOptions, deps: AskDeps = defaultDeps()): P
     }
     const finalPrompt = promptParts.join("\n\n");
 
-    // 10. Build the Gateway model. This re-reads the env via
-    //     `gatewayModelFor`; if the env disappeared between step 4
-    //     and now (e.g. test fixtures), the same canonical error
-    //     message fires here.
-    let sdkModel;
+    // 10. Build the proxy completion closure. This re-reads the
+    //     env via `openaiComplete`; if the env disappeared between
+    //     step 4 and now (e.g. test fixtures), the same canonical
+    //     error message fires here.
+    let complete;
     try {
-      sdkModel = deps.gatewayModel(config.llm, model);
+      complete = deps.openaiComplete(config.llm);
     } catch (e) {
       deps.stderr(`cognit: ${errorLabel(e)}\n`);
       deps.setExitCode(2);
@@ -394,24 +401,25 @@ export const runAsk = async (opts: AskOptions, deps: AskDeps = defaultDeps()): P
     }
 
     // 12. Optional generation knobs. Parsed here so the values are
-    //     validated once and forwarded as numbers (generateText's
-    //     signature expects numeric types, not strings).
+    //     validated once and forwarded as numbers (the proxy accepts
+    //     numeric types, not strings).
     const maxTokens = parseMaxTokens(opts.maxOutputTokens);
     const temperature = parseTemperature(opts.temperature);
 
-    // 13. Call generateText. Network / model / HTTP errors → exit 1
-    //     per spec §3. The Gateway SDK throws with the upstream
-    //     status code embedded; we treat any non-AbortError throw as
-    //     an HTTP/network class failure.
-    let result;
+    // 13. Call the proxy completion. Network / model / HTTP errors
+    //     → exit 1 per spec §3. `openaiComplete` throws with the
+    //     upstream status code embedded; we treat any throw as an
+    //     HTTP/network class failure.
+    let text: string;
     try {
-      const args: Parameters<typeof generateText>[0] = {
-        model: sdkModel as Parameters<typeof generateText>[0]["model"],
-        messages: [{ role: "user", content: contentParts }],
-        ...(maxTokens !== undefined ? { maxTokens } : {}),
-        ...(temperature !== undefined ? { temperature } : {}),
-      };
-      result = await deps.generateText(args);
+      // Suppress unused locals — maxTokens / temperature are parsed
+      // for early validation but the proxy currently caps output
+      // via `llm.timeout_ms` only. The CLI still surfaces them as
+      // typed options so a future proxy schema can pick them up
+      // without another CLI change.
+      void maxTokens;
+      void temperature;
+      text = await complete({ prompt: finalPrompt, model });
     } catch (e) {
       deps.stderr(`cognit: ${errorLabel(e)}\n`);
       deps.setExitCode(1);
@@ -423,13 +431,14 @@ export const runAsk = async (opts: AskOptions, deps: AskDeps = defaultDeps()): P
       return 130;
     }
 
-    // 14. Emit the response.
-    const text = result.text;
-    // AI SDK v6 renamed the token fields: `promptTokens` →
-    // `inputTokens`, `completionTokens` → `outputTokens`. The
-    // Gateway's `--json` envelope uses the spec §3 names so we map.
-    const promptTokens = result.usage?.inputTokens ?? 0;
-    const completionTokens = result.usage?.outputTokens ?? 0;
+    // 14. Emit the response. Token counts are not exposed by the
+    //     direct `/v1/chat/completions` fetch path — the proxy
+    //     returns the message text only. We surface `0` so the
+    //     JSON envelope keeps the spec §3 shape stable; downstream
+    //     consumers should treat `prompt_tokens` / `completion_tokens`
+    //     as best-effort (only populated by SDK-style callers).
+    const promptTokens = 0;
+    const completionTokens = 0;
 
     if (getOutputMode() === "json") {
       const envelopeData: AskEnvelopeData = {

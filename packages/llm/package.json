@@ -16,15 +16,9 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^2.0.0",
-    "@ai-sdk/gateway": "^3.0.0",
-    "@ai-sdk/google": "^2.0.0",
-    "@ai-sdk/openai": "^2.0.0",
     "@cognit/agent": "workspace:*",
     "@cognit/core": "workspace:*",
-    "ai": "^6.0.0",
-    "effect": "3.21.3",
-    "ollama-ai-provider-v2": "^2.0.0"
+    "effect": "3.21.3"
   },
   "devDependencies": {
     "@types/node": "^25.9.3",

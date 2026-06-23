@@ -1,11 +1,17 @@
 /**
- * @cognit/llm — Vercel AI SDK provider layer (C1).
+ * @cognit/llm — LiteLLM proxy OpenAI-compat provider layer (C1).
  *
  * Public surface:
- *   - `LlmLiveFromRoute(llm)` / `LlmLiveLazyFromRoute(llm)` —
- *     Gateway-routed Layers satisfying `@cognit/agent`'s
+ *   - `LlmLive(llm)` / `LlmLiveLazy(llm)` —
+ *     `fetch`-based Layers satisfying `@cognit/agent`'s
  *     `LlmProvider` Tag
- *   - `gatewayModel(llm, modelId)` — Vercel AI Gateway factory
+ *   - `resolveModel(llm, cmd?)` — pick a model id from
+ *     `llm.commands[cmd]` (alias → literal → default_model)
+ *   - `LLM_RETRY_SCHEDULE` — pinned exponential-backoff schedule
+ *     used by the live layer
+ *   - `openaiComplete` / `OpenAiCompleteInput` — direct
+ *     `/v1/chat/completions` caller (re-used by `cognit ask`'s
+ *     bypass path)
  *   - `makeCompleteJson` / `extendWithJson` / `JSON_OUTPUT_INSTRUCTION` —
  *     typed JSON completion helper (re-exported by tests)
  *   - `LlmCompletionError` / `JsonParseError` / `SchemaValidationError`
@@ -18,7 +24,7 @@
  * Layer that satisfies it. No reverse dependency.
  *
  * The package owns:
- *   - the Vercel AI SDK wrapper (`generateText`)
+ *   - the OpenAI-compat `fetch` wrapper (`openaiComplete`)
  *   - the JSON parse + Effect Schema validation step
  *   - the env-var boot check
  *   - multimodal input classification
@@ -29,17 +35,16 @@
  *   - the loop orchestration
  */
 export {
-  LlmLiveFromRoute,
-  LlmLiveLazyFromRoute,
-  gatewayShapeFor,
+  LlmLive,
+  LlmLiveLazy,
+  resolveModel,
+  LLM_RETRY_SCHEDULE,
 } from "./layer.js";
 
 export {
-  gatewayModel,
-  gatewayModelFor,
-  resolveGatewayRoute,
-  type GatewayRoute,
-} from "./gateway.js";
+  openaiComplete,
+  type OpenAiCompleteInput,
+} from "./openai.js";
 
 export {
   makeCompleteJson,
