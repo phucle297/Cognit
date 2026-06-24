@@ -195,10 +195,12 @@ describe("auto-snapshot trigger", () => {
     expect(idMatch).not.toBeNull();
     const sessionId = idMatch![1]!;
 
-    // 4. Append three events. With everyN=3 and a session_created
-    //    event already in the table, the 1st append is event #2
-    //    (no snapshot), the 2nd is event #3 (crosses threshold ->
-    //    snapshot: yes), the 3rd is event #4 (4-3=1 < 3, no new snap).
+    // 4. Append three events. With everyN=3 and TWO pre-existing
+    //    rows in events (actor_registered + session_created, the
+    //    Cognit-ttc audit side-effect on first ensureActor), the
+    //    1st append brings the count to 3 (crosses threshold ->
+    //    snapshot: yes), the 2nd is event #4 (4-3=1 < 3, no snap),
+    //    the 3rd is event #5 (5-3=2 < 3, no new snap).
     const results: { stdout: string }[] = [];
     for (const text of ["a", "b", "c"]) {
       const out = runCli(tmp, [
@@ -215,8 +217,8 @@ describe("auto-snapshot trigger", () => {
     }
 
     // 5. Stdout contract: append reports `snapshot: yes|no`.
-    expect(results[0]!.stdout).toContain("snapshot: no");
-    expect(results[1]!.stdout).toContain("snapshot: yes");
+    expect(results[0]!.stdout).toContain("snapshot: yes");
+    expect(results[1]!.stdout).toContain("snapshot: no");
     expect(results[2]!.stdout).toContain("snapshot: no");
 
     // 6. Open the DB directly and assert exactly one snapshot row.

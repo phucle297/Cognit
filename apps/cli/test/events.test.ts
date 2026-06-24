@@ -111,11 +111,14 @@ describe("cognit events", () => {
     };
     expect(env.version).toBe(1);
     expect(env.kind).toBe("events.list");
-    // session_created + 2 observations + 1 finding = 4.
-    expect(env.data.count).toBe(4);
-    expect(env.data.events).toHaveLength(4);
+    // actor_registered (Cognit-ttc audit side-effect on first
+    // ensureActor for "cognit-cli") + session_created + 2
+    // observations + 1 finding = 5.
+    expect(env.data.count).toBe(5);
+    expect(env.data.events).toHaveLength(5);
     const types = env.data.events.map((e) => e.type).sort();
     expect(types).toEqual([
+      "actor_registered",
       "finding_created",
       "observation_recorded",
       "observation_recorded",
@@ -201,8 +204,9 @@ describe("cognit events", () => {
       data: { count: number; events: ReadonlyArray<{ type: string }> };
     };
     expect(env.kind).toBe("events.follow");
-    expect(env.data.count).toBe(4);
-    expect(env.data.events).toHaveLength(4);
+    // Includes actor_registered (Cognit-ttc audit side-effect).
+    expect(env.data.count).toBe(5);
+    expect(env.data.events).toHaveLength(5);
   });
 
   it("returns an empty events list (in JSON) for a brand-new session", () => {

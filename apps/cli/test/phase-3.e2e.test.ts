@@ -159,7 +159,10 @@ const ENTITY_COMMANDS: ReadonlyArray<{
 ];
 
 describe("phase 3 E2E — AC1: every cognition-entity subcommand", () => {
-  it("appends a valid event in <500ms (warm path) for each entity subcommand", () => {
+  // 11 entity subcommands, each spawnSync-boots tsx. The shared
+  // 30s suite default is too tight when vitest parallel-runs other
+  // CLI test files; bump to 90s to keep this stable under load.
+  it("appends a valid event in <500ms (warm path) for each entity subcommand", { timeout: 90_000 }, () => {
     expect(runCli(tmp, ["init", "--project", "demo"]).status).toBe(0);
     const create = runCli(tmp, ["session", "create", "phase-3 e2e"]);
     expect(create.status).toBe(0);
@@ -180,12 +183,13 @@ describe("phase 3 E2E — AC1: every cognition-entity subcommand", () => {
       const r = runCli(tmp, [...cmd.build(sessionId)]);
       const elapsed = Date.now() - t0;
       expect(r.status, `${cmd.label} failed: ${r.stderr || r.stdout}`).toBe(0);
-      // 5s budget: tsx cold start is ~1-2s sequential, ~4s when
+      // 10s budget: tsx cold start is ~1-2s sequential, ~4-6s when
       // vitest runs 20+ parallel tests (CPU contention). The plan
       // <500ms target is measured in-process by the per-entity
       // unit tests; this E2E proves the wiring + bounds the spawn
-      // cost, not the operation cost.
-      expect(elapsed, `${cmd.label} took ${elapsed}ms`).toBeLessThan(5000);
+      // cost, not the operation cost. Bumped from 5s → 10s after
+      // CI runs occasionally spiked to 6-9s on a 4-core runner.
+      expect(elapsed, `${cmd.label} took ${elapsed}ms`).toBeLessThan(10_000);
     }
 
     // Open the DB and assert every expected event type is present.

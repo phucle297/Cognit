@@ -31,7 +31,11 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:chil
 
 const CLI_ENTRY = path.resolve(__dirname, "..", "src", "index.ts");
 const TSX = path.resolve(__dirname, "..", "node_modules", ".bin", "tsx");
-const HEALTHZ_TIMEOUT_MS = 5000;
+// Server boot in this E2E goes through a fresh `tsx` child + a full
+// app-layer build (DB migrations, drizzle, commander 15, effect 3.21).
+// 5s was too tight when vitest runs 20+ test files in parallel and
+// CPU contention pushes cold-start past 25s on a 4-core runner.
+const HEALTHZ_TIMEOUT_MS = 30_000;
 
 function runCli(
   cwd: string,

@@ -122,7 +122,9 @@ describe("cognit session lifecycle", () => {
     const snap = runCli(tmp, ["snapshot"]);
     expect(snap.status).toBe(0);
     expect(snap.stdout).toContain(`session:     ${id}`);
-    expect(snap.stdout).toContain("event_count: 1");
+    // Session create emits TWO events: actor_registered (Cognit-ttc
+    // audit side-effect on first ensureActor) + session_created.
+    expect(snap.stdout).toContain("event_count: 2");
     expect(snap.stdout).toContain("taken:       yes (new)");
 
     // Running again returns the existing snapshot.

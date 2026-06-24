@@ -38,11 +38,16 @@ describe("cognit inbox --process", () => {
     const idMatch = create.stdout.match(/session:\s+(01[A-Z0-9]+)/i);
     const sessionId = idMatch![1]!;
 
-    // Write a well-formed inbox event.
+    // Write a well-formed inbox event. The InboxEnvelope schema
+    // (Cognit-ttc) requires a `version` field, and the file name
+    // must match `<session-ulid>-<event-ulid>.json`; otherwise the
+    // file goes to _error/.
     const inboxDir = path.join(tmp, ".cognit", "inbox");
-    const inboxFile = path.join(inboxDir, "obs-1.json");
+    const eventUlid = "01AAAAAAAAAAAAAAAAAAAAAAAA";
+    const inboxFile = path.join(inboxDir, `${sessionId}-${eventUlid}.json`);
     const payload = {
       type: "observation_recorded",
+      version: "1.1.0",
       session_id: sessionId,
       actor_name: "test",
       actor_type: "system",
