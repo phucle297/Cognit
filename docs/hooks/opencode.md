@@ -52,8 +52,9 @@ shares the `ulid` package the DB uses — no shelling out to a Node
 helper. Follows the **Common behavior** algorithms in
 [`docs/hooks/README.md`](./README.md#common-behavior).
 
-`tool.execute.before` → `hypothesis_created` is deferred to Phase G
-alongside the Claude Code / Codex / Gemini pre hooks.
+`tool.execute.before` → `hypothesis_created` is not wired in this
+plugin; the Claude Code / Codex / Gemini pre hooks cover the
+hypothesis_created emission across providers.
 
 ## Payload
 

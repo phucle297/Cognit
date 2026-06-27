@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { registerInit } from "./commands/init.js";
 import { registerConfig } from "./commands/config.js";
+import { registerEnv } from "./commands/env.js";
 import { registerSession } from "./commands/session.js";
 import { registerSnapshot } from "./commands/snapshot.js";
 import { registerAppend } from "./commands/append.js";
@@ -60,6 +61,7 @@ program.option(
 
 registerInit(program);
 registerConfig(program);
+registerEnv(program);
 registerSession(program);
 registerSnapshot(program);
 registerAppend(program);

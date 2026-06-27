@@ -40,9 +40,10 @@ cognit session create "Investigate memory leak"
 ```
 
 Writes the new session ULID to `.cognit/current-session`. Hooks
-read this pointer (or `$COGNIT_SESSION_ID` from
-`eval "$(cognit init --shell)"`) to know which session to attribute
-their events to.
+read this pointer (or `$COGNIT_INBOX` from
+`eval "$(cognit env --shell)"`, plus a manual
+`export COGNIT_SESSION_ID=<ulid>`) to know which session to
+attribute their events to.
 
 ## 4. Wire the AI tool
 

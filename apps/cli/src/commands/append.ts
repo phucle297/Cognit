@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { SessionService, type ActorType } from "@cognit/db";
+import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayerAndConfig } from "../layer-build.js";
@@ -13,8 +14,6 @@ interface AppendOptions {
   session?: string;
   actor?: string;
 }
-
-const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>(["human", "worker", "system"]);
 
 /** Parse an `--actor "name:type"` string, falling back to the supplied defaults. */
 const parseActor = (

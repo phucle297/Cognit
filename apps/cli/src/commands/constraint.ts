@@ -19,6 +19,7 @@
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { EventStore, ConstraintPolicy, type ActorType } from "@cognit/db";
+import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
@@ -44,8 +45,6 @@ interface TestOptions {
   session?: string;
   root?: string;
 }
-
-const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>(["human", "worker", "system"]);
 
 const parseActor = (
   raw: string | undefined,

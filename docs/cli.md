@@ -18,7 +18,8 @@ as a snapshot, not a fixed count. Each lives in its own file under
 |---|---------------|-------------------------------------------|----------------------------------------------------------------------------------------------------------|
 | 1 | `init`        | `apps/cli/src/commands/init.ts:1`         | Initialise a local Cognit project (creates `.cognit/` tree, writes `cognit.yaml`, adds `.gitignore`).    |
 | 2 | `config`      | `apps/cli/src/commands/config.ts:1`       | Show or edit the local `cognit.yaml`.                                                                    |
-| 3 | `session`     | `apps/cli/src/commands/session.ts:1`      | Manage sessions: create / list / show / resume / close / fork.                                           |
+| 3 | `env`         | `apps/cli/src/commands/env.ts:1`          | Print hook-relevant env vars (e.g. `$COGNIT_INBOX`) for the current project. Read-only, no side effects. |
+| 4 | `session`     | `apps/cli/src/commands/session.ts:1`      | Manage sessions: create / list / show / resume / close / fork.                                           |
 
 ## Event authoring
 
@@ -29,8 +30,8 @@ as a snapshot, not a fixed count. Each lives in its own file under
 | 6  | `observe`    | `apps/cli/src/commands/observation.ts:1`        | Record an `observation_recorded` event.                                                  |
 | 7  | `finding`    | `apps/cli/src/commands/finding.ts:1`            | Record a `finding_created` event.                                                        |
 | 8  | `hypothesis` | `apps/cli/src/commands/hypothesis.ts:1`         | Hypothesis lifecycle: propose / weaken / reject / promote (4-state).                     |
-| 9  | `theory`     | `apps/cli/src/commands/theory.ts:1`             | Theory lifecycle: `theory_created`, `theory_updated`, `theory_merged`, `theory_archived`.|
-| 10 | `experiment` | `apps/cli/src/commands/experiment.ts:1`         | Experiment lifecycle: `experiment_created`, `experiment_completed`.                      |
+| 9  | `theory`     | `apps/cli/src/commands/theory.ts:1`             | **Experimental** — Theory lifecycle: `theory_created`, `theory_updated`, `theory_merged`, `theory_archived`. Rarely needed for canonical investigation flow; emits a one-shot stderr warning unless `COGNIT_QUIET_DEPRECATIONS=1`.|
+| 10 | `experiment` | `apps/cli/src/commands/experiment.ts:1`         | **Experimental** — Experiment lifecycle: `experiment_created`, `experiment_completed`. Rarely needed for canonical investigation flow; emits a one-shot stderr warning unless `COGNIT_QUIET_DEPRECATIONS=1`.|
 | 11 | `decision`   | `apps/cli/src/commands/decision.ts:1`           | Decisions: propose, accept, reject, supersede (4-state lifecycle).                       |
 | 12 | `conclusion` | `apps/cli/src/commands/conclusion.ts:1`         | Conclusion lifecycle: propose / verify / reject.                                         |
 | 13 | `verify`     | `apps/cli/src/commands/verification.ts:1`       | Verification lifecycle: run (default), cancel, pass, fail, error, rerun.                 |
@@ -91,8 +92,10 @@ all other subcommands have something to read. In one call it:
   `cognit init` does NOT touch your environment — a child process
   cannot mutate the parent shell's env. To export
   `$COGNIT_INBOX=<projectRoot>/.cognit/inbox` in the current shell,
-  run `eval "$(cognit init --shell)"` (this prints an `export`
-  snippet to stdout that the shell evaluates). Without an explicit
+  run `eval "$(cognit env --shell)"` (this prints an `export`
+  snippet to stdout that the shell evaluates). `cognit env` is a
+  separate subcommand (see the lifecycle table above) precisely so
+  `init` keeps its single bootstrap purpose. Without an explicit
   override, every producer script resolves the inbox via
   `findProjectRoot` → `<projectRoot>/.cognit/inbox/` (project-relative
   from the script's CWD), so most users do not need the `--shell`

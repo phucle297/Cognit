@@ -55,6 +55,7 @@ import path from "node:path";
 import fsp from "node:fs/promises";
 import { Effect, Ref } from "effect";
 import { ulid } from "ulid";
+import type { StateEventType } from "@cognit/core";
 import {
   runVerification,
   type ArtifactRef,
@@ -72,15 +73,17 @@ import { atomicWriteJson } from "./atomic-write.js";
 export const WRAP_SCHEMA_VERSION = "1.2.0" as const;
 
 /**
- * Envelope types wrap produces. Kept in sync with the watcher's
- * payload schema lookup table
- * (`packages/db/src/event-schema.ts`).
+ * Envelope types wrap produces. `Extract<StateEventType, ...>` projects
+ * the wrap-specific subset out of the canonical state-event union
+ * defined in `@cognit/core/event-types.ts`. Adding a new envelope type
+ * to wrap means adding the string literal here; if it isn't a member of
+ * `StateEventType`, the `Extract` collapses to `never` and the union
+ * becomes empty — a compile-time trip wire.
  */
-export type WrapEnvelopeType =
-  | "observation_recorded"
-  | "verification_passed"
-  | "verification_failed"
-  | "verification_errored";
+export type WrapEnvelopeType = Extract<
+  StateEventType,
+  "observation_recorded" | "verification_passed" | "verification_failed" | "verification_errored"
+>;
 
 /**
  * The fields the watcher requires + the cross-cutting ones we

@@ -58,7 +58,9 @@ The Cognit `session_id` written into each envelope is resolved in
 this order:
 
 1. **`$COGNIT_SESSION_ID` env var** — set by
-   `eval "$(cognit init --shell)"` in the current shell.
+   `eval "$(cognit env --shell)"` in the current shell (then
+   `export COGNIT_SESSION_ID=<session-ulid>` manually after
+   `cognit session create`).
 2. **Sticky pointer** at `./.cognit/current-session` — a plain-text
    ULID written by `cognit session create` / `cognit session resume`
    (`apps/cli/src/current-session.ts`).
@@ -98,7 +100,7 @@ before Python reopens the file).
 The destination directory is resolved in this order:
 
 1. **`$COGNIT_INBOX` env var** (set by
-   `eval "$(cognit init --shell)"`).
+   `eval "$(cognit env --shell)"`).
 2. **Default**: `<projectRoot>/.cognit/inbox/` — Cognit is
    per-project local-first. The producer script resolves the
    project root from its CWD (the project the AI tool was launched

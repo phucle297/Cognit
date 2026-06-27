@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { Effect } from "effect";
 import { ProjectService, SessionService } from "@cognit/db";
+import { VALID_ACTOR_TYPES, type ActorType } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
@@ -11,24 +12,22 @@ interface SnapshotOptions {
   actor?: string;
 }
 
-const VALID_ACTOR_TYPES = new Set(["human", "worker", "system"]);
-
 const parseActor = (
   raw: string | undefined,
   defaultName: string,
-  defaultType: "human" | "worker" | "system",
-): { name: string; type: "human" | "worker" | "system" } => {
+  defaultType: ActorType,
+): { name: string; type: ActorType } => {
   if (!raw) return { name: defaultName, type: defaultType };
   const idx = raw.lastIndexOf(":");
   if (idx < 0) return { name: raw, type: defaultType };
   const name = raw.slice(0, idx);
-  const type = raw.slice(idx + 1);
+  const type = raw.slice(idx + 1) as ActorType;
   if (!VALID_ACTOR_TYPES.has(type)) {
     process.stderr.write(`cognit: --actor type must be one of human|worker|system, got: ${type}\n`);
     process.exitCode = 2;
     return { name: defaultName, type: defaultType };
   }
-  return { name: name || defaultName, type: type as "human" | "worker" | "system" };
+  return { name: name || defaultName, type };
 };
 
 const requireProjectRoot = (): string => {

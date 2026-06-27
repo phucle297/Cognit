@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType, type VerificationType } from "@cognit/db";
+import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { runVerification, type TerminalEvent } from "@cognit/verification";
 import { findProjectRoot, projectPaths } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
@@ -24,7 +25,6 @@ interface VerifyOptions {
   errorCode?: string;
 }
 
-const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>(["human", "worker", "system"]);
 const VALID_VERIFICATION_TYPES: ReadonlySet<VerificationType> = new Set<VerificationType>([
   "test",
   "lint",

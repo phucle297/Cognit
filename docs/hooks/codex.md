@@ -25,11 +25,10 @@ cognit inbox --watch   →   SQLite   →   dashboard
 ## Install
 
 ```bash
+mkdir -p ~/.cognit/hooks
+install -m 0755 hooks/codex/codex-pre.sh  ~/.cognit/hooks/codex-pre.sh
 install -m 0755 hooks/codex/codex-post.sh ~/.cognit/hooks/codex-post.sh
 ```
-
-(`codex-pre.sh` is the Phase G companion for `PreToolUse` →
-`hypothesis_created`.)
 
 ## Hook
 

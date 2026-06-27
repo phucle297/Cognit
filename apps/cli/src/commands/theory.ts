@@ -1,10 +1,12 @@
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
+import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
+import { warnExperimentalOnce } from "./_deprecation.js";
 
 interface TheoryOptions {
   session?: string;
@@ -14,8 +16,6 @@ interface TheoryOptions {
   text?: string;
   into?: string;
 }
-
-const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>(["human", "worker", "system"]);
 
 /** Parse an `--actor "name:type"` string, falling back to defaults. */
 const parseActor = (
@@ -115,6 +115,7 @@ const runTheory = async (
  * constraint chokepoint that phase 3c will hook into).
  */
 export function registerTheory(program: Command): void {
+  warnExperimentalOnce("cognit theory");
   const theory = program
     .command("theory")
     .description("theory lifecycle (theory_created, theory_updated, theory_merged, theory_archived)");

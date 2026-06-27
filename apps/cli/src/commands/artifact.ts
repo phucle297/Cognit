@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType, type ArtifactRole } from "@cognit/db";
+import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
@@ -14,7 +15,6 @@ interface ArtifactAddOptions {
   root?: string;
 }
 
-const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>(["human", "worker", "system"]);
 const VALID_ROLES: ReadonlySet<ArtifactRole> = new Set<ArtifactRole>([
   "evidence",
   "code",

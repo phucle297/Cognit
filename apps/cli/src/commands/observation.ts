@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
+import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
@@ -12,8 +13,6 @@ interface ObserveOptions {
   root?: string;
   confidence?: string;
 }
-
-const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>(["human", "worker", "system"]);
 
 /** Parse an `--actor "name:type"` string, falling back to defaults. */
 const parseActor = (

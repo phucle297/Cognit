@@ -2,7 +2,17 @@ import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { findProjectRoot, isCognitProject, projectPaths, COGNIT_SUBDIRS } from "../src/paths.js";
+import {
+  findProjectRoot,
+  isCognitProject,
+  projectPaths,
+  COGNIT_SUBDIRS,
+  cognitDir,
+  COGNIT_FILES,
+  isCognitProject as isCognitProjectAgain,
+  expandHome,
+} from "@cognit/core/paths";
+import * as corePaths from "@cognit/core/paths";
 
 let tmp: string;
 
@@ -12,6 +22,56 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.promises.rm(tmp, { recursive: true, force: true });
+});
+
+/**
+ * The CLI's `src/paths.ts` is a 3-line shim:
+ *
+ *     export * from "@cognit/core/paths";
+ *
+ * These tests assert that the shim re-exports every public symbol
+ * the canonical `@cognit/core/paths` module exports. If a new export
+ * is added to core without a corresponding re-export through the
+ * shim, the `coreExports` set below will still pass (we mirror the
+ * canonical set), but the import list at the top of this file will
+ * need to grow alongside it — see `describe("shim re-exports")`
+ * below for the machine-checkable part of that contract.
+ */
+
+/**
+ * `ProjectPaths` is a TypeScript interface in `packages/core/src/paths.ts:50`.
+ * Interfaces are erased at runtime, so it does NOT appear in the
+ * `corePaths` namespace import. The compile-time path is exercised by
+ * `pnpm typecheck`; the runtime check here covers the seven
+ * runtime-visible exports the shim forwards.
+ */
+const coreExports = [
+  "findProjectRoot",
+  "cognitDir",
+  "projectPaths",
+  "COGNIT_SUBDIRS",
+  "COGNIT_FILES",
+  "isCognitProject",
+  "expandHome",
+] as const;
+
+describe("shim re-exports", () => {
+  it("imports the canonical runtime helpers from @cognit/core/paths", () => {
+    for (const name of coreExports) {
+      expect(corePaths).toHaveProperty(name);
+    }
+  });
+
+  it("imported helpers are functions or the expected constant type", () => {
+    expect(typeof findProjectRoot).toBe("function");
+    expect(typeof cognitDir).toBe("function");
+    expect(typeof projectPaths).toBe("function");
+    expect(typeof isCognitProject).toBe("function");
+    expect(typeof isCognitProjectAgain).toBe("function");
+    expect(typeof expandHome).toBe("function");
+    expect(Array.isArray(COGNIT_SUBDIRS)).toBe(true);
+    expect(Array.isArray(COGNIT_FILES)).toBe(true);
+  });
 });
 
 describe("paths", () => {

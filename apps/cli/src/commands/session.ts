@@ -8,6 +8,7 @@ import {
   type SessionRow,
   type SessionShowResult,
 } from "@cognit/db";
+import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot, projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
@@ -36,8 +37,6 @@ interface SessionResumeOptions {
 interface SessionActorOnly {
   actor?: string;
 }
-
-const VALID_ACTOR_TYPES: ReadonlySet<ActorType> = new Set<ActorType>(["human", "worker", "system"]);
 
 /** Parse an `--actor "name:type"` string, falling back to the supplied defaults. */
 const parseActor = (

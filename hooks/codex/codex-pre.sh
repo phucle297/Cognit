@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# cc-pre.sh — Claude Code PreToolUse hook → Cognit inbox.
+# codex-pre.sh — Codex CLI PreToolUse hook → Cognit inbox.
 #
 # Reference producer. Reads the PreToolUse JSON payload from stdin,
 # builds a `hypothesis_created` envelope v1.2.0 FLAT (actor_name /
@@ -32,19 +32,20 @@
 # noise. The gate is best-effort here — a missing allowlist file
 # means "emit nothing".
 #
-# Wire in `~/.claude/settings.json`:
+# Wire in `~/.codex/hooks.json` (user layer):
 #
 #   {
 #     "hooks": {
 #       "PreToolUse": [
-#         {"matcher": "Read|Edit|Write", "hooks": [
-#           {"type": "command", "command": "~/.cognit/hooks/cc-pre.sh"}
-#         ]}
+#         {"matcher": ".*", "type": "command",
+#          "command": "~/.cognit/hooks/codex-pre.sh", "timeout": 30}
 #       ]
 #     }
 #   }
 #
-# Requirements: `jq`, `node`, `python3` (same as cc-post.sh).
+# Or TOML equivalent (config.toml `[hooks]` blocks).
+#
+# Requirements: `jq`, `node`, `python3` (same as codex-post.sh).
 set -euo pipefail
 
 # Cognit is per-project local-first; canonical inbox is
@@ -54,7 +55,7 @@ mkdir -p "$inbox_dir"
 
 input="$(cat)"
 
-# Session id resolution — same order as cc-post.sh.
+# Session id resolution — same order as cc-pre.sh.
 session="${COGNIT_SESSION_ID:-}"
 if [[ -z "$session" && -f ./.cognit/current-session ]]; then
   session="$(tr -d '[:space:]' < ./.cognit/current-session)"
@@ -67,14 +68,14 @@ tool="$(jq -r '.tool_name // "unknown"' <<<"$input")"
 file_path="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // ""' <<<"$input")"
 
 # Known-files gate. If the file is in the allowlist, do nothing
-# (silent exit 0). Claude Code treats exit 0 as "do not block".
+# (silent exit 0). Codex treats exit 0 as "do not block".
 if [[ -n "$file_path" && -f "$HOME/.cognit/known-files.txt" ]]; then
   if grep -Fxq "$file_path" "$HOME/.cognit/known-files.txt"; then
     exit 0
   fi
 fi
 
-# ULID — see cc-post.sh for the rationale.
+# ULID — see codex-post.sh for the rationale.
 event_id="$(node -e 'process.stdout.write(require("ulid")())' \
   2>/dev/null || node -e '
     const t=Date.now();let r="";for(let i=0;i<10;i++)r+=Math.floor(Math.random()*16).toString(16);
@@ -98,7 +99,7 @@ payload="$(jq -n \
   --arg version   "1.2.0" \
   --arg session   "$session" \
   --arg type      "hypothesis_created" \
-  --arg actorName "claude-code" \
+  --arg actorName "codex" \
   --arg title     "$title" \
   --arg text      "$text" \
   --arg id        "$event_id" \
@@ -109,7 +110,7 @@ payload="$(jq -n \
      actor_name: $actorName,
      actor_type: "worker",
      id:         $id,
-     source:     {tool: "claude-code", command: "PreToolUse"},
+     source:     {tool: "codex", command: "PreToolUse"},
      payload:    {title: $title, text: $text}
    }')"
 

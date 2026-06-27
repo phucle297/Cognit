@@ -37,55 +37,11 @@ import {
   type VerificationKind,
   type VerificationLifecycle,
 } from "./state.js";
-
-/** Event types the reducer actively folds into state. */
-const STATE_EVENT_TYPES = new Set<string>([
-  "session_created",
-  "session_paused",
-  "session_closed",
-  "observation_recorded",
-  "finding_created",
-  "hypothesis_created",
-  "hypothesis_weakened",
-  "hypothesis_rejected",
-  "hypothesis_promoted",
-  "theory_created",
-  "theory_updated",
-  "theory_merged",
-  "theory_archived",
-  "experiment_created",
-  "experiment_completed",
-  "decision_proposed",
-  "decision_accepted",
-  "decision_rejected",
-  "decision_superseded",
-  "conclusion_proposed",
-  "conclusion_verified",
-  "conclusion_rejected",
-  "verification_started",
-  "verification_passed",
-  "verification_failed",
-  "verification_errored",
-  "verification_cancelled",
-  "verification_rerun",
-  "artifact_attached",
-  "edge_created",
-  "hypothesis_ranked",
-]);
-
-const NON_STATE_EVENT_TYPES = new Set<string>([
-  "project_created",
-  "actor_registered",
-  "redaction_applied",
-  "constraint_rule_added",
-  "constraint_rule_applied",
-  "snapshot_created",
-]);
-
-const ALL_KNOWN_TYPES: ReadonlySet<string> = new Set([
-  ...STATE_EVENT_TYPES,
-  ...NON_STATE_EVENT_TYPES,
-]);
+import {
+  ALL_KNOWN_TYPES,
+  NON_STATE_EVENT_TYPES,
+  STATE_EVENT_TYPES,
+} from "./event-types.js";
 
 /**
  * Sort events into replay order: ascending `(created_at, id)`.

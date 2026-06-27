@@ -98,9 +98,10 @@ const send = (params: {
  * Plugin entry. OpenCode invokes this once on startup; the returned
  * object declares the lifecycle hooks we care about.
  *
- * Phase E ships only `tool.execute.after` (the PostToolUse analog).
+ * Plugin ships only `tool.execute.after` (the PostToolUse analog).
  * Pre-tool hooks (`tool.execute.before`) → `hypothesis_created` are
- * deferred to Phase G alongside the Claude-Code / Codex pre hooks.
+ * not wired in this plugin; the Claude-Code / Codex / Gemini pre
+ * hooks cover the hypothesis_created emission across providers.
  */
 export const CognitInbox: Plugin = async () => ({
   "tool.execute.after": async (input, output) => {

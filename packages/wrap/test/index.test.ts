@@ -263,7 +263,7 @@ describe("inboxFilename — AC 9.2.1 filename contract", () => {
 });
 
 describe("appendInboxEnvelope — AC 9.2.1 envelope shape", () => {
-  it("stamps schema_version=1.1.0 and a per-event ULID", async () => {
+  it("stamps version=1.2.0 and a per-event ULID", async () => {
     const env: WrapEnvelope = {
       type: "observation_recorded",
       version: WRAP_SCHEMA_VERSION,
@@ -276,7 +276,7 @@ describe("appendInboxEnvelope — AC 9.2.1 envelope shape", () => {
     const filePath = await Effect.runPromise(appendInboxEnvelope(inboxDir, env));
     expect(filePath).toBe(join(inboxDir, `${sessionUlid}-${env.id}.json`));
     const onDisk = await parseEnvelopeFile(filePath);
-    expect(onDisk.version).toBe("1.1.0");
+    expect(onDisk.version).toBe("1.2.0");
     expect(onDisk.session_id).toBe(sessionUlid);
     expect(onDisk.actor_type).toBe("worker");
     expect(onDisk.payload).toEqual({ text: "hello" });
@@ -298,7 +298,7 @@ describe("runWrap — AC 9.2.1 spawn + capture + atomic-write", () => {
     expect(env.session_id).toBe(sessionId);
     expect(env.actor_type).toBe("worker");
     expect(env.actor_name).toBe("cognit-wrap");
-    expect(env.version).toBe("1.1.0");
+    expect(env.version).toBe("1.2.0");
     const payload = env.payload as { exit_code?: number; duration_ms?: number };
     expect(payload.exit_code).toBe(0);
     expect(typeof payload.duration_ms).toBe("number");

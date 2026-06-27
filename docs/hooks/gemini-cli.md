@@ -25,11 +25,10 @@ cognit inbox --watch   →   SQLite   →   dashboard
 ## Install
 
 ```bash
+mkdir -p ~/.cognit/hooks
+install -m 0755 hooks/gemini-cli/gemini-post.sh ~/.cognit/hooks/gemini-post.sh
 cp hooks/gemini-cli/gemini-hooks.json ~/.cognit/hooks/gemini-hooks.json
 ```
-
-The companion shell script (`hooks/gemini-cli/gemini-post.sh`,
-Phase G) ships as the AfterTool handler referenced below.
 
 ## Hook
 
@@ -54,8 +53,9 @@ Drop under `~/.gemini/settings.json` (user layer) or
 | -            | `BeforeAgent` / `AfterAgent` |
 | -            | `SessionStart` / `SessionEnd`|
 
-`BeforeTool` → `hypothesis_created` is the Phase G companion (added
-with matcher `"read_file"`, gated by `~/.cognit/known-files.txt`).
+`BeforeTool` → `hypothesis_created` is the pre-tool companion
+(added with matcher `"read_file"`, gated by
+`~/.cognit/known-files.txt`).
 
 ## Flow
 
