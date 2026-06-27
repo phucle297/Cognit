@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Cognit-XXX: llm: drop Vercel AI SDK, LiteLLM proxy OpenAI-compat
+search: 8g.5 Dashboard real SuggestedNextStepsCard + Constraint Rules CRUD page dashboard phase-8 rules ui
 queue: 
 next: 
