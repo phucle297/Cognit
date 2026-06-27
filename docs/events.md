@@ -107,7 +107,7 @@ FLAT shape documented above.
 | Failure                                  | Sidecar category                | Where                                  |
 |------------------------------------------|---------------------------------|----------------------------------------|
 | JSON parse error                         | `invalid_json`                  | watcher / `decodeUnknownEither`        |
-| Unknown `version` (not in registry)      | `payload_schema_unknown`        | watcher, before `migratePayload`       |
+| Unknown `version` literal (not in envelope schema) | `schema_validation_failure` | watcher envelope-decode step |
 | Payload fails v1.2.0 schema after lift   | `schema_validation_failure`     | `migratePayload` re-validation step    |
 | `session_id` not in `sessions` table     | `unknown_session_id`            | watcher, before persistence            |
 | `actor_name` not in `actors` table       | `actor_not_registered`          | watcher, before persistence            |
@@ -121,7 +121,9 @@ See `docs/hooks/README.md` for the canonical category list.
   envelopes with unknown versions.
 - The watcher dispatches on the producer's `version` to pick the right
   payload schema. Unknown versions are quarantined under
-  `.cognit/inbox/_error/` with a `payload_schema_unknown` sidecar.
+  `.cognit/inbox/_error/` with a `schema_validation_failure` sidecar
+  (the envelope schema accepts `1.0.0`, `1.1.0`, and `CURRENT_VERSION`;
+  anything else surfaces here).
 - Bumping `version` is a wire-protocol change and ships with a
   migration runner entry. Producers MUST stay on the latest version
   the inbox accepts (currently v1.2.0).

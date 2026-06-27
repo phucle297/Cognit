@@ -91,6 +91,6 @@ grep for it.
 
 ## CLI entry points
 
-`cognit config show` and `cognit config edit` (`apps/cli/src/commands/config.ts:1`)
+`cognit config --show` and `cognit config --edit` (`apps/cli/src/commands/config.ts:1`)
 read and write this file. `cognit init` (`apps/cli/src/commands/init.ts:1`)
 writes the default version.

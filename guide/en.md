@@ -626,17 +626,16 @@ cognit redaction test "Authorization: Bearer eyJhbGciOi...xyz"
 A verification is a typed, reproducible run.
 
 ```bash
-# start a verification
-cognit verify --type benchmark --command "pnpm run bench:memory" \
-  --tests "Module graph listener leak in HMR"
+# start a verification (the command is positional, not a flag)
+cognit verify --type benchmark "pnpm run bench:memory" \
+  --linked-hypothesis <hypothesis-id>
 
 # explicit lifecycle control (for custom runners)
-cognit verify start --type custom --command "./scripts/smoke.sh"
 cognit verify pass --id <verification-id>
 cognit verify fail --id <verification-id>
 
 # rerun — previous run linked via parent_verification_id
-cognit verify rerun --parent <verification-id> --command "..." --type test
+cognit verify rerun <parent-verification-id> --type test "pnpm test"
 ```
 
 | State       | Meaning                                     |
@@ -757,19 +756,19 @@ cognit conclusion reject  --id <c-id> --reason "..."
 
 # verifications
 cognit verify [--type build|test|lint|typecheck|benchmark|custom]
-              --command "cmd" [--tests <h-id>] [--timeout-ms N]   # default action: run
+              <cmd> [--linked-hypothesis <h-id>] [--timeout-ms N]   # default action: run
 cognit verify cancel --id <v-id>
 cognit verify pass   <verification-id>    # inject verification_passed
 cognit verify fail   <verification-id>    # inject verification_failed
 cognit verify error  <verification-id> --reason "..."
-cognit verify rerun  --parent <v-id> --command "cmd" [--type ...]
+cognit verify rerun  <parent-v-id> [--type ...] <cmd>
 
 # evidence
 cognit artifact add <path> [--session <id>] [--kind <k>] [--label "..."]
 
 # edges
-cognit edge add  --from <entity:id> --to <entity:id> \
-                 --kind supports|contradicts|tests|based_on|derived_from|references|caused
+cognit edge add  --from-type <t> --from-id <id> --to-type <t> --to-id <id> \
+                 --kind <edge_type>
 cognit edge list [--session <id>] [--kind <kind>]
 
 # constraints

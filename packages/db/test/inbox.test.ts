@@ -924,4 +924,46 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
       expect(reason).toMatch(/^schema_validation_failure: envelope:/);
     });
   });
+
+  describe("CURRENT_VERSION envelope acceptance", () => {
+    it("accepts a CURRENT_VERSION (1.2.0) envelope and moves it to processed", async () => {
+      // Regression: the envelope literal union previously listed
+      // only "1.0.0"/"1.1.0" while every live producer (wrap,
+      // claude/codex/gemini/opencode hooks) emits CURRENT_VERSION
+      // ("1.2.0"). The literal gap caused every inbox file to land
+      // in `.cognit/inbox/_error/` as `schema_validation_failure`.
+      const config: InboxWatcherConfig = {
+        inboxDir: dirs.inbox,
+        processedDir: dirs.processed,
+        errorDir: dirs.error,
+        debounceMs: 50,
+      };
+      const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
+        type: "observation_recorded",
+        version: "1.2.0",
+        session_id: SESSION_ULID,
+        actor_name: "inboxer",
+        actor_type: "worker",
+        id: EVENT_ULID,
+        payload: { text: "current version envelope" },
+      });
+
+      const program = Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        setupSession(conn);
+        const { processFile } = yield* makeInboxWatcher(config);
+        yield* processFile(file);
+      });
+
+      await Effect.runPromise(
+        program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<void, never, never>,
+      );
+
+      const processed = await fs.readdir(dirs.processed);
+      // Processed file is renamed to `<event.id>.json`.
+      expect(processed).toContain(`${EVENT_ULID}.json`);
+      const errored = await fs.readdir(dirs.error);
+      expect(errored).toEqual([]);
+    });
+  });
 });

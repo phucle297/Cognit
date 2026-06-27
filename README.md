@@ -176,7 +176,7 @@ The intended flow is simple:
 git clone <repo>
 cd <repo>
 
-docker compose up -d
+./scripts/up.sh
 
 cognit init
 ```
@@ -320,10 +320,27 @@ It only needs to preserve the useful engineering state produced by the worker.
 
 ## Installation
 
-Start the local stack:
+Prerequisites: **Node ≥ 22** (root `package.json` engines), **pnpm 9**,
+and **Docker** with `docker compose` v2.
+
+Install + start the local stack (one command):
 
 ```bash
-docker compose up -d
+./scripts/up.sh
+```
+
+This installs Node dependencies on the host, builds + links
+`@cognit/cli` onto your `PATH` as `cognit`, and starts the server in
+Docker. The host-side install is required because `apps/cli` depends
+on `better-sqlite3`, a native module whose prebuild must match the
+host's libc — running `pnpm install` inside the Alpine container
+would produce a musl binary that won't load on glibc Linux hosts or
+macOS.
+
+If `cognit` is not on `PATH` after `scripts/up.sh`:
+
+```bash
+export PATH="$(pnpm config get global-dir 2>/dev/null)/bin:$PATH"
 ```
 
 Initialize Cognit inside a project:
@@ -345,6 +362,12 @@ Open the dashboard:
 
 ```bash
 cognit dashboard
+```
+
+To start the dashboard behind Docker's published port (`:6970`):
+
+```bash
+cognit dashboard --docker
 ```
 
 Default dashboard URLs (see [`docs/dashboard.md`](docs/dashboard.md)
@@ -384,7 +407,7 @@ cognit session create "Fix memory leak"
 
 cognit observe "Next.js reaches 18GB during local development"
 
-cognit verify --type test --command "pnpm test"
+cognit verify --type test pnpm test
 
 cognit recovery search "memory leak"
 ```

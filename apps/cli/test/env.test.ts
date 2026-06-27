@@ -102,3 +102,42 @@ describe("cognit env --root <path>", () => {
     expect(r.stdout).toContain(`${otherRoot}/.cognit/inbox`);
   });
 });
+
+describe("cognit env COGNIT_SESSION_ID", () => {
+  it("is omitted from --shell output when no current-session pointer exists", () => {
+    const r = runCli(tmp, ["env", "--shell"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain("COGNIT_SESSION_ID");
+  });
+
+  it("exports COGNIT_SESSION_ID from .cognit/current-session when present", () => {
+    // Simulate `cognit session create` having written the pointer.
+    const cognitDir = path.join(tmp, ".cognit");
+    fs.mkdirSync(cognitDir, { recursive: true });
+    const ulid = "01J9XQ9Z4R7H3K2N5P8WVT6YBC";
+    fs.writeFileSync(path.join(cognitDir, "current-session"), `${ulid}\n`, "utf8");
+
+    const r = runCli(tmp, ["env", "--shell"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`export COGNIT_SESSION_ID="${ulid}"\n`);
+    expect(r.stdout).toContain(`export COGNIT_INBOX="${tmp}/.cognit/inbox"\n`);
+  });
+
+  it("prints just the session id when queried by KEY", () => {
+    const cognitDir = path.join(tmp, ".cognit");
+    fs.mkdirSync(cognitDir, { recursive: true });
+    const ulid = "01J9XQ9Z4R7H3K2N5P8WVT6YBD";
+    fs.writeFileSync(path.join(cognitDir, "current-session"), `${ulid}\n`, "utf8");
+
+    const r = runCli(tmp, ["env", "COGNIT_SESSION_ID"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toBe(`${ulid}\n`);
+  });
+
+  it("prints an empty line for the KEY form when no session is set", () => {
+    const r = runCli(tmp, ["env", "COGNIT_SESSION_ID"]);
+    expect(r.status).toBe(0);
+    // Empty value rather than failing — keeps scripts composable.
+    expect(r.stdout).toBe("\n");
+  });
+});

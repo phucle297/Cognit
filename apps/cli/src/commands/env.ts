@@ -1,21 +1,43 @@
 import path from "node:path";
 import process from "node:process";
+import fs from "node:fs";
 import { Command } from "commander";
 import { projectPaths } from "../paths.js";
 
 /**
- * Registry of env vars exposed by `cognit env`. Each value is
+ * Read the current-session pointer (`.cognit/current-session`).
+ * Returns `null` when the file is missing or unreadable. The hook
+ * shell bootstrap relies on this so `$COGNIT_SESSION_ID` resolves
+ * to the session most recently created/resumed by the user.
+ */
+const readCurrentSession = (projectRoot: string): string | null => {
+  const p = projectPaths(projectRoot).currentSession;
+  try {
+    const raw = fs.readFileSync(p, "utf8").trim();
+    return raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Registry of env vars exposed by `cognit env`. Static entries are
  * derived from the resolved project root only — no DB read, no
  * `.cognit/` walk-up, so this command is safe to run before
  * `cognit init` (and that's the whole point: hook setup needs
  * `$COGNIT_INBOX` to point at the inbox that `init` will create).
  *
+ * `COGNIT_SESSION_ID` is dynamic: it reads `.cognit/current-session`
+ * and is omitted when no session has been created yet (so `eval
+ * "$(cognit env --shell)"` never exports an empty value).
+ *
  * Add new vars by appending a `KEY -> (root) => value` entry. The
  * `env --shell`, `env` table, and `env KEY` forms all read this
  * single source.
  */
-const ENV_VARS: Readonly<Record<string, (projectRoot: string) => string>> = {
+const ENV_VARS: Readonly<Record<string, (projectRoot: string) => string | null>> = {
   COGNIT_INBOX: (projectRoot) => projectPaths(projectRoot).inbox,
+  COGNIT_SESSION_ID: (projectRoot) => readCurrentSession(projectRoot),
 };
 
 const KNOWN_KEYS = Object.keys(ENV_VARS);
@@ -81,7 +103,13 @@ export function registerEnv(program: Command): void {
     .action((key: string | undefined, opts: EnvOptions, command) => {
       const globals = command.optsWithGlobals() as { root?: string };
       const projectRoot = path.resolve(resolveProjectRoot(opts, globals));
-      const entries = KNOWN_KEYS.map((k) => [k, ENV_VARS[k]!(projectRoot)] as const);
+      // Drop keys whose resolver returned null (e.g. COGNIT_SESSION_ID
+      // before the first `cognit session create`). Excluded from both
+      // `--shell` and the table form so the bootstrap is never noisy.
+      const entries = KNOWN_KEYS.flatMap((k) => {
+        const v = ENV_VARS[k]!(projectRoot);
+        return v === null ? [] : ([[k, v]] as const);
+      });
 
       if (opts.shell) {
         for (const [k, v] of entries) {
@@ -98,12 +126,20 @@ export function registerEnv(program: Command): void {
           process.exitCode = 1;
           return;
         }
-        process.stdout.write(`${ENV_VARS[key]!(projectRoot)}\n`);
+        const value = ENV_VARS[key]!(projectRoot);
+        if (value === null) {
+          // Empty string preserves the script-composable contract
+          // (`cognit env COGNIT_SESSION_ID` never fails) while letting
+          // callers distinguish "unset" from "missing key".
+          process.stdout.write("\n");
+          return;
+        }
+        process.stdout.write(`${value}\n`);
         return;
       }
 
       // Readable table form.
-      const keyWidth = Math.max(3, ...entries.map(([k]) => k.length));
+      const keyWidth = Math.max(3, ...KNOWN_KEYS.map((k) => k.length));
       process.stdout.write(`${"KEY".padEnd(keyWidth)}  VALUE\n`);
       process.stdout.write(`${"-".repeat(keyWidth)}  ${"-".repeat(5)}\n`);
       for (const [k, v] of entries) {

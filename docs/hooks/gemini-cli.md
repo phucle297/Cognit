@@ -9,9 +9,9 @@ Reference: `https://www.geminicli.com/docs/reference/configuration`.
 ```txt
 Gemini CLI
    │
-   │ BeforeTool / AfterTool (stdin = event JSON)
+   │ AfterTool (stdin = event JSON)
    ▼
-gemini-pre.sh / gemini-post.sh
+gemini-post.sh
    │
    │ atomic write (write → fsync → rename)
    ▼
@@ -48,14 +48,15 @@ Drop under `~/.gemini/settings.json` (user layer) or
 
 | Claude Code  | Gemini CLI                   |
 |--------------|------------------------------|
-| `PreToolUse` | `BeforeTool`                 |
+| `PreToolUse` | (not shipped)                |
 | `PostToolUse`| `AfterTool`                  |
 | -            | `BeforeAgent` / `AfterAgent` |
 | -            | `SessionStart` / `SessionEnd`|
 
-`BeforeTool` → `hypothesis_created` is the pre-tool companion
-(added with matcher `"read_file"`, gated by
-`~/.cognit/known-files.txt`).
+> Gemini ships only an `AfterTool` producer. The pre-tool
+> `hypothesis_created` path used by Claude / Codex is not yet wired
+> — when added it will live at `hooks/gemini-cli/gemini-pre.sh` and
+> be installed the same way.
 
 ## Flow
 

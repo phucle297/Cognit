@@ -25,8 +25,8 @@ project owns.
 ├── current-session          # plain text — id of the active session
 ├── current-session.tmp      # atomic-write target for current-session
 ├── inbox/                   # external publishers drop JSON envelopes here
-│   ├── _error/              # failed envelopes + <name>.reason.txt sidecars
-│   └── processed/           # (sidecar bookkeeping — see inbox_processed)
+│   └── _error/              # failed envelopes + <name>.reason.txt sidecars
+├── processed/               # successfully processed envelopes (sibling of inbox/)
 ├── artifacts/
 │   └── curated/             # curated artifacts attached to sessions
 ├── snapshots/               # frozen SessionState projections (json)
@@ -49,6 +49,7 @@ project owns.
 |--------------------------|-------------------------|-------------------------------------------------------------------------------|
 | `.cognit/inbox/`         | `inbox`                 | Drop folder for JSON envelopes from external CLIs. See `docs/hooks.md`.        |
 | `.cognit/inbox/_error/`  | `inboxError`            | Failed envelopes land here with a `.reason.txt` sidecar.                       |
+| `.cognit/processed/`     | `processed`             | Successfully processed envelopes (renamed to `<event-id>.json`).               |
 | `.cognit/artifacts/`     | `artifacts`             | Content-addressed files attached to events (`artifacts` table, sha256-indexed).|
 | `.cognit/artifacts/curated/` | `artifactsCurated`  | Curated subset shown in the dashboard's Recovery / Knowledge Graph views.      |
 | `.cognit/snapshots/`     | `snapshots`             | Frozen `SessionState` JSON projections, one per snapshot event.                |

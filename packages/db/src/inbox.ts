@@ -5,7 +5,7 @@ import path from "node:path";
 import { Logger } from "./context";
 import { InboxError } from "./errors";
 import { moveToError } from "./inbox-sidecar";
-import { PAYLOAD_SCHEMAS_BY_VERSION } from "./event-schema";
+import { CURRENT_VERSION, PAYLOAD_SCHEMAS_BY_VERSION } from "./event-schema";
 import { ActorType } from "./actor";
 import { SessionService, type SessionAppendEventInput } from "./session-service";
 import {
@@ -58,15 +58,17 @@ const INBOX_FILENAME_RE = new RegExp(
 
 /**
  * Envelope schema. Required fields per plan.xml:692. `version` is a
- * literal union of the two versions the schema registry knows
+ * literal union of every version the schema registry knows
  * (`packages/db/src/event-schema.ts`); unknown versions fail at the
- * envelope-decode step. `payload` is intentionally `Schema.Unknown`
- * because per-payload validation runs against the version+type keyed
- * map below.
+ * envelope-decode step. CURRENT_VERSION is included so producers that
+ * emit the latest envelope (claude/codex/gemini/opencode hooks +
+ * @cognit/wrap) are always accepted. `payload` is intentionally
+ * `Schema.Unknown` because per-payload validation runs against the
+ * version+type keyed map below.
  */
 const EnvelopeSchema = Schema.Struct({
   type: Schema.String.pipe(Schema.minLength(1)),
-  version: Schema.Literal("1.0.0", "1.1.0"),
+  version: Schema.Literal("1.0.0", "1.1.0", CURRENT_VERSION),
   session_id: Schema.String.pipe(Schema.pattern(ULID_RE)),
   actor_name: Schema.String.pipe(Schema.minLength(1)),
   actor_type: ActorType,

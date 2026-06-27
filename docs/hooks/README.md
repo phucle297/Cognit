@@ -4,7 +4,7 @@ External AI CLIs (Claude Code, Codex, Gemini CLI, OpenCode, …)
 publish events to Cognit by writing atomic JSON files into
 `.cognit/inbox/`. The watcher (`cognit inbox --watch`) validates
 each file against the Effect Schema registry, calls
-`SessionService.appendEvent`, and moves it to `.cognit/inbox/processed/`.
+`SessionService.appendEvent`, and moves it to `.cognit/processed/`.
 On failure the file moves to `.cognit/inbox/_error/` with a sidecar
 `<name>.reason.txt` whose first line is `"<category>: <reason>"`.
 
@@ -25,13 +25,14 @@ envelope v1.2.0 FLAT (`actor_name` / `actor_type` at the top level,
 no nested `actor`) matching `packages/wrap/src/index.ts:72`
 (`WRAP_SCHEMA_VERSION = "1.2.0"`).
 
-| Provider       | Source path                        | Host hook event      |
-| -------------- | ---------------------------------- | -------------------- |
-| Claude Code    | `hooks/claude-code/cc-post.sh`     | `PostToolUse`        |
-| Claude Code    | `hooks/claude-code/cc-pre.sh`      | `PreToolUse`         |
-| Codex CLI      | `hooks/codex/codex-post.sh`        | `PostToolUse`        |
-| OpenCode       | `hooks/opencode/cognit.ts`         | `tool.execute.after` |
-| Gemini CLI     | `hooks/gemini-cli/gemini-hooks.json` | `AfterTool`        |
+| Provider       | Source path                          | Host hook event      |
+| -------------- | ------------------------------------ | -------------------- |
+| Claude Code    | `hooks/claude-code/cc-post.sh`       | `PostToolUse`        |
+| Claude Code    | `hooks/claude-code/cc-pre.sh`        | `PreToolUse`         |
+| Codex CLI      | `hooks/codex/codex-post.sh`          | `PostToolUse`        |
+| Codex CLI      | `hooks/codex/codex-pre.sh`           | `PreToolUse`         |
+| OpenCode       | `hooks/opencode/cognit.ts`           | `tool.execute.after` |
+| Gemini CLI     | `hooks/gemini-cli/gemini-post.sh`    | `AfterTool`          |
 
 Install:
 
@@ -40,6 +41,7 @@ mkdir -p ~/.cognit/hooks
 install -m 0755 hooks/claude-code/cc-post.sh  ~/.cognit/hooks/cc-post.sh
 install -m 0755 hooks/claude-code/cc-pre.sh   ~/.cognit/hooks/cc-pre.sh
 install -m 0755 hooks/codex/codex-post.sh     ~/.cognit/hooks/codex-post.sh
+install -m 0755 hooks/codex/codex-pre.sh      ~/.cognit/hooks/codex-pre.sh
 cp hooks/gemini-cli/gemini-hooks.json         ~/.cognit/hooks/gemini-hooks.json
 cp hooks/opencode/cognit.ts                   ~/.cognit/hooks/cognit.ts
 ```
@@ -57,10 +59,11 @@ duplicating them.
 The Cognit `session_id` written into each envelope is resolved in
 this order:
 
-1. **`$COGNIT_SESSION_ID` env var** — set by
-   `eval "$(cognit env --shell)"` in the current shell (then
-   `export COGNIT_SESSION_ID=<session-ulid>` manually after
-   `cognit session create`).
+1. **`$COGNIT_SESSION_ID` env var** — exported by
+   `eval "$(cognit env --shell)"` (read from
+   `.cognit/current-session`, which `cognit session create` /
+   `cognit session resume` keeps up to date). Omitted from the shell
+   output before the first session exists.
 2. **Sticky pointer** at `./.cognit/current-session` — a plain-text
    ULID written by `cognit session create` / `cognit session resume`
    (`apps/cli/src/current-session.ts`).
@@ -109,6 +112,41 @@ The destination directory is resolved in this order:
 `~/.cognit/inbox/` is **not** a built-in default — it is only used
 when `$COGNIT_INBOX` is explicitly set to that path.
 
+### Known-files allowlist (`~/.cognit/known-files.txt`)
+
+The Claude Code and Codex pre-tool producers
+(`hooks/claude-code/cc-pre.sh`, `hooks/codex/codex-pre.sh`) suppress
+`hypothesis_created` events for paths you have marked as "already
+mapped" — files the agent has seen enough times that re-emitting a
+hypothesis on every read would just spam the inbox.
+
+**Location**: per-user, at `~/.cognit/known-files.txt` (NOT inside
+the project; this is a personal preference). Cognit never creates or
+modifies the file — it is yours to manage.
+
+**Format**: one absolute path per line, no globbing. Matched with
+`grep -Fxq` (whole-line, literal), so the comparison is exact and
+case-sensitive. Lines starting with `#` and blank lines are ignored
+by your editor / shell tooling but are also matched literally by the
+producer — keep the file clean.
+
+**Example** (`~/.cognit/known-files.txt`):
+
+```text
+# Files I have already explored — skip hypothesis_created for these.
+/home/you/projects/foo/README.md
+/home/you/projects/foo/src/index.ts
+```
+
+**Workflow**: when a pre-tool event fires, the script extracts
+`tool_input.file_path` (or the Claude Code / Codex equivalent) and
+checks it against the file. A match returns exit 0 (the agent sees
+"do not block"); a miss proceeds with the normal
+`hypothesis_created` envelope.
+
+`cognit init` does NOT create this file. Add entries as you go or
+seed it manually before running the agent.
+
 ### Failure categories
 
 The watcher writes `<name>.reason.txt` sidecars with one of these
@@ -118,9 +156,10 @@ canonical categories (declared in
 - `invalid_json` — file does not parse as JSON.
 - `unknown_session_id` — `session_id` is not a Cognit session ULID.
 - `schema_validation_failure` — envelope decoded but does not
-  satisfy the version-keyed payload schema.
-- `payload_schema_unknown` — `version` is not in
-  `PAYLOAD_SCHEMAS_BY_VERSION` (no schema map to validate against).
+  satisfy the version-keyed payload schema. This also covers
+  unknown `(version, type)` pairs and unknown version literals
+  (the envelope schema accepts `1.0.0`, `1.1.0`, and
+  `CURRENT_VERSION`; anything else surfaces here).
 - `actor_not_registered` — `actor_name` is not in the `actors` table.
 - `invalid_actor_type` — `actor_type` is not the literal `"worker"`.
 - `invalid_envelope` — envelope is not an object or has the wrong

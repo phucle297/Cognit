@@ -2,17 +2,29 @@
 
 Five minutes from `git clone` to a working Cognit installation.
 
+Prerequisites: **Node ≥ 22**, **pnpm 9**, **Docker** with `docker
+compose` v2.
+
 ## 1. Start the local stack
 
 ```bash
-docker compose up -d
+./scripts/up.sh
 ```
 
-Brings up the dashboard + server. The Hono API binds
-`127.0.0.1:6971` internally; the Vite dev dashboard is published on
-host `http://localhost:5173`. Docker profile publishes on
-`http://localhost:6970`. See [`docs/dashboard.md`](dashboard.md) for
-the full rule.
+Builds + globally links `@cognit/cli` onto your `PATH`, then starts
+the server in Docker. Re-run any time — it is idempotent (skipping
+the install/build steps when already satisfied).
+
+If `cognit` is not on `PATH` after the script completes:
+
+```bash
+export PATH="$(pnpm config get global-dir 2>/dev/null)/bin:$PATH"
+```
+
+The Hono API binds `127.0.0.1:6971` internally; the Vite dev
+dashboard is published on host `http://localhost:5173`. Docker
+profile publishes on `http://localhost:6970`. See
+[`docs/dashboard.md`](dashboard.md) for the full rule.
 
 ## 2. Initialise Cognit inside a project
 
@@ -29,8 +41,7 @@ Creates `.cognit/` inside the project:
 - `.cognit/artifacts/`, `.cognit/snapshots/`, `.cognit/archive/` —
   runtime state (gitignored).
 
-`init` is idempotent. The Docker `init` service runs it on every
-`docker compose up`; re-running against an already-initialised
+`init` is idempotent. Re-running against an already-initialised
 project prints "already exists; nothing to do" and exits 0.
 
 ## 3. Bind a session
@@ -40,22 +51,27 @@ cognit session create "Investigate memory leak"
 ```
 
 Writes the new session ULID to `.cognit/current-session`. Hooks
-read this pointer (or `$COGNIT_INBOX` from
-`eval "$(cognit env --shell)"`, plus a manual
-`export COGNIT_SESSION_ID=<ulid>`) to know which session to
-attribute their events to.
+read this pointer; the `cognit env --shell` command also exposes it
+as `$COGNIT_SESSION_ID` so scripts that bootstrap via `eval
+"$(cognit env --shell)"` can attach to the active session
+immediately. `$COGNIT_INBOX` is exported the same way.
 
 ## 4. Wire the AI tool
 
-Install hooks for your AI tool:
+Install hooks for your AI tool. Hooks are installed into
+`~/.cognit/hooks/` (per-user, NOT inside the project) — the
+destination directory must exist first.
 
 ```bash
+mkdir -p ~/.cognit/hooks
+
 # Claude Code
 install -m 0755 hooks/claude-code/cc-post.sh ~/.cognit/hooks/cc-post.sh
 install -m 0755 hooks/claude-code/cc-pre.sh  ~/.cognit/hooks/cc-pre.sh
 
-# Codex
+# Codex — both pre AND post (pre emits hypothesis_created, post emits observation_recorded)
 install -m 0755 hooks/codex/codex-post.sh    ~/.cognit/hooks/codex-post.sh
+install -m 0755 hooks/codex/codex-pre.sh     ~/.cognit/hooks/codex-pre.sh
 
 # OpenCode / Gemini CLI — see the provider pages under docs/hooks/.
 ```
