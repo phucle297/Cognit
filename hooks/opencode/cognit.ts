@@ -18,7 +18,7 @@
  * overwrite a leftover `.tmp` (defensive against crashes).
  *
  * Session id resolution order:
- *   1. `$COGNIT_SESSION_ID` env var (set by `eval "$(cognit init --shell)"`)
+ *   1. `$COGNIT_SESSION_ID` env var (set by `eval "$(cognit env --shell)"`)
  *   2. sticky pointer at `.cognit/current-session` (written by
  *      `cognit session create` / `cognit session resume`)
  *   3. placeholder ULID (the `unknown_session_id` sidecar will fire on

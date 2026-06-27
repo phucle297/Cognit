@@ -12,7 +12,7 @@
 # POSIX sequence.
 #
 # SESSION ID RESOLUTION — order matters:
-#   1. `$COGNIT_SESSION_ID` env var (set by `eval "$(cognit init --shell)"`)
+#   1. `$COGNIT_SESSION_ID` env var (set by `eval "$(cognit env --shell)"`)
 #   2. sticky pointer `.cognit/current-session` (written by
 #      `cognit session create` / `cognit session resume`)
 #   3. placeholder ULID `01HXXX...` so the watcher can still parse

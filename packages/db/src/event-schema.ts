@@ -386,7 +386,7 @@ export type EventType = keyof PayloadSchemaByType;
 export const EVENT_TYPES: ReadonlyArray<string> = Object.keys(PAYLOAD_SCHEMAS_V1_2_0);
 
 /**
- * Compile-time drift check (Phase E, AC28): ensure `PAYLOAD_SCHEMAS_V1`
+ * Compile-time drift check: ensure `PAYLOAD_SCHEMAS_V1`
  * keys stay in sync with the canonical event-type set in
  * `@cognit/core/event-types.ts`. The side-effect import runs the
  * conditional-type assertions defined there; a missing/extra key fails
