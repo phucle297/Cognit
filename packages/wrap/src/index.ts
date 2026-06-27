@@ -69,7 +69,7 @@ import { atomicWriteJson } from "./atomic-write.js";
  * `@cognit/db::CURRENT_VERSION` so the watcher's payload-schema
  * lookup resolves cleanly for every type we emit.
  */
-export const WRAP_SCHEMA_VERSION = "1.1.0" as const;
+export const WRAP_SCHEMA_VERSION = "1.2.0" as const;
 
 /**
  * Envelope types wrap produces. Kept in sync with the watcher's

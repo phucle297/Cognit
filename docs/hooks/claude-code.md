@@ -2,11 +2,37 @@
 
 Claude Code fires hooks on tool lifecycle events. Reference:
 `https://code.claude.com/docs/en/hooks`. Settings at
-`.claude/settings.json` (project) or `~/.claude/settings.json` (user).
+`.claude/settings.json` (project) or `~/.claude/settings.json`
+(user).
 
-## PostToolUse → observation_recorded
+## How it works
 
-The hook command receives the tool-call JSON on stdin.
+```txt
+Claude Code
+   │
+   │ PreToolUse / PostToolUse (stdin = event JSON)
+   ▼
+cc-pre.sh / cc-post.sh
+   │
+   │ atomic write (write → fsync → rename)
+   ▼
+.cognit/inbox/<session>-<ulid>.json
+   │
+   │ validate + persist + fold state
+   ▼
+cognit inbox --watch   →   SQLite   →   dashboard
+```
+
+## Install
+
+```bash
+install -m 0755 hooks/claude-code/cc-post.sh ~/.cognit/hooks/cc-post.sh
+install -m 0755 hooks/claude-code/cc-pre.sh  ~/.cognit/hooks/cc-pre.sh
+```
+
+## Hook
+
+Wire in `~/.claude/settings.json`:
 
 ```json
 {
@@ -15,36 +41,76 @@ The hook command receives the tool-call JSON on stdin.
       {"matcher": "Edit|Write|Bash", "hooks": [
         {"type": "command", "command": "~/.cognit/hooks/cc-post.sh"}
       ]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Read|Edit|Write", "hooks": [
+        {"type": "command", "command": "~/.cognit/hooks/cc-pre.sh"}
+      ]}
     ]
   }
 }
 ```
 
-`~/.cognit/hooks/cc-post.sh`:
+`matcher` is a regex on `tool_name`. Exit `2` from `PreToolUse`
+blocks the call.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-input="$(cat)"
-tool=$(jq -r '.tool_name' <<<"$input")
-args=$(jq -c '.tool_input' <<<"$input")
-session=$(jq -r '.session_id' <<<"$input")
-ulid=$(ulid-new)
-tmp="$HOME/.cognit/inbox/${session}-${ulid}.json.tmp"
-dest="$HOME/.cognit/inbox/${session}-${ulid}.json"
-jq -n --arg t "$tool" --argjson a "$args" --arg s "$session" '{
-  schema_version:"1.0.0", type:"observation_recorded",
-  session_id:$s, actor:{type:"worker",name:"claude-code"},
-  source:{tool:"claude-code",command:"PostToolUse"},
-  payload:{text:("tool " + $t + " called"), args:$a}
-}' > "$tmp"; sync; mv "$tmp" "$dest"
+## Flow
+
+| Host event   | Script      | Cognit envelope       |
+|--------------|-------------|------------------------|
+| `PreToolUse` | `cc-pre.sh` | `hypothesis_created`   |
+| `PostToolUse`| `cc-post.sh`| `observation_recorded` |
+
+Both scripts follow the **Common behavior** algorithms in
+[`docs/hooks/README.md`](./README.md#common-behavior):
+
+- Session id resolution (`$COGNIT_SESSION_ID` →
+  `.cognit/current-session` → placeholder).
+- Atomic write (open `wx` → write → fsync → close → rename).
+- Inbox resolution (`$COGNIT_INBOX` → `./.cognit/inbox/`).
+
+The Claude Code `.session_id` field is intentionally **not** used as
+the Cognit session id — see the rationale in the common-behavior
+section.
+
+## Payload
+
+`observation_recorded` payload (PostToolUse):
+
+```json
+{
+  "text": "tool Edit returned",
+  "tool": "Edit",
+  "tool_input": {...},
+  "tool_response": {...}
+}
 ```
 
-## PreToolUse → hypothesis_created
+`hypothesis_created` payload (PreToolUse):
 
-`matcher: "Read|Edit|Write"`. Emit `hypothesis_created` only when the
-target file is not in `~/.cognit/known-files.txt` (per `plan.xml:686`).
+```json
+{
+  "title": "Edit",
+  "text": "agent intends to Edit /tmp/foo.ts"
+}
+```
 
-## Notes
+Canonical envelope (v1.2.0 FLAT — see [`docs/events.md`](../events.md)
+for the full schema):
 
-- `matcher` is a regex on `tool_name`. Exit `2` from `PreToolUse` blocks the call.
+```json
+{
+  "version": "1.2.0",
+  "type": "observation_recorded",
+  "session_id": "01HXY...ULID",
+  "actor_name": "claude-code",
+  "actor_type": "worker",
+  "id": "01JXY...ULID",
+  "source": { "tool": "claude-code", "command": "PostToolUse" },
+  "payload": { "...": "..." }
+}
+```
+
+## Source
+
+Producer scripts: [`hooks/claude-code/`](../../hooks/claude-code/).

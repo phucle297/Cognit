@@ -4,46 +4,85 @@ OpenCode plugins are JS/TS modules loaded from `.opencode/plugins/`
 (project) or `~/.config/opencode/plugins/` (global). Reference:
 `https://opencode.ai/docs/plugins/`.
 
-## Plugin entry
+## How it works
 
-```ts
-// .opencode/plugins/cognit.ts
-import type { Plugin } from "@opencode-ai/plugin";
-import { writeFileSync, renameSync, openSync, fsyncSync, closeSync } from "node:fs";
-import { join } from "node:path";
-import { ulid } from "ulid";
-
-const inbox = process.env.COGNIT_INBOX ?? `${process.cwd()}/.cognit/inbox`;
-const send = (env: unknown) => {
-  const session = (env as any).session_id ?? "01HXXXXXXXXXXXXXXXXXXXXXXXX";
-  const id = ulid();
-  const tmp = join(inbox, `${session}-${id}.json.tmp`);
-  const dest = join(inbox, `${session}-${id}.json`);
-  writeFileSync(tmp, JSON.stringify(env));
-  const fd = openSync(tmp, "r+"); fsyncSync(fd); closeSync(fd);
-  renameSync(tmp, dest);
-};
-
-export const CognitInbox: Plugin = async ({ client, $ }) => ({
-  "tool.execute.after": async (input, output) => {
-    send({
-      schema_version: "1.0.0",
-      type: "observation_recorded",
-      session_id: "01HXXXXXXXXXXXXXXXXXXXXXXXX",
-      actor: { type: "worker", name: "opencode" },
-      payload: { tool: input.tool, args: input.args, output },
-    });
-  },
-});
+```txt
+OpenCode
+   │
+   │ tool.execute.after (handler args)
+   ▼
+cognit.ts plugin
+   │
+   │ atomic write (open wx → write → fsync → close → rename)
+   ▼
+.cognit/inbox/<session>-<ulid>.json
+   │
+   │ validate + persist + fold state
+   ▼
+cognit inbox --watch   →   SQLite   →   dashboard
 ```
 
-## Loading
+## Install
 
-- Local: drop under `.opencode/plugins/cognit.ts`.
-- npm: list under `plugin` in `opencode.json` (`bun install` runs at
-  startup; external packages need a `package.json`).
+```bash
+mkdir -p ~/.cognit/hooks
+cp hooks/opencode/cognit.ts ~/.cognit/hooks/cognit.ts
+mkdir -p .opencode/plugins
+ln -s ~/.cognit/hooks/cognit.ts .opencode/plugins/cognit.ts
+```
 
-## Notes
+Alternatively, list under `plugin` in `opencode.json` (`bun install`
+runs at startup; external packages need a `package.json`).
 
-- Handlers are `(input, output)`. Mutate `output.args` to alter; throw
-  to block. Use `client.app.log()` instead of `console.log`.
+## Hook
+
+OpenCode invokes the plugin once on startup; the returned object
+declares the lifecycle hooks we care about. Handlers are
+`(input, output)`. Mutate `output.args` to alter the call; throw to
+block. Use `client.app.log()` instead of `console.log`.
+
+## Flow
+
+| Host event            | Plugin handler           | Cognit envelope       |
+|-----------------------|--------------------------|------------------------|
+| `tool.execute.after`  | `tool.execute.after`     | `observation_recorded` |
+
+The plugin runs in-process inside OpenCode (Bun / Node), so it
+shares the `ulid` package the DB uses — no shelling out to a Node
+helper. Follows the **Common behavior** algorithms in
+[`docs/hooks/README.md`](./README.md#common-behavior).
+
+`tool.execute.before` → `hypothesis_created` is deferred to Phase G
+alongside the Claude Code / Codex / Gemini pre hooks.
+
+## Payload
+
+`observation_recorded` payload (`tool.execute.after`):
+
+```json
+{
+  "text": "tool <input.tool> returned",
+  "tool": "<input.tool>",
+  "args": "<input.args>",
+  "output": "<output>"
+}
+```
+
+Canonical envelope (v1.2.0 FLAT — see [`docs/events.md`](../events.md)):
+
+```json
+{
+  "version": "1.2.0",
+  "type": "observation_recorded",
+  "session_id": "01HXY...ULID",
+  "actor_name": "opencode",
+  "actor_type": "worker",
+  "id": "01JXY...ULID",
+  "source": { "tool": "opencode", "command": "tool.execute.after" },
+  "payload": { "...": "..." }
+}
+```
+
+## Source
+
+Producer script: [`hooks/opencode/`](../../hooks/opencode/).

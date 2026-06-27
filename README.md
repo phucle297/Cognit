@@ -2,66 +2,58 @@
 
 > Git for AI cognition.
 
-Code has Git.
-Tasks have Jira.
-AI has Cognit.
+```txt
+Claude Code     ─┐
+Codex CLI       ─┤
+Gemini CLI      ─┼──►   Cognit   ──►   reasoning graph
+OpenCode        ─┤      (local)        (sessions, events,
+custom scripts  ─┘                      hypotheses, decisions)
+```
 
-Cognit is a local-first cognition layer for AI-assisted software engineering.
+Cognit is a local-first reasoning layer for AI-assisted engineering.
+It preserves the engineering knowledge produced during an
+investigation — observations, hypotheses, experiments, decisions —
+so the next worker, the next session, or the same developer six
+months later does not have to rediscover the same context.
 
-It preserves the engineering reasoning created during development so it can be resumed, searched, verified, and reused after the original AI context is gone.
-
----
-
-## Why Cognit?
-
-AI coding tools are good at investigating problems.
-
-They read files.
-They inspect logs.
-They form hypotheses.
-They try approaches.
-They reject wrong ideas.
-They verify fixes.
-They make decisions.
-
-But when the task ends, most of that reasoning disappears.
-
-Usually only these remain:
-
-* code
-* commits
-* pull requests
-* short summaries
-
-The investigation itself is lost.
-
-That means the next worker, the next session, or even the same developer six months later often has to rediscover the same context again.
-
-Cognit exists to prevent that.
+It is not an agent framework, a workflow engine, or a chat-history
+database. It is the persistent layer behind whatever AI tool you
+already use.
 
 ---
 
-## The Idea
+## Without Cognit vs With Cognit
 
-Git preserves code evolution.
+```txt
+Without Cognit                   With Cognit
+─────────────────────            ─────────────────────
+Claude                           Claude
+  ↓                                ↓
+context lost                   Cognit
+  ↓                                ↓
+start over                     Codex  (or Gemini, OpenCode, …)
+                                 ↓
+                               continue
+```
 
-Jira preserves task evolution.
+| Without Cognit                              | With Cognit                                       |
+|---------------------------------------------|---------------------------------------------------|
+| AI forgets when the chat ends               | Every observation preserved                       |
+| Next session restarts from zero             | Resume any investigation from the last decision   |
+| Decisions disappear with the chat           | Decisions stay searchable forever                 |
+| Switching AI tools loses context            | Switch AI tools without losing context            |
+| Six-month-old investigation is gone         | Six-month-old investigation is one search away   |
 
-Cognit preserves reasoning evolution.
+---
 
-It captures the engineering knowledge created while solving a task:
+## Why install today
 
-* what was observed
-* what was inferred
-* what was suspected
-* what was tested
-* what was rejected
-* what was verified
-* what was decided
+Most teams lose engineering reasoning every day. They just do not
+notice until they have to redo it.
 
-Cognit is not a replacement for your AI coding tool.
-
-It is the persistent layer behind it.
+Cognit fixes that with one `cognit init` and your existing AI
+workflow. No new agent framework to learn. No new UI. The hooks
+capture what your tool already does.
 
 ---
 
@@ -69,7 +61,7 @@ It is the persistent layer behind it.
 
 Cognit stores engineering cognition as structured knowledge.
 
-A typical investigation looks like this:
+The canonical flow:
 
 ```txt
 Observation
@@ -78,8 +70,6 @@ Finding
   ↓
 Hypothesis
   ↓
-Experiment
-  ↓
 Verification
   ↓
 Conclusion
@@ -87,21 +77,45 @@ Conclusion
 Decision
 ```
 
-Each step answers a different question.
+| Concept      | Meaning                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| Observation  | A raw fact seen in the project                                                           |
+| Finding      | An interpretation of one or more observations                                            |
+| Hypothesis   | A possible explanation that can be tested                                                |
+| Verification | Evidence from a command, test, build, benchmark, or manual check                         |
+| Conclusion   | A verified claim about the project                                                       |
+| Decision     | An action chosen based on verified conclusions                                           |
+| Artifact     | Attached evidence — code, log, config, or any external file referenced by the reasoning |
+| Edge         | A link between entities — supports, contradicts, supersedes, or otherwise relates them   |
+| Session      | A unit of investigation; lifecycle is `active` / `paused` / `closed`                     |
 
-| Concept      | Meaning                                                          |
-| ------------ | ---------------------------------------------------------------- |
-| Observation  | A raw fact seen in the project                                   |
-| Finding      | An interpretation of one or more observations                    |
-| Hypothesis   | A possible explanation that can be tested                        |
-| Experiment   | A test designed to support or reject a hypothesis                |
-| Verification | Evidence from a command, test, build, benchmark, or manual check |
-| Conclusion   | A verified claim about the project                               |
-| Decision     | An action chosen based on verified conclusions                   |
+Two more concepts exist for multi-step reasoning flows that need
+explicit evidence collection (`Experiment`) or higher-level model
+assembly (`Theory`). Most investigations use the canonical flow
+above; `Theory` and `Experiment` are documented in
+[`docs/cli.md`](docs/cli.md) under "Advanced lifecycle commands".
 
 This makes the reasoning recoverable.
 
 Not just the final answer.
+
+---
+
+## Storage
+
+Cognit stores an append-only reasoning graph in a local SQLite file
+inside the project (`.cognit/cognit.db`).
+
+Two layers:
+
+- **Reasoning model** — sessions, events, hypotheses, findings,
+  conclusions, decisions, artifacts, edges.
+- **Infrastructure** — actors, projects, constraint rules, version
+  ledger, inbox sidecar.
+
+Schema, migrations, and the exact table list live in
+[`docs/storage.md`](docs/storage.md) and
+[`docs/data-model.md`](docs/data-model.md).
 
 ---
 
@@ -125,7 +139,6 @@ Session
 ├─ observations
 ├─ findings
 ├─ hypotheses
-├─ experiments
 ├─ verifications
 ├─ conclusions
 └─ decisions
@@ -154,7 +167,8 @@ The investigation does not reset.
 
 Cognit is designed to fit into your existing AI workflow.
 
-You should not need to manually write hypotheses, experiments, or conclusions while coding.
+You should not need to manually write hypotheses, experiments, or
+conclusions while coding.
 
 The intended flow is simple:
 
@@ -266,14 +280,15 @@ What has already been verified?
 Where should the next worker continue?
 ```
 
-Typical views include:
+The dashboard covers four high-level surfaces:
 
-* Overview
-* Timeline
-* Knowledge Graph
-* Decision Graph
-* Verifications
-* Recovery
+* **Overview** — current state of the project.
+* **Timeline** — chronological event stream.
+* **Knowledge Graph** — entities and how they relate.
+* **Recovery** — "why was this approach rejected?" with full audit.
+
+Routes, lazy loading, and Docker publishing rules live in
+[`docs/dashboard.md`](docs/dashboard.md).
 
 The dashboard is for visibility.
 
@@ -317,6 +332,9 @@ Initialize Cognit inside a project:
 cognit init
 ```
 
+`cognit init` creates the project inbox (`.cognit/inbox/`) and writes
+the hooks config template — see [`docs/cli.md`](docs/cli.md).
+
 Then use your AI coding tool normally.
 
 ```bash
@@ -329,11 +347,13 @@ Open the dashboard:
 cognit dashboard
 ```
 
-Default dashboard URL:
+Default dashboard URLs (see [`docs/dashboard.md`](docs/dashboard.md)
+for the full rule):
 
-```txt
-http://localhost:6970
-```
+| Profile               | URL                          |
+|-----------------------|------------------------------|
+| Local dev             | `http://localhost:5173`      |
+| Docker publish        | `http://localhost:6970`      |
 
 ---
 
@@ -362,7 +382,7 @@ Examples include:
 ```bash
 cognit session create "Fix memory leak"
 
-cognit observation add "Next.js reaches 18GB during local development"
+cognit observe "Next.js reaches 18GB during local development"
 
 cognit verify --type test --command "pnpm test"
 
@@ -387,19 +407,20 @@ Let Cognit preserve the investigation.
 
 ## Documentation
 
-Detailed implementation docs live under `/docs`.
-
-Recommended docs:
+Detailed implementation docs live under [`docs/`](docs/), ordered
+by learning path:
 
 ```txt
-docs/architecture.md
-docs/data-model.md
-docs/events.md
-docs/hooks.md
-docs/cli.md
-docs/dashboard.md
-docs/configuration.md
-docs/storage.md
+docs/getting-started.md     first cognit init + first hook
+docs/cli.md                 command reference
+docs/hooks.md               how external CLIs publish to Cognit
+docs/hooks/README.md        common behavior + atomic-write protocol
+docs/architecture.md        repo layout, data flow, subsystems
+docs/storage.md             SQLite file + .cognit/ directory
+docs/data-model.md          tables, events, reducer
+docs/dashboard.md           dashboard routes + URLs
+docs/configuration.md       cognit.yaml schema
+docs/events.md              envelope shape + migration runner
 ```
 
 The README explains what Cognit is and why it exists.

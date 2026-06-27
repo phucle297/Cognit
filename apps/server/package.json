@@ -16,7 +16,7 @@
     "@cognit/db": "workspace:*",
     "@cognit/gravity": "workspace:*",
     "@cognit/recovery": "workspace:*",
-    "@cognit/verification": "workspace:^",
+    "@cognit/verification": "workspace:*",
     "@hono/node-server": "^2.0.5",
     "commander": "^15.0.0",
     "effect": "3.21.3",

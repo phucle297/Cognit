@@ -1,50 +1,94 @@
 # Codex Hooks
 
 Codex CLI reads hooks from `<repo>/.codex/hooks.json` or
-`config.toml [hooks]` blocks (equivalent; pick one per layer).
-Reference: `https://developers.openai.com/codex/config-advanced`.
+`config.toml [hooks]` blocks. Reference:
+`https://developers.openai.com/codex/config-advanced`.
 
-Project hooks load only when the project layer is trusted. User hooks
-live at `~/.codex/hooks.json`. Codex uses the same event names as
-Claude Code (`PreToolUse`, `PostToolUse`); the hook command receives
-the event JSON on stdin.
+## How it works
 
-## Shape (hooks.json)
+```txt
+Codex CLI
+   │
+   │ PreToolUse / PostToolUse (stdin = event JSON)
+   ▼
+codex-pre.sh / codex-post.sh
+   │
+   │ atomic write (write → fsync → rename)
+   ▼
+.cognit/inbox/<session>-<ulid>.json
+   │
+   │ validate + persist + fold state
+   ▼
+cognit inbox --watch   →   SQLite   →   dashboard
+```
+
+## Install
+
+```bash
+install -m 0755 hooks/codex/codex-post.sh ~/.cognit/hooks/codex-post.sh
+```
+
+(`codex-pre.sh` is the Phase G companion for `PreToolUse` →
+`hypothesis_created`.)
+
+## Hook
+
+Wire in `~/.codex/hooks.json` (user layer):
 
 ```json
 {
   "hooks": {
-    "PreToolUse": [{"matcher": "^Bash$", "type": "command",
-       "command": "~/.cognit/hooks/codex-pre.sh", "timeout": 30}],
-    "PostToolUse": [{"matcher": ".*", "type": "command",
-       "command": "~/.cognit/hooks/codex-post.sh", "timeout": 30}]
+    "PostToolUse": [
+      {"matcher": ".*", "type": "command",
+       "command": "~/.cognit/hooks/codex-post.sh", "timeout": 30}
+    ]
   }
 }
 ```
 
-TOML equivalent uses `[[hooks.PreToolUse]]` + `[[hooks.PreToolUse.hooks]]`
-with the same `matcher`/`type`/`command`/`timeout` fields.
+TOML equivalent uses `[[hooks.PostToolUse]]` +
+`[[hooks.PostToolUse.hooks]]` with the same `matcher` / `type` /
+`command` / `timeout` fields. One form per layer — Codex warns if
+both are present.
 
-## Producer script
+## Flow
 
-Read stdin JSON, build an envelope with `schema_version: "1.0.0"`,
-write to `<inbox>/<session>-<ulid>.json.tmp`, `sync`, rename to `.json`.
+| Host event   | Script         | Cognit envelope       |
+|--------------|----------------|------------------------|
+| `PostToolUse`| `codex-post.sh`| `observation_recorded` |
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-input="$(cat)"
-session=$(jq -r '.session_id // "01HXXXXXXXXXXXXXXXXXXXXXXXX"' <<<"$input")
-ulid=$(ulid-new)
-tmp="$HOME/.cognit/inbox/${session}-${ulid}.json.tmp"
-dest="$HOME/.cognit/inbox/${session}-${ulid}.json"
-jq -n --arg s "$session" --argjson i "$input" \
-  '{schema_version:"1.0.0", type:"observation_recorded",
-   session_id:$s, actor:{type:"worker",name:"codex"},
-   payload:{text:"codex tool event", raw:$i}}' \
-  > "$tmp"; sync; mv "$tmp" "$dest"
+Follows the **Common behavior** algorithms in
+[`docs/hooks/README.md`](./README.md#common-behavior). Identical to
+the Claude Code PostToolUse path except for `actor_name` (`"codex"`)
+and `source.tool` (`"codex"`).
+
+## Payload
+
+`observation_recorded` payload (PostToolUse):
+
+```json
+{
+  "text": "tool <tool_name> returned",
+  "tool": "<tool_name>",
+  "tool_input": {...}
+}
 ```
 
-## Notes
+Canonical envelope (v1.2.0 FLAT — see [`docs/events.md`](../events.md)):
 
-- One form per layer — Codex warns if both are present.
+```json
+{
+  "version": "1.2.0",
+  "type": "observation_recorded",
+  "session_id": "01HXY...ULID",
+  "actor_name": "codex",
+  "actor_type": "worker",
+  "id": "01JXY...ULID",
+  "source": { "tool": "codex", "command": "PostToolUse" },
+  "payload": { "...": "..." }
+}
+```
+
+## Source
+
+Producer script: [`hooks/codex/`](../../hooks/codex/).

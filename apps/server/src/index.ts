@@ -59,7 +59,7 @@ import { registerSearchRoutes } from "./routes/search.js";
 import { registerRulesRoutes } from "./routes/rules.js";
 import { resolveServerConfig } from "./config.js";
 import { requestIdMiddleware } from "./api-error.js";
-import { findProjectRoot } from "../../../apps/cli/src/paths.js";
+import { findProjectRoot } from "@cognit/core/paths";
 
 const program = new Command();
 program

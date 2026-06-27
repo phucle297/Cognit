@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsup && pnpm run copy-migrations",
+    "dev": "tsx watch src/index.ts",
     "prepare": "pnpm run build",
     "copy-migrations": "rm -rf dist/migrations && cp -R ../../packages/db/src/schema/migrations dist/migrations",
     "typecheck": "tsgo --noEmit",
