@@ -8,6 +8,7 @@
  * Save.
  */
 import { useEffect, useMemo, useState, type JSX } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Save, Server, FolderTree, Palette } from "lucide-react";
 
 import { Breadcrumb } from "@/shared/ui/breadcrumb";
@@ -23,6 +24,15 @@ import { Input } from "@/shared/ui/input";
 import { useApi } from "@/lib/use-api";
 import { ConfigView } from "@/components/ConfigView";
 import { StorageUsage } from "@/components/StorageUsage";
+import { SettingsAdvanced, type SectionId } from "@/widgets/settings-advanced";
+
+const ADVANCED_SECTIONS: ReadonlyArray<SectionId> = [
+  "guardrails",
+  "recovery",
+  "decisions",
+  "checks",
+  "ai",
+];
 
 type ServerSettings = {
   bind: string;
@@ -76,6 +86,13 @@ const saveSettings = (s: typeof DEFAULTS): void => {
 const equal = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 export const SettingsPage = (): JSX.Element => {
+  const [searchParams] = useSearchParams();
+  const advancedParam = searchParams.get("advanced");
+  const advancedSection: SectionId | undefined =
+    advancedParam !== null && (ADVANCED_SECTIONS as ReadonlyArray<string>).includes(advancedParam)
+      ? (advancedParam as SectionId)
+      : undefined;
+
   const projects = useApi<{ projects: Array<{ id: string; name: string; goal?: string }> }>("/api/projects");
 
   const [draft, setDraft] = useState(DEFAULTS);
@@ -230,6 +247,8 @@ export const SettingsPage = (): JSX.Element => {
             </div>
           </CardContent>
         </Card>
+
+        <SettingsAdvanced defaultOpen={advancedSection} />
       </section>
     </div>
   );

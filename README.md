@@ -2,19 +2,38 @@
 
 > Remembers why your code looks like this.
 
-```text
-Git     remembers WHAT changed.
-Jira    remembers WHAT was planned.
-Cognit  remembers WHY the AI changed it.
-```
+**What did your AI actually think 3 months ago?**
 
-Claude Code forgets the moment chat ends. Cognit makes the
-reasoning behind every change searchable forever — locally, on your
-machine, no cloud.
+Local-first reasoning memory for AI coding tools.
 
-```text
-claude / codex / gemini  ──►  Cognit  ──►  searchable reasoning
-```
+---
+
+## Why not [Git | Jira | Claude Code | Cursor | chat logs]?
+
+| Tool          | Tracks                | Captures at        | Searchable          | Survives          | Replaces           |
+|---------------|-----------------------|--------------------|---------------------|-------------------|--------------------|
+| Git           | what changed          | commit time        | by file/author      | forever           | never              |
+| Jira          | what was planned      | ticket creation    | by status/assignee  | as long as Jira lives | never          |
+| Claude Code   | the final chat        | chat end           | by session          | until the window closes | never       |
+| Cursor        | the final chat        | chat end           | by session          | until the window closes | never       |
+| Chat logs     | the conversation      | chat end           | by full text        | only if you saved them | never        |
+| **Cognit**    | **why it changed**    | **every step**     | **by meaning**      | **forever, local**| **none of the above** |
+
+Cognit does not replace any of those tools. It adds the layer none
+of them have: the reasoning between observation and decision.
+
+---
+
+## What you get
+
+- **Searchable.** Every observation, guess, and decision is
+  indexed. Find the reasoning three months from now.
+- **Resumable.** Pick up any investigation from the last
+  conclusion. The next session starts where the last one stopped.
+- **Switchable.** Change AI tools without losing context. Claude
+  today, Codex tomorrow — the reasoning graph is the same.
+- **Local-only.** A single SQLite file on your machine. No cloud,
+  no account, no telemetry.
 
 ---
 
@@ -53,12 +72,14 @@ cognit dashboard
 
 ---
 
-## What you get
+## Find reasoning later
 
-- Every decision and why, searchable forever.
-- Resume any investigation from the last conclusion.
-- Switch AI tools without losing context.
-- Local only. SQLite file. Nothing leaves your machine.
+```bash
+cognit recovery search "why did we drop the JWT refresh"
+```
+
+Returns the session, the chain of guesses and checks that led to
+the decision, and a one-click way to resume that investigation.
 
 ---
 
@@ -77,7 +98,7 @@ Cognit is infrastructure for preserving engineering reasoning.
 ## How it works (one paragraph)
 
 AI tools call hooks on every tool invocation. Each hook drops a
-small JSON envelope into `.cognit/inbox/`. A background watcher
+small JSON record into `.cognit/inbox/`. A background watcher
 validates and persists each event into SQLite. The dashboard
 folds the event log into a reasoning graph: observations,
 hypotheses, decisions, conclusions. That graph is what makes the
@@ -88,11 +109,15 @@ where the last one left off.
 
 ## Documentation
 
-- [`docs/cli.md`](docs/cli.md) — every command
-- [`docs/dashboard.md`](docs/dashboard.md) — every tab
-- [`docs/getting-started.md`](docs/getting-started.md) — walkthrough
+- [docs/index.md](docs/index.md) — why Cognit exists, 90-second answer
+- [docs/getting-started.md](docs/getting-started.md) — five-minute walkthrough
+- [docs/why.md](docs/why.md) — "Why did AI make this change?"
+- [docs/recover.md](docs/recover.md) — "How do I undo or revisit?"
+- [docs/search.md](docs/search.md) — "How do I find past reasoning?"
+- [docs/cli.md](docs/cli.md) — every command
+- [docs/dashboard.md](docs/dashboard.md) — every tab
 
-The README explains what Cognit is. The docs explain how.
+The README tells you what Cognit is. The docs tell you how.
 
 ---
 

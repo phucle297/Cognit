@@ -112,6 +112,20 @@ export interface VerifiedConclusion {
   readonly created_at: string;
 }
 
+/**
+ * Lightweight reference to an observation in the rejection sheet.
+ * `ts` is the observation's `created_at` (ISO 8601). The recovery
+ * surface joins `state.observations` to the `supports`/`contradicts`
+ * edges pointing at the hypothesis (via the intermediate finding /
+ * conclusion) and surfaces up to N rows per direction so the
+ * dashboard's rejection-sheet has something concrete to render.
+ */
+export interface ObservationRef {
+  readonly id: string;
+  readonly text: string;
+  readonly ts: string;
+}
+
 export interface RejectedHypothesis {
   readonly id: string;
   readonly title: string;
@@ -120,6 +134,22 @@ export interface RejectedHypothesis {
   readonly reason_type: "evidence" | "superseded" | "constraint" | null;
   readonly superseded_by_id: string | null;
   readonly created_at: string;
+  /**
+   * Top-3 observations feeding findings/conclusions that `support`
+   * this hypothesis via an `edge_created` event. Empty when no
+   * `supports` edge points at the hypothesis from a finding or
+   * conclusion that itself records observations.
+   */
+  readonly supporting_observations: ReadonlyArray<ObservationRef>;
+  /**
+   * Top-1 observation feeding findings/conclusions that `contradict`
+   * this hypothesis. We surface only the strongest contradiction so
+   * the rejection sheet stays focused on "the one thing that killed
+   * it"; the supporting list gets more room because rejection often
+   * has a single decisive counter-example plus several corroborating
+   * positives. Empty when no `contradicts` edge exists.
+   */
+  readonly contradicting_observations: ReadonlyArray<ObservationRef>;
 }
 
 export interface AcceptedDecision {
@@ -164,7 +194,13 @@ export const buildRecovery = (input: BuildRecoveryInput): RecoveryV02 => {
   const rejected_hypotheses: RejectedHypothesis[] = [];
   for (const h of input.state.hypotheses.values()) {
     if (h.current_state !== "rejected") continue;
-    rejected_hypotheses.push(toRejectedHypothesis(h));
+    const links = collectObservationLinks(h.id, input.state);
+    rejected_hypotheses.push(
+      toRejectedHypothesis(h, {
+        supporting: links.supporting.slice(0, 3),
+        contradicting: links.contradicting.slice(0, 1),
+      }),
+    );
   }
 
   const accepted_decisions: AcceptedDecision[] = [];
@@ -217,7 +253,13 @@ export const buildRecovery = (input: BuildRecoveryInput): RecoveryV02 => {
   };
 };
 
-const toRejectedHypothesis = (h: HypothesisState): RejectedHypothesis => ({
+const toRejectedHypothesis = (
+  h: HypothesisState,
+  links: {
+    readonly supporting: ReadonlyArray<ObservationRef>;
+    readonly contradicting: ReadonlyArray<ObservationRef>;
+  },
+): RejectedHypothesis => ({
   id: h.id,
   title: h.title,
   text: h.text,
@@ -225,7 +267,103 @@ const toRejectedHypothesis = (h: HypothesisState): RejectedHypothesis => ({
   reason_type: h.reason_type,
   superseded_by_id: h.superseded_by_id,
   created_at: h.created_at,
+  supporting_observations: links.supporting,
+  contradicting_observations: links.contradicting,
 });
+
+/**
+ * Resolve the supporting + contradicting observation lists for one
+ * rejected hypothesis.
+ *
+ * Walk the directed edge set in `state.edges`:
+ *   supports/contradicts:   finding|conclusion  →  hypothesis
+ *   derived_from:          finding              →  observation|finding
+ *   related_observation_ids (on FindingState): finding → observation
+ *
+ * For every supports edge pointing at the hypothesis we collect the
+ * observation ids reachable through the source finding/conclusion
+ * (via `derived_from` edges OR the finding's own
+ * `related_observation_ids`). For every contradicts edge we do the
+ * same. The lists are deduplicated, ordered by the originating edge's
+ * `created_at` (oldest observation first), then capped at the desired
+ * surface count (3 supporting, 1 contradicting) so the rejection
+ * sheet's `slice(0, N)` matches what we ship over the wire.
+ *
+ * Pure — no I/O. Same input state always produces the same lists.
+ */
+const collectObservationLinks = (
+  hypothesisId: string,
+  state: SessionState,
+): {
+  readonly supporting: ReadonlyArray<ObservationRef>;
+  readonly contradicting: ReadonlyArray<ObservationRef>;
+} => {
+  type Dir = "supports" | "contradicts";
+  const collect = (dir: Dir): ReadonlyArray<ObservationRef> => {
+    // 1. Find every supports/contradicts edge landing on this
+    //    hypothesis from a finding or conclusion. Order by edge
+    //    `created_at` ASC so the oldest observation wins ties.
+    const relevant = state.edges
+      .filter(
+        (e) =>
+          e.edge_type === dir &&
+          e.to_entity_type === "hypothesis" &&
+          e.to_entity_id === hypothesisId &&
+          (e.from_entity_type === "finding" ||
+            e.from_entity_type === "conclusion"),
+      )
+      .slice()
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+    if (relevant.length === 0) return [];
+
+    // 2. For each finding/conclusion, walk derived_from edges OR the
+    //    finding's own related_observation_ids to get observation ids.
+    //    We keep the originating edge's timestamp for ordering.
+    type Hit = { ts: string; obsId: string };
+    const hits: Hit[] = [];
+    const seenObs = new Set<string>();
+    for (const edge of relevant) {
+      const obsIds: ReadonlyArray<string> = ((): ReadonlyArray<string> => {
+        if (edge.from_entity_type === "finding") {
+          const f = state.findings.find((x) => x.id === edge.from_entity_id);
+          if (f) return f.related_observation_ids;
+        }
+        // Conclusion → observation only via a derived_from edge.
+        if (edge.from_entity_type === "conclusion") {
+          return state.edges
+            .filter(
+              (de) =>
+                de.edge_type === "derived_from" &&
+                de.from_entity_type === "conclusion" &&
+                de.from_entity_id === edge.from_entity_id &&
+                de.to_entity_type === "observation",
+            )
+            .map((de) => de.to_entity_id);
+        }
+        return [];
+      })();
+      for (const obsId of obsIds) {
+        if (seenObs.has(obsId)) continue;
+        seenObs.add(obsId);
+        hits.push({ ts: edge.created_at, obsId });
+      }
+    }
+
+    // 3. Resolve observation ids to ObservationRef rows. Keep order.
+    const out: ObservationRef[] = [];
+    for (const h of hits) {
+      const o = state.observations.find((x) => x.id === h.obsId);
+      if (!o) continue;
+      out.push({ id: o.id, text: o.text, ts: o.created_at });
+    }
+    return out;
+  };
+
+  return {
+    supporting: collect("supports"),
+    contradicting: collect("contradicts"),
+  };
+};
 
 /**
  * Wire serialisation. `Map` is not JSON-native; convert to a plain

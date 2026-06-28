@@ -78,6 +78,18 @@ interface RankedRow {
 }
 
 /**
+ * One entry in the per-hypothesis rank history. `score` is the
+ * verbatim `payload.score` value from the `hypothesis_ranked` event
+ * (0..1 inclusive, per the v1.2.0 payload schema). Order is by
+ * `created_at` ASC so the caller can plot it left-to-right.
+ */
+export interface RankHistoryEntry {
+  readonly event_id: string;
+  readonly created_at: string;
+  readonly score: number;
+}
+
+/**
  * Type guard for the events we expect to bucket — guards against
  * future event-id format changes in `@cognit/agent`. The supervisor
  * emits ids of shape `${tickId}-a<idx>` or `${tickId}-r<id>`. Any
@@ -191,6 +203,58 @@ const loadDecisionLogE = (
       }));
   });
 
+/**
+ * Pull the ordered `hypothesis_ranked` score history for one
+ * hypothesis in one session. Pure SQL — the only filter is
+ * `(session_id, type)`, and the JS pass scans the small JSON
+ * payloads for `payload.hypothesis_id` to avoid depending on a JSON1
+ * extension (the SQLite build for the dashboard server doesn't
+ * always ship one).
+ *
+ * Order is `created_at ASC, id ASC` so the sparkline reads
+ * left-to-right oldest-first. Window is capped at 500 rows — a
+ * well-behaved supervisor emits ≤ a few per minute, so this is
+ * months of headroom for one hypothesis.
+ *
+ * Malformed payloads (missing `hypothesis_id` or `score`) are
+ * skipped silently; the schema gate at append time keeps this
+ * defensive path empty in practice.
+ */
+const loadRankHistoryE = (
+  sessionId: string,
+  hypothesisId: string,
+): Effect.Effect<ReadonlyArray<RankHistoryEntry>, never, DbConnection> =>
+  Effect.gen(function* () {
+    const conn = yield* DbConnection;
+    const rows = conn.handle.all<EventRow>(
+      `SELECT * FROM events
+       WHERE session_id = ? AND type = 'hypothesis_ranked'
+       ORDER BY created_at ASC, id ASC
+       LIMIT 500`,
+      [sessionId],
+    );
+    const out: RankHistoryEntry[] = [];
+    for (const r of rows) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(r.payload_json);
+      } catch {
+        continue;
+      }
+      if (typeof payload !== "object" || payload === null) continue;
+      const p = payload as Record<string, unknown>;
+      if (p.hypothesis_id !== hypothesisId) continue;
+      const score = p.score;
+      if (typeof score !== "number" || !Number.isFinite(score)) continue;
+      out.push({
+        event_id: r.id,
+        created_at: r.created_at,
+        score,
+      });
+    }
+    return out;
+  });
+
 export const registerSessionsAiReasoningRoute = (
   app: Hono,
   deps: SessionsRouteDeps,
@@ -199,6 +263,14 @@ export const registerSessionsAiReasoningRoute = (
 
   app.get("/api/sessions/:id/ai-reasoning", async (c) => {
     const id = c.req.param("id");
+    // Optional ?hypothesis=<id> filter. When supplied, the handler
+    // additionally surfaces `rank_history: number[]` — the ordered
+    // `payload.score` values from every `hypothesis_ranked` event
+    // whose payload targets this hypothesis, oldest first. The
+    // dashboard's rejection sheet renders this as a sparkline; the
+    // server does the filter so we don't ship the full event log
+    // over the wire just to slice it client-side.
+    const hypothesisQ = c.req.query("hypothesis");
     const program = Effect.gen(function* () {
       const service = yield* SessionService;
       const gravityQ = yield* GravityQueries;
@@ -265,7 +337,10 @@ export const registerSessionsAiReasoningRoute = (
         };
       });
       const decisionLog = yield* loadDecisionLogE(id, 200);
-      return { rows, decisionLog, show };
+      const rankHistory = hypothesisQ !== undefined
+        ? yield* loadRankHistoryE(id, hypothesisQ)
+        : [];
+      return { rows, decisionLog, show, rankHistory };
     });
 
     type ExitVal = {
@@ -277,6 +352,7 @@ export const registerSessionsAiReasoningRoute = (
         readonly snapshot: SnapshotRow | null;
         readonly eventsAfterSnapshot: number;
       };
+      readonly rankHistory: ReadonlyArray<RankHistoryEntry>;
     };
     const exit = await runtime.runPromiseExit(
       program as unknown as Effect.Effect<ExitVal, unknown, never>,
@@ -295,6 +371,12 @@ export const registerSessionsAiReasoningRoute = (
         session_id: id,
         ranked: v.rows,
         decision_log: v.decisionLog,
+        ...(hypothesisQ !== undefined
+          ? {
+              hypothesis_id: hypothesisQ,
+              rank_history: v.rankHistory,
+            }
+          : {}),
       }),
     );
   });

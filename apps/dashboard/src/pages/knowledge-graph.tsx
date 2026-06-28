@@ -58,12 +58,6 @@ export const KnowledgeGraphPage = (): JSX.Element => {
     setMode(data.nodes.length > AUTO_CONSTELLATION_THRESHOLD ? "constellation" : "physics");
   }, [data, mode]);
 
-  const onNodeClick = useCallback((n: GraphResp["nodes"][number]) => {
-    setSelectedNode(n);
-  }, []);
-
-  const onZoomReset = useCallback(() => setRemountKey((k) => k + 1), []);
-
   const effectiveMode: LayoutMode = mode ?? "constellation";
   const nodeCount = data?.nodes.length ?? 0;
   const capped = nodeCount > 500;
@@ -71,6 +65,45 @@ export const KnowledgeGraphPage = (): JSX.Element => {
     () => data ?? { session_id: sessionId, nodes: [], edges: [] },
     [data, sessionId],
   );
+
+  // Phase B.4 query-string flags:
+  //   ?kind=decision  → restrict the rendered graph to decisions
+  //                    (matches the old `/decision-graph` view)
+  //   ?ai=1           → AI reasoning mode toggle. Adds a banner
+  //                    indicating the AI-reasoning filter is active;
+  //                    the full reasoning view still lives in
+  //                    Settings → Advanced → AI reasoning.
+  // Both flags are read from `searchParams` (already destructured
+  // above) and applied as filters on the node list before render.
+  const kindFilter = searchParams.get("kind");
+  const aiMode = searchParams.get("ai") === "1";
+  const filteredNodes = useMemo<GraphResp["nodes"]>(() => {
+    if (!kindFilter) return graphResp.nodes;
+    return graphResp.nodes.filter(
+      (n) => typeof n.entity_type === "string" && n.entity_type === kindFilter,
+    );
+  }, [graphResp.nodes, kindFilter]);
+  const filteredEdges = useMemo<GraphResp["edges"]>(() => {
+    if (!kindFilter) return graphResp.edges;
+    const ids = new Set(filteredNodes.map((n) => n.id));
+    return graphResp.edges.filter((e) => ids.has(e.from) || ids.has(e.to));
+  }, [graphResp.edges, kindFilter, filteredNodes]);
+  const filteredGraph: GraphResp = useMemo(
+    () => ({
+      session_id: graphResp.session_id,
+      nodes: filteredNodes,
+      edges: filteredEdges,
+    }),
+    [graphResp.session_id, filteredNodes, filteredEdges],
+  );
+
+  const onNodeClick = useCallback((n: GraphResp["nodes"][number]) => {
+    setSelectedNode(n);
+  }, []);
+
+  const onZoomReset = useCallback(() => setRemountKey((k) => k + 1), []);
+
+  const visibleNodeCount = filteredGraph.nodes.length;
 
   const relatedEvents = useMemo<
     ReadonlyArray<{ id: string; type: string; created_at: string }>
@@ -131,8 +164,26 @@ export const KnowledgeGraphPage = (): JSX.Element => {
     >
       <div className="flex items-center justify-between border-b px-[var(--space-page-x)] py-2">
         <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
-        <div className="text-xs text-muted-foreground" data-testid="kg-node-count">
-          {nodeCount} node{nodeCount === 1 ? "" : "s"}
+        <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="kg-node-count">
+          {kindFilter ? (
+            <span data-testid="kg-kind-filter">
+              kind: <span className="font-mono">{kindFilter}</span>
+              {" · "}
+              {visibleNodeCount} of {nodeCount} node{nodeCount === 1 ? "" : "s"}
+            </span>
+          ) : (
+            <span>
+              {nodeCount} node{nodeCount === 1 ? "" : "s"}
+            </span>
+          )}
+          {aiMode ? (
+            <span
+              data-testid="kg-ai-mode"
+              className="rounded-full border border-[var(--color-brand)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-brand)]"
+            >
+              AI reasoning mode
+            </span>
+          ) : null}
         </div>
       </div>
       <div className="relative flex-1">
@@ -140,11 +191,11 @@ export const KnowledgeGraphPage = (): JSX.Element => {
           <GraphControls
             mode={effectiveMode}
             onModeChange={setMode}
-            edges={graphResp.edges}
+            edges={filteredGraph.edges}
             visibleEdgeTypes={visibleEdgeTypes}
             onVisibleEdgeTypesChange={setVisibleEdgeTypes}
             onZoomReset={onZoomReset}
-            nodeCount={nodeCount}
+            nodeCount={visibleNodeCount}
             capped={capped}
           />
         </div>
@@ -157,10 +208,19 @@ export const KnowledgeGraphPage = (): JSX.Element => {
               data-testid="kg-empty"
             />
           </div>
+        ) : visibleNodeCount === 0 && kindFilter !== null ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <EmptyState
+              icon={Share2}
+              title={`No ${kindFilter} nodes`}
+              description={`This session has no ${kindFilter} entities. Try clearing the kind filter.`}
+              data-testid="kg-empty-filtered"
+            />
+          </div>
         ) : (
           <GraphCanvas
-            key={`${effectiveMode}-${remountKey}`}
-            data={graphResp}
+            key={`${effectiveMode}-${remountKey}-${kindFilter ?? ""}-${aiMode ? "ai" : ""}`}
+            data={filteredGraph}
             mode={effectiveMode}
             visibleEdgeTypes={visibleEdgeTypes}
             onNodeClick={onNodeClick}

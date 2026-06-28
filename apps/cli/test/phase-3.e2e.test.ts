@@ -227,13 +227,23 @@ describe("phase 3 E2E — AC1: every cognition-entity subcommand", () => {
   it("`cognit --help` hides internal commands from the public surface", () => {
     const r = runCli(tmp, ["--help"]);
     expect(r.status).toBe(0);
-    // Public surface must NOT mention internal commands as command
-    // names. Use a word-boundary check so the test does not match
-    // fragments inside unrelated descriptions.
+    // Public surface must NOT list internal commands as command
+    // names. Aliases (`check`, `decide`, `conclude`) intentionally
+    // mention their canonical names (`verify`, `decision`,
+    // `conclusion`) inside backtick descriptions — those are
+    // references, not command entries. Match only indented command
+    // entries under the `Commands:` heading.
+    const commandsBlock = r.stdout.split(/^Commands:/m)[1] ?? "";
     for (const cmd of ENTITY_COMMANDS) {
       const word = cmd.command.split(" ")[0]!;
-      const re = new RegExp(`\\b${word}\\b`);
-      expect(re.test(r.stdout), `public --help leaked '${word}'`).toBe(false);
+      // Match the start of a line: two leading spaces + the word.
+      // Commander renders public commands with this indent; alias
+      // descriptions live further right on the same line.
+      const re = new RegExp(`^  ${word}\\b`, "m");
+      expect(
+        re.test(commandsBlock),
+        `public --help listed '${word}' as a command`,
+      ).toBe(false);
     }
   });
 

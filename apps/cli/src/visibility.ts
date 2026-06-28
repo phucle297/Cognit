@@ -7,6 +7,15 @@
  * CLI stays discoverable for new users while power users and AI
  * callers can still find every command.
  *
+ * Phase B.2: promoted `env`, `config`, `schema-dump`, `recovery`,
+ * `export`, `import` to the public set per
+ * `plans/plan-simplify-public-surface.md` §2.4. The new commands
+ * `doctor`, `reset`, and `update` are also public (they appear in
+ * `cognit --help` without `--internal`) but are NOT listed here —
+ * this set is purely the commands to hide when `--internal` is NOT
+ * set. New public commands simply don't appear in
+ * `INTERNAL_TOP_LEVEL` and are therefore visible by default.
+ *
  * Module-level flag is set in the program's `preAction` hook from
  * the `--internal` global option. `applyInternalVisibility` walks
  * the registered command tree and either hides or reveals commands
@@ -17,8 +26,6 @@
  */
 
 const INTERNAL_TOP_LEVEL: ReadonlySet<string> = new Set([
-  "env",
-  "config",
   "snapshot",
   "append",
   "inbox",
@@ -36,15 +43,20 @@ const INTERNAL_TOP_LEVEL: ReadonlySet<string> = new Set([
   "edge",
   "constraint",
   "redaction",
-  "schema-dump",
   "server",
   "gc",
-  "export",
-  "import",
-  "recovery",
   "agent",
   "ask",
 ]);
+
+// Aliases — intentionally NOT in `INTERNAL_TOP_LEVEL` so they show up
+// in `cognit --help` for new users. Each alias in `commands/check.ts`,
+// `commands/decide.ts`, and `commands/conclude.ts` is a thin wrapper
+// that re-invokes `registerVerification` / `registerDecision` /
+// `registerConclusion` against an isolated program tree. Keeping
+// aliases public (and their canonical names internal) means the
+// "lifecycle verbs" users type are discoverable, while advanced users
+// still find the full event-named surface behind `--internal`.
 
 // Within `session`, only `ls` (alias for `list`) is public. All
 // lifecycle commands are hidden — they are AI/hook territory.

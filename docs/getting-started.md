@@ -1,119 +1,98 @@
-# Getting Started
+# Getting started
 
-Five minutes from `git clone` to a working Cognit installation.
+## What is Cognit?
 
-Prerequisites: **Node ≥ 22**, **pnpm 9**, **Docker** with `docker
-compose` v2.
+Cognit remembers the reasoning behind every change your AI tool
+makes — what it observed, what it guessed, and what it decided.
+That memory lives locally on your machine, so three months from now
+you can ask "why does this file look like this?" and get the actual
+answer from the AI itself, not a guess from your commit message.
 
-## 1. Start the local stack
+## Why do I want it?
 
-```bash
-./scripts/up.sh
-```
+Git tracks what changed. Your AI tool tracks the chat. Cognit tracks
+the *why* in between — the chain of guesses, checks, and decisions
+that led to the change. When something breaks later, you want the
+decision, not just the diff. See the comparison table at the top of
+[README.md](../README.md) for the full picture.
 
-Builds + globally links `@cognit/cli` onto your `PATH`, then starts
-the server in Docker. Re-run any time — it is idempotent (skipping
-the install/build steps when already satisfied).
+## How do I install?
 
-If `cognit` is not on `PATH` after the script completes:
-
-```bash
-export PATH="$(pnpm config get global-dir 2>/dev/null)/bin:$PATH"
-```
-
-The Hono API binds `127.0.0.1:6971` internally; the Vite dev
-dashboard is published on host `http://localhost:5173`. Docker
-profile publishes on `http://localhost:6970`. See
-[`docs/dashboard.md`](dashboard.md) for the full rule.
-
-## 2. Initialise Cognit inside a project
+About 60 seconds, copy-paste:
 
 ```bash
+git clone https://github.com/phucle297/Cognit
+cd Cognit
+pnpm install
+pnpm build
+pnpm link --global
+
 cd <your-project>
 cognit init
 ```
 
-Creates `.cognit/` inside the project:
+`cognit init` detects which AI tools you have installed — Claude
+Code, Codex, Gemini CLI, or OpenCode — and wires Cognit into each
+one automatically. No manual config, no JSON editing, no copying
+files around. Re-running it on a project that is already initialised
+is a no-op.
 
-- `.cognit/cognit.yaml` — project config (commit this).
-- `.cognit/cognit.db` — the SQLite reasoning graph (gitignored).
-- `.cognit/inbox/` — drop folder for hook envelopes.
-- `.cognit/artifacts/`, `.cognit/snapshots/`, `.cognit/archive/` —
-  runtime state (gitignored).
+Prerequisites: Node 22 or newer, and pnpm 9.
 
-`init` is idempotent. Re-running against an already-initialised
-project prints "already exists; nothing to do" and exits 0.
+## How do I use my AI tool normally?
 
-## 3. Bind a session
-
-```bash
-cognit session create "Investigate memory leak"
-```
-
-Writes the new session ULID to `.cognit/current-session`. Hooks
-read this pointer; the `cognit env --shell` command also exposes it
-as `$COGNIT_SESSION_ID` so scripts that bootstrap via `eval
-"$(cognit env --shell)"` can attach to the active session
-immediately. `$COGNIT_INBOX` is exported the same way.
-
-## 4. Wire the AI tool
-
-Install hooks for your AI tool. Hooks are installed into
-`~/.cognit/hooks/` (per-user, NOT inside the project) — the
-destination directory must exist first.
-
-```bash
-mkdir -p ~/.cognit/hooks
-
-# Claude Code
-install -m 0755 hooks/claude-code/cc-post.sh ~/.cognit/hooks/cc-post.sh
-install -m 0755 hooks/claude-code/cc-pre.sh  ~/.cognit/hooks/cc-pre.sh
-
-# Codex — both pre AND post (pre emits hypothesis_created, post emits observation_recorded)
-install -m 0755 hooks/codex/codex-post.sh    ~/.cognit/hooks/codex-post.sh
-install -m 0755 hooks/codex/codex-pre.sh     ~/.cognit/hooks/codex-pre.sh
-
-# OpenCode / Gemini CLI — see the provider pages under docs/hooks/.
-```
-
-Add the corresponding entries to the host CLI's hooks config
-(`~/.claude/settings.json`, `~/.codex/hooks.json`, etc.). Full
-wiring lives in [`docs/hooks.md`](hooks.md) and the per-provider
-pages ([claude-code](hooks/claude-code.md), [codex](hooks/codex.md),
-[opencode](hooks/opencode.md), [gemini-cli](hooks/gemini-cli.md)).
-
-## 5. Use your AI tool normally
+Just use it the way you already do:
 
 ```bash
 claude
+# or codex, gemini, opencode
 ```
 
-The hooks fire on every tool call. Each tool invocation lands as a
-v1.2.0 envelope in `.cognit/inbox/`. The watcher (`cognit inbox
---watch`) validates and persists the event; the reasoning graph
-folds it into the active session's state.
-
-## 6. Inspect
-
-Open the dashboard (`cognit dashboard`) and navigate:
-
-- `/` — current investigation summary.
-- `/timeline` — what just happened.
-- `/recovery-center` — what was rejected and why.
-- `/knowledge-graph` — entities and their relations.
-
-Lower-level introspection:
+Cognit runs in the background and records every step of every
+investigation as you go. Nothing to remember, nothing to invoke
+manually. To see what your AI has been thinking, open the
+dashboard:
 
 ```bash
-cognit events --follow
-cognit session show
-cognit recovery search "memory leak"
+cognit dashboard
 ```
 
-## What's next
+The browser opens at `http://localhost:5173`. The Timeline view
+shows each session as it unfolds.
 
-- [`docs/cli.md`](cli.md) — every subcommand.
-- [`docs/hooks.md`](hooks.md) — how external CLIs publish to Cognit.
-- [`docs/architecture.md`](architecture.md) — repo layout, data flow,
-  subsystem map.
-- [`docs/storage.md`](storage.md) — what lives where on disk.
+## How do I find reasoning later?
+
+When a file changes and you cannot remember why, search the way you
+would ask a teammate:
+
+```bash
+cognit recovery search "why did we drop the JWT refresh"
+```
+
+Cognit returns matching sessions, the chain of guesses and checks
+that led to the decision, and a one-click way to resume that
+investigation from where it stopped. Search works on meaning, not
+exact words, so describe the symptom if you do not remember the
+decision: `cognit recovery search "login fails on mobile"`.
+
+## How do I uninstall?
+
+```bash
+rm -rf .cognit
+pnpm rm -g cognit
+```
+
+Cognit stores everything inside `.cognit/` inside your project, so
+removing that folder wipes all local reasoning memory. Removing the
+package from your global pnpm setup takes the CLI off your `PATH`.
+Nothing lives outside those two places — no cloud account, no
+remote server, nothing to clean up elsewhere.
+
+## Next steps
+
+- [index.md](index.md) — why Cognit exists, in 90 seconds
+- [why.md](why.md) — "Why did AI make this change?"
+- [recover.md](recover.md) — "How do I undo or revisit?"
+- [search.md](search.md) — "How do I find past reasoning?"
+- [dashboard.md](dashboard.md) — every tab in the dashboard
+- [cli.md](cli.md) — every command

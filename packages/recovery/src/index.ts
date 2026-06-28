@@ -22,6 +22,7 @@ export {
   type BuildRecoveryInput,
   type LatestVerification,
   type LatestVerifications,
+  type ObservationRef,
   type RecoveryV02,
   type RejectedDecision,
   type RejectedHypothesis,
