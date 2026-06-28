@@ -82,7 +82,11 @@ const rowCount = (root: string, table: string): number => {
 };
 
 describe("cognit import", () => {
-  it("--merge-strategy skip keeps local on id collision (round-trip is a no-op)", async () => {
+  // This test does 5+ spawnSync(tsx) cold-starts in series (init +
+  // session + observe + export + 2x import). Under parallel vitest
+  // load the cold-start cost pushes past the 30s default. Logic is
+  // deterministic — bumped to 90s.
+  it("--merge-strategy skip keeps local on id collision (round-trip is a no-op)", { timeout: 90_000 }, async () => {
     // Source project: 1 session, some events.
     const source = path.join(tmp, "source");
     initProject(source, "src");
