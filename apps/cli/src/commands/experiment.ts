@@ -131,7 +131,6 @@ const runExperiment = async (
  * (the constraint chokepoint that phase 3c will hook into).
  */
 export function registerExperiment(program: Command): void {
-  warnExperimentalOnce("cognit experiment");
   const experiment = program
     .command("experiment")
     .description("experiment lifecycle (experiment_created, experiment_completed)");
@@ -145,6 +144,7 @@ export function registerExperiment(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: ExperimentOptions) => {
+      warnExperimentalOnce("cognit experiment");
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const resolved = resolveSessionId(root, opts.session);
@@ -192,6 +192,7 @@ export function registerExperiment(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: ExperimentOptions) => {
+      warnExperimentalOnce("cognit experiment");
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const resolved = resolveSessionId(root, opts.session);

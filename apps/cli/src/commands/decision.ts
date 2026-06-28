@@ -3,9 +3,9 @@ import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
 import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
-import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
+import { ensureSession, requireProjectRoot } from "../auto-session.js";
 
 interface ProposeOptions {
   session?: string;
@@ -171,24 +171,26 @@ export function registerDecision(program: Command): void {
     .description("propose a new decision (decision_proposed event)")
     .argument("<text>", "the decision text")
     .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
-    .requiredOption("--based-on <ids>", "comma-separated conclusion ids the decision is based on")
+    .option(
+      "--based-on <ids>",
+      "comma-separated conclusion ids the decision is based on (optional; empty = no linked conclusions)",
+    )
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--confidence <0..1>", "confidence score in [0, 1]")
     .action(async (text: string, opts: ProposeOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const confidence = parseConfidence(opts.confidence);
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
+      const { sessionId, created } = await ensureSession({
+        root,
+        explicit: opts.session,
+        goalHint: text,
+        actor,
+      });
+      if (created && opts.session === undefined) {
+        process.stderr.write(`cognit: created session ${sessionId}\n`);
       }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
       const basedOnConclusionIds = parseBasedOn(opts.basedOn);
 
       const program = Effect.gen(function* () {
@@ -218,22 +220,20 @@ export function registerDecision(program: Command): void {
     .description("accept a proposed decision (decision_accepted event)")
     .option("--session <id>", "session id (ULID) (defaults to sticky current-session pointer)")
     .requiredOption("--id <id>", "decision id being accepted")
-    .requiredOption("--based-on <ids>", "comma-separated conclusion ids the decision is based on")
+    .option(
+      "--based-on <ids>",
+      "comma-separated conclusion ids the decision is based on (optional)",
+    )
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: AcceptOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
-      }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
+      const { sessionId } = await ensureSession({
+        root,
+        explicit: opts.session,
+        actor,
+      });
       const decisionId = opts.id!;
       const basedOnConclusionIds = parseBasedOn(opts.basedOn);
 
@@ -267,18 +267,13 @@ export function registerDecision(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: RejectOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
-      }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
+      const { sessionId } = await ensureSession({
+        root,
+        explicit: opts.session,
+        actor,
+      });
       const decisionId = opts.id!;
       const reason = opts.reason!;
 
@@ -312,18 +307,13 @@ export function registerDecision(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: SupersedeOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
-      }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
+      const { sessionId } = await ensureSession({
+        root,
+        explicit: opts.session,
+        actor,
+      });
       const decisionId = opts.id!;
       const supersededByDecisionId = opts.by!;
 

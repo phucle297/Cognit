@@ -37,15 +37,15 @@ afterEach(async () => {
 
 describe("current-session pointer (file-level)", () => {
   it("writeCurrentSession creates .cognit/current-session with the given id", () => {
-    writeCurrentSession(tmp, "01SESSSTICKY0000000000000");
+    writeCurrentSession(tmp, "01ABCDEFGHJKMNP00000000000");
     const paths = projectPaths(tmp);
     expect(fs.existsSync(paths.currentSession)).toBe(true);
     const content = fs.readFileSync(paths.currentSession, "utf8").trim();
-    expect(content).toBe("01SESSSTICKY0000000000000");
+    expect(content).toBe("01ABCDEFGHJKMNP00000000000");
   });
 
   it("writeCurrentSession is atomic — no .tmp file remains after success", () => {
-    writeCurrentSession(tmp, "01SESSSTICKY0000000000001");
+    writeCurrentSession(tmp, "01ABCDEFGHJKMNP00000000001");
     const paths = projectPaths(tmp);
     expect(fs.existsSync(paths.currentSessionTmp)).toBe(false);
   });
@@ -55,15 +55,15 @@ describe("current-session pointer (file-level)", () => {
   });
 
   it("readCurrentSession returns the id and stale=false for a fresh write", () => {
-    writeCurrentSession(tmp, "01SESSSTICKY0000000000002");
+    writeCurrentSession(tmp, "01ABCDEFGHJKMNP00000000002");
     const r = readCurrentSession(tmp);
     expect(r).not.toBeNull();
-    expect(r?.sessionId).toBe("01SESSSTICKY0000000000002");
+    expect(r?.sessionId).toBe("01ABCDEFGHJKMNP00000000002");
     expect(r?.stale).toBe(false);
   });
 
   it("readCurrentSession sets stale=true when mtime is older than 24h", () => {
-    writeCurrentSession(tmp, "01SESSSTICKY0000000000003");
+    writeCurrentSession(tmp, "01ABCDEFGHJKMNP00000000003");
     const paths = projectPaths(tmp);
     // Backdate the mtime to 25h ago.
     const old = Date.now() - 25 * 60 * 60 * 1000;
@@ -73,7 +73,7 @@ describe("current-session pointer (file-level)", () => {
   });
 
   it("clearCurrentSession removes the pointer; reading then returns null", () => {
-    writeCurrentSession(tmp, "01SESSSTICKY0000000000004");
+    writeCurrentSession(tmp, "01ABCDEFGHJKMNP00000000004");
     expect(readCurrentSession(tmp)).not.toBeNull();
     clearCurrentSession(tmp);
     expect(readCurrentSession(tmp)).toBeNull();

@@ -4,9 +4,9 @@ import { CognitionService, type ActorType, type VerificationType } from "@cognit
 import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { runVerification, type TerminalEvent } from "@cognit/verification";
 import { findProjectRoot, projectPaths } from "../paths.js";
-import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
+import { ensureSession, requireProjectRoot } from "../auto-session.js";
 
 interface VerifyOptions {
   session?: string;
@@ -145,17 +145,22 @@ const printEvent = (event: CliEvent): void => {
   process.stdout.write(`time:     ${event.created_at}\n`);
 };
 
-const requireSessionId = (root: string, raw: string | undefined): string => {
-  const resolved = resolveSessionId(root, raw);
-  if (!resolved) {
-    process.stderr.write(
-      "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-    );
-    process.exitCode = 2;
-    throw new Error("--session: missing");
+const requireSessionId = async (
+  root: string,
+  raw: string | undefined,
+  actor: { readonly name: string; readonly type: ActorType },
+  goalHint?: string,
+): Promise<string> => {
+  const { sessionId, created } = await ensureSession({
+    root,
+    explicit: raw,
+    ...(goalHint !== undefined ? { goalHint } : {}),
+    actor,
+  });
+  if (created && raw === undefined) {
+    process.stderr.write(`cognit: created session ${sessionId}\n`);
   }
-  if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-  return resolved.sessionId;
+  return sessionId;
 };
 
 const parseOptionalInt = (raw: string | undefined, flag: string): number | undefined => {
@@ -220,10 +225,10 @@ export function registerVerification(program: Command): void {
         process.exitCode = 2;
         throw new Error("verify: missing command");
       }
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const type = parseVerificationType(opts.type);
-      const sessionId = requireSessionId(root, opts.session);
+      const sessionId = await requireSessionId(root, opts.session, actor, argv.join(" "));
 
       // Step 1: append `verification_started` (this is the row whose
       // id we thread into the terminal event's parent_verification_id).
@@ -384,9 +389,9 @@ export function registerVerification(program: Command): void {
     .option("--root <path>", "project root")
     .action(
       async (opts: { id: string; reason: string } & VerifyOptions) => {
-        const root = resolveProjectRoot(opts.root);
+        const root = opts.root ?? requireProjectRoot();
         const actor = parseActor(opts.actor, "cognit-cli", "system");
-        const sessionId = requireSessionId(root, opts.session);
+        const sessionId = await requireSessionId(root, opts.session, actor);
         const programEff = Effect.gen(function* () {
           const cognition = yield* CognitionService;
           return yield* cognition.cancelVerification({
@@ -424,9 +429,9 @@ export function registerVerification(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root")
     .action(async (vid: string, opts: VerifyOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = requireSessionId(root, opts.session);
+      const sessionId = await requireSessionId(root, opts.session, actor);
       const exitCode = parseOptionalInt(opts.exitCode, "--exit-code");
       const durationMs = parseOptionalInt(opts.durationMs, "--duration-ms");
       const programEff = Effect.gen(function* () {
@@ -471,9 +476,9 @@ export function registerVerification(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root")
     .action(async (vid: string, opts: { stderrExcerpt: string } & VerifyOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = requireSessionId(root, opts.session);
+      const sessionId = await requireSessionId(root, opts.session, actor);
       const exitCode = parseOptionalInt(opts.exitCode, "--exit-code");
       const durationMs = parseOptionalInt(opts.durationMs, "--duration-ms");
       const programEff = Effect.gen(function* () {
@@ -517,9 +522,9 @@ export function registerVerification(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root")
     .action(async (vid: string, opts: { error: string } & VerifyOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = requireSessionId(root, opts.session);
+      const sessionId = await requireSessionId(root, opts.session, actor);
       const durationMs = parseOptionalInt(opts.durationMs, "--duration-ms");
       const programEff = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -556,9 +561,9 @@ export function registerVerification(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root")
     .action(async (parentVid: string, opts: VerifyOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const sessionId = requireSessionId(root, opts.session);
+      const sessionId = await requireSessionId(root, opts.session, actor);
       const durationMs = parseOptionalInt(opts.durationMs, "--duration-ms");
       const programEff = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -580,5 +585,36 @@ export function registerVerification(program: Command): void {
         return;
       }
       printEvent(event);
+    });
+}
+
+/**
+ * `cognit verification <args...>` — public alias for `cognit verify`.
+ *
+ * M1 affordance: CLAUDE.md teaches the LLM to call
+ * `cognit verification run "<cmd>"`. The verb is a noun (the memory
+ * type), not an imperative. Same forwarder pattern as `registerCheck`
+ * and `registerObservationAlias`.
+ */
+export function registerVerificationAlias(program: Command): void {
+  const v = program
+    .command("verification")
+    .description("record a verification (alias for `cognit verify`)");
+  v.argument("[args...]")
+    .allowUnknownOption(true)
+    .helpOption(false)
+    .action(async (args: string[]) => {
+      const sub = new Command();
+      sub.name("cognit").exitOverride();
+      registerVerification(sub);
+      const innerArgs = args[0] === "verify" ? args.slice(1) : args;
+      try {
+        await sub.parseAsync(["verify", ...innerArgs], { from: "user" });
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code !== "commander.helpDisplayed" && code !== "commander.versionDisplayed") {
+          throw err;
+        }
+      }
     });
 }

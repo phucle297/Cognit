@@ -7,14 +7,14 @@ import { registerSnapshot } from "./commands/snapshot.js";
 import { registerAppend } from "./commands/append.js";
 import { registerInbox } from "./commands/inbox.js";
 import { registerEvents } from "./commands/events.js";
-import { registerObservation } from "./commands/observation.js";
+import { registerObservation, registerObservationAlias } from "./commands/observation.js";
 import { registerFinding } from "./commands/finding.js";
 import { registerHypothesis } from "./commands/hypothesis.js";
 import { registerTheory } from "./commands/theory.js";
 import { registerExperiment } from "./commands/experiment.js";
 import { registerDecision } from "./commands/decision.js";
 import { registerConclusion } from "./commands/conclusion.js";
-import { registerVerification } from "./commands/verification.js";
+import { registerVerification, registerVerificationAlias } from "./commands/verification.js";
 import { registerCheck } from "./commands/check.js";
 import { registerDecide } from "./commands/decide.js";
 import { registerConclude } from "./commands/conclude.js";
@@ -35,6 +35,8 @@ import { registerImport } from "./commands/import.js";
 import { registerRecovery } from "./commands/recovery.js";
 import { registerAgent } from "./commands/agent.js";
 import { registerAsk } from "./commands/ask.js";
+import { registerContinue } from "./commands/continue.js";
+import { registerSearch } from "./commands/search.js";
 import { setOutputMode } from "./output.js";
 import { applyInternalVisibility, setShowInternal } from "./visibility.js";
 
@@ -118,6 +120,10 @@ registerImport(program);
 registerRecovery(program);
 registerAgent(program);
 registerAsk(program);
+registerObservationAlias(program);
+registerVerificationAlias(program);
+registerContinue(program);
+registerSearch(program);
 
 // Initial visibility pass — public help shows only init / session ls
 // / dashboard until the user passes --internal.

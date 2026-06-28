@@ -3,9 +3,9 @@ import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
 import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
-import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
+import { ensureSession, requireProjectRoot } from "../auto-session.js";
 
 interface ConcludeOptions {
   session?: string;
@@ -168,19 +168,18 @@ export function registerConclusion(program: Command): void {
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--confidence <0..1>", "confidence score in [0, 1]")
     .action(async (text: string, opts: ConcludeOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const confidence = parseConfidence(opts.confidence);
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
+      const { sessionId, created } = await ensureSession({
+        root,
+        explicit: opts.session,
+        goalHint: text,
+        actor,
+      });
+      if (created && opts.session === undefined) {
+        process.stderr.write(`cognit: created session ${sessionId}\n`);
       }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -211,7 +210,7 @@ export function registerConclusion(program: Command): void {
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--confidence <0..1>", "confidence score in [0, 1]")
     .action(async (opts: VerifyConclusionOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const confidence = parseConfidence(opts.confidence);
       const evidence = parseCsv(opts.evidence);
@@ -220,16 +219,11 @@ export function registerConclusion(program: Command): void {
         process.exitCode = 2;
         throw new Error("--evidence: empty");
       }
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
-      }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
+      const { sessionId } = await ensureSession({
+        root,
+        explicit: opts.session,
+        actor,
+      });
       const conclusionId = opts.id!;
       const verificationId = opts.verification!;
 
@@ -262,18 +256,13 @@ export function registerConclusion(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: RejectConclusionOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
-      }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
+      const { sessionId } = await ensureSession({
+        root,
+        explicit: opts.session,
+        actor,
+      });
       const conclusionId = opts.id!;
       const reason = opts.reason!;
 

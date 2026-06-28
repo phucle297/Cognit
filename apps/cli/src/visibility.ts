@@ -49,6 +49,24 @@ const INTERNAL_TOP_LEVEL: ReadonlySet<string> = new Set([
   "ask",
 ]);
 
+/**
+ * Public verbs the LLM-facing surface uses (registered via the
+ * `*Alias` helpers in observation.ts / verification.ts and via
+ * register{Continue,Search}):
+ *   - `observation`   (alias of observe)
+ *   - `verification`  (alias of verify)
+ *   - `continue`
+ *   - `search`
+ *
+ * The full-noun commands (`decision`, `conclusion`, `verify`,
+ * `observe`) stay internal — only the short alias verbs are public.
+ * `decide` / `conclude` / `check` are the human-friendly public
+ * aliases that already existed.
+ *
+ * Do NOT promote more commands without re-reading M1.1's
+ * "keep public surface small" rule.
+ */
+
 // Aliases — intentionally NOT in `INTERNAL_TOP_LEVEL` so they show up
 // in `cognit --help` for new users. Each alias in `commands/check.ts`,
 // `commands/decide.ts`, and `commands/conclude.ts` is a thin wrapper

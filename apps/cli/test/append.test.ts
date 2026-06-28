@@ -115,7 +115,10 @@ describe("cognit append", () => {
     expect(append.stderr).toContain("not a known event type");
   });
 
-  it("fails cleanly when --session does not exist", async () => {
+  it("auto-recovers when --session does not exist (M1.1: forgiving)", async () => {
+    // M1.1 contract: an unknown explicit --session falls through to
+    // auto-create rather than failing the LLM call. This matches the
+    // auto-session behaviour for every other write verb.
     expect(runCli(tmp, ["init", "--project", "demo"]).status).toBe(0);
 
     const append = runCli(tmp, [
@@ -127,8 +130,8 @@ describe("cognit append", () => {
       "--session",
       "01ZZZZZZZZZZZZZZZZZZZZZZZZ",
     ]);
-    expect(append.status).not.toBe(0);
-    expect(append.stderr).toContain("does not exist");
+    expect(append.status).toBe(0);
+    expect(append.stderr).toContain("created session");
   });
 
   it("rejects --actor with an invalid type", async () => {

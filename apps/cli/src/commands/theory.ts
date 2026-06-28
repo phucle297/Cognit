@@ -115,7 +115,6 @@ const runTheory = async (
  * constraint chokepoint that phase 3c will hook into).
  */
 export function registerTheory(program: Command): void {
-  warnExperimentalOnce("cognit theory");
   const theory = program
     .command("theory")
     .description("theory lifecycle (theory_created, theory_updated, theory_merged, theory_archived)");
@@ -129,6 +128,7 @@ export function registerTheory(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (title: string, opts: TheoryOptions) => {
+      warnExperimentalOnce("cognit theory");
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const resolved = resolveSessionId(root, opts.session);
@@ -173,6 +173,7 @@ export function registerTheory(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: TheoryOptions) => {
+      warnExperimentalOnce("cognit theory");
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const resolved = resolveSessionId(root, opts.session);
@@ -218,6 +219,7 @@ export function registerTheory(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: TheoryOptions) => {
+      warnExperimentalOnce("cognit theory");
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const resolved = resolveSessionId(root, opts.session);
@@ -262,6 +264,7 @@ export function registerTheory(program: Command): void {
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .action(async (opts: TheoryOptions) => {
+      warnExperimentalOnce("cognit theory");
       const root = resolveProjectRoot(opts.root);
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const resolved = resolveSessionId(root, opts.session);

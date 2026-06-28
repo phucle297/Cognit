@@ -4,9 +4,9 @@ import { Effect, Exit, Cause } from "effect";
 import { SessionService, type ActorType } from "@cognit/db";
 import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
-import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayerAndConfig } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
+import { ensureSession, requireProjectRoot } from "../auto-session.js";
 
 interface AppendOptions {
   type?: string;
@@ -81,16 +81,6 @@ const resolvePayload = (raw: string | undefined): unknown => {
     process.exitCode = 2;
     throw new Error("--payload: invalid JSON");
   }
-};
-
-const requireProjectRoot = (): string => {
-  const root = findProjectRoot();
-  if (!root) {
-    process.stderr.write("cognit: no .cognit/cognit.yaml found. Run `cognit init` first.\n");
-    process.exitCode = 2;
-    throw new Error("not in a cognit project");
-  }
-  return root;
 };
 
 const runAppend = async (
@@ -174,16 +164,17 @@ export function registerAppend(program: Command): void {
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const payload = resolvePayload(opts.payload);
       const eventType = opts.type!;
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
+      const { sessionId, created } = await ensureSession({
+        root,
+        explicit: opts.session,
+        goalHint: typeof payload === "object" && payload !== null && "text" in payload
+          ? String((payload as { text?: unknown }).text ?? "")
+          : "",
+        actor,
+      });
+      if (created) {
+        process.stderr.write(`cognit: created session ${sessionId}\n`);
       }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const sessions = yield* SessionService;

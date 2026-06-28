@@ -44,9 +44,17 @@ export function readCurrentSession(
   if (raw.length === 0) {
     return null;
   }
-  // A ULID is 26 chars of Crockford base32; we accept any non-empty
-  // trimmed string as a session id (the resolver will re-check
-  // existence).
+  // ULID shape: 26 chars of Crockford base32. Anything else is a
+  // pointer that no session row can ever resolve to — treat as null
+  // and warn so the user knows why their sticky session is being
+  // recreated.
+  const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+  if (!ULID.test(raw)) {
+    process.stderr.write(
+      `cognit: warning — .cognit/current-session contains "${raw.length > 20 ? raw.slice(0, 20) + "…" : raw}" which is not a valid session id; ignoring.\n`,
+    );
+    return null;
+  }
   const stat = fs.statSync(paths.currentSession);
   return {
     sessionId: raw,

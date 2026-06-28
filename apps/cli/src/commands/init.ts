@@ -9,6 +9,44 @@ import { writeConfig, writeCognitGitignore } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
 import { detectAndInstallHooks, type HookInstallResult } from "../hook-installer.js";
 
+/**
+ * CLAUDE.md is the prompt that teaches Claude Code when to call
+ * Cognit commands. It is written to the project root by `cognit init`
+ * and refreshed on every re-init so version drift between CLI and
+ * instructions is impossible. The file is plain markdown — Claude
+ * Code's CLAUDE.md loader picks it up automatically with no plugin.
+ *
+ * M1.1: tightened to be command-oriented. Each verb has a single
+ * trigger condition so Claude does not have to reason about when to
+ * use Cognit — it just follows the table.
+ */
+const CLAUDE_MD = `# Cognit — memory for this project
+
+You have a local memory store. Call these commands yourself when
+the trigger matches. Do not ask the user to run them.
+
+| When | Command |
+|---|---|
+| You noticed something the user will want to remember | \`cognit observation "<one line>"\` |
+| You are about to make a non-trivial choice | \`cognit decision propose "<the choice>"\` |
+| You have evidence (a test, lint, build, exec) | \`cognit verification run "<cmd>"\` |
+| You are closing out a decision with that evidence | \`cognit conclusion propose "<claim>"\` |
+| You start a new turn and want context | \`cognit continue\` |
+| You need prior reasoning on a topic | \`cognit search "<query>"\` |
+
+Rules:
+- Do not run \`cognit session create\`. Cognit auto-creates a session
+  on the first call. Just invoke the verb.
+- Keep each \`observation\` to one line. The dashboard and
+  \`cognit continue\` will summarise them.
+- Always run \`verification\` for tests, lint, build, typecheck.
+  Don't skip it.
+- At the start of every turn (after compaction, after a long break),
+  run \`cognit continue\` before answering.
+- The user is not expected to run Cognit commands. If a memory op
+  is needed, run it yourself via Bash.
+`;
+
 interface InitOptions {
   project?: string;
   force?: boolean;
@@ -59,6 +97,10 @@ export function registerInit(program: Command): void {
         // idempotent — already-wired tools are skipped.
         const hookResults = detectAndInstallHooks();
         printHookSummary(hookResults);
+        // M1: refresh CLAUDE.md even on idempotent re-init so the
+        // instructions stay in lockstep with the installed CLI.
+        await fs.writeFile(path.join(projectRoot, "CLAUDE.md"), CLAUDE_MD, "utf8");
+        process.stdout.write(`\nNext: open Claude Code. Reasoning will appear in \`cognit continue\`.\n`);
         return;
       }
 
@@ -74,6 +116,12 @@ export function registerInit(program: Command): void {
       await writeConfig(paths.config, config);
       await writeCognitGitignore(paths.gitignore);
 
+      // M1: write / refresh CLAUDE.md at the project root so Claude
+      // Code (and any other AI tool that honours CLAUDE.md) learns
+      // when to call the Cognit verbs. Idempotent — re-running init
+      // overwrites with the current canonical text.
+      await fs.writeFile(path.join(projectRoot, "CLAUDE.md"), CLAUDE_MD, "utf8");
+
       // Bootstrap the SQLite DB and insert the project row. The
       // server (and every CLI subcommand that touches the DB) reads
       // `projects` to resolve the current project; without this row
@@ -81,15 +129,30 @@ export function registerInit(program: Command): void {
       // `ensure` is idempotent — re-running init against an existing
       // row is a no-op — so the docker `init` service can run on
       // every `up` without harm.
-      await Effect.runPromise(
-        withAppLayer(
-          projectRoot,
-          Effect.gen(function* () {
-            const projectService = yield* ProjectService;
-            yield* projectService.ensure({ name: projectName });
-          }),
-        ),
-      );
+      try {
+        await Effect.runPromise(
+          withAppLayer(
+            projectRoot,
+            Effect.gen(function* () {
+              const projectService = yield* ProjectService;
+              yield* projectService.ensure({ name: projectName });
+            }),
+          ),
+        );
+      } catch (e) {
+        const msg = (e as Error).message ?? String(e);
+        if (/SqliteError|no such column|malformed|database disk image/i.test(msg)) {
+          process.stderr.write(
+            `cognit: database schema is incompatible with this CLI.\n` +
+              `  Cause: ${msg}\n` +
+              `  Fix:   rm -rf .cognit/cognit.db .cognit/cognit.db-*  &&  cognit init\n`,
+          );
+        } else {
+          process.stderr.write(`cognit: database bootstrap failed: ${msg}\n`);
+        }
+        process.exitCode = 1;
+        return;
+      }
 
       process.stdout.write(`Initialised Cognit project: ${projectName}\n`);
       process.stdout.write(`  ${paths.config}\n`);
@@ -104,6 +167,10 @@ export function registerInit(program: Command): void {
       // fix one tool at a time.
       const hookResults: HookInstallResult[] = detectAndInstallHooks();
       printHookSummary(hookResults);
+
+      process.stdout.write(
+        `\nNext: open Claude Code. Reasoning will appear in \`cognit continue\`.\n`,
+      );
     });
 }
 

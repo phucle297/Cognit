@@ -3,9 +3,9 @@ import { Effect, Exit, Cause } from "effect";
 import { CognitionService, type ActorType } from "@cognit/db";
 import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot } from "../paths.js";
-import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
+import { ensureSession, requireProjectRoot } from "../auto-session.js";
 
 interface ObserveOptions {
   session?: string;
@@ -135,19 +135,18 @@ export function registerObservation(program: Command): void {
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--confidence <0..1>", "confidence score in [0, 1]")
     .action(async (text: string, opts: ObserveOptions) => {
-      const root = resolveProjectRoot(opts.root);
+      const root = opts.root ?? requireProjectRoot();
       const actor = parseActor(opts.actor, "cognit-cli", "system");
       const confidence = parseConfidence(opts.confidence);
-      const resolved = resolveSessionId(root, opts.session);
-      if (!resolved) {
-        process.stderr.write(
-          "cognit: --session is required (or run `cognit session create` to set the sticky pointer)\n",
-        );
-        process.exitCode = 2;
-        return;
+      const { sessionId, created } = await ensureSession({
+        root,
+        explicit: opts.session,
+        goalHint: text,
+        actor,
+      });
+      if (created && opts.session === undefined) {
+        process.stderr.write(`cognit: created session ${sessionId}\n`);
       }
-      if (resolved.source === "pointer") warnStalePointer(root, resolved.sessionId);
-      const sessionId = resolved.sessionId;
 
       const program = Effect.gen(function* () {
         const cognition = yield* CognitionService;
@@ -170,5 +169,37 @@ export function registerObservation(program: Command): void {
       process.stdout.write(`type:     ${event.type}\n`);
       process.stdout.write(`session:  ${event.session_id}\n`);
       process.stdout.write(`time:     ${event.created_at}\n`);
+    });
+}
+
+/**
+ * `cognit observation "<text>"` — public alias for `cognit observe`.
+ *
+ * M1 affordance: the verb Claude reads in CLAUDE.md is `observation`
+ * (a noun — the memory type), not `observe` (an internal verb). This
+ * is a thin forwarder; all flag definitions stay in `registerObservation`
+ * above.
+ */
+export function registerObservationAlias(program: Command): void {
+  const obs = program
+    .command("observation")
+    .description("record an observation (alias for `cognit observe`)");
+  obs
+    .argument("[args...]")
+    .allowUnknownOption(true)
+    .helpOption(false)
+    .action(async (args: string[]) => {
+      const sub = new Command();
+      sub.name("cognit").exitOverride();
+      registerObservation(sub);
+      const innerArgs = args[0] === "observe" ? args.slice(1) : args;
+      try {
+        await sub.parseAsync(["observe", ...innerArgs], { from: "user" });
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code !== "commander.helpDisplayed" && code !== "commander.versionDisplayed") {
+          throw err;
+        }
+      }
     });
 }
