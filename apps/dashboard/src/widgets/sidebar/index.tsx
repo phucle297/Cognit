@@ -1,26 +1,25 @@
 /**
  * apps/dashboard/src/widgets/sidebar/index.tsx — left rail nav.
  *
- * Restyled to match the Alina template nav pattern: semantic
- * icons per item, brand badge area, optional badge counters on
- * nav links, and a Quick Actions block at the bottom. Light
- * theme — uses the existing design tokens in
+ * Phase A.6: public surface is four tabs — Overview / Timeline /
+ * Graph / Settings. Internal pages (decision-graph, verification,
+ * ai-reasoning, recovery-center, rules) keep their routes so deep
+ * links still work, but they no longer appear in the sidebar. They
+ * remain reachable only by URL — for AI callers, the developer-ex
+ * team, and anyone who has bookmarked them from before the cut.
+ *
+ * Light theme — uses the existing design tokens in
  * `apps/dashboard/src/app/index.css`.
  */
 import {
   Boxes,
-  CircleDot,
   Cog,
-  History,
   LayoutDashboard,
-  ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
   PlusCircle,
   ScrollText,
   Share2,
-  Sparkles,
-  TestTube2,
 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
@@ -41,25 +40,11 @@ const SECTIONS: ReadonlyArray<{
   items: ReadonlyArray<NavItem>;
 }> = [
   {
-    title: "Main",
+    title: "Cognit",
     items: [
       { to: "/", label: "Overview", icon: LayoutDashboard },
       { to: "/timeline", label: "Timeline", icon: ScrollText },
-    ],
-  },
-  {
-    title: "Explore",
-    items: [
-      { to: "/knowledge-graph", label: "Knowledge Graph", icon: Share2 },
-      { to: "/decision-graph", label: "Decision Graph", icon: CircleDot },
-      { to: "/verification", label: "Verification", icon: TestTube2 },
-      { to: "/ai-reasoning", label: "AI Reasoning", icon: Sparkles },
-    ],
-  },
-  {
-    title: "Admin",
-    items: [
-      { to: "/recovery-center", label: "Recovery", icon: History },
+      { to: "/knowledge-graph", label: "Graph", icon: Share2 },
       { to: "/settings", label: "Settings", icon: Cog },
     ],
   },
@@ -67,8 +52,6 @@ const SECTIONS: ReadonlyArray<{
 
 const QUICK_ACTIONS: ReadonlyArray<{ label: string; icon: LucideIcon; to: string }> = [
   { label: "New Session", icon: PlusCircle, to: "/?new=session" },
-  { label: "Rules", icon: ListChecks, to: "/rules" },
-  { label: "Snapshots", icon: Boxes, to: "/?snapshots=1" },
 ];
 
 export const Sidebar = () => {
@@ -142,7 +125,9 @@ export const Sidebar = () => {
                     <item.icon
                       className={cn(
                         "size-4 shrink-0",
-                        isActive ? "text-[var(--color-brand)]" : "text-muted-foreground group-hover:text-foreground",
+                        isActive
+                          ? "text-[var(--color-brand)]"
+                          : "text-muted-foreground group-hover:text-foreground",
                       )}
                       aria-hidden
                     />

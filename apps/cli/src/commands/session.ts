@@ -12,7 +12,11 @@ import { VALID_ACTOR_TYPES } from "@cognit/core";
 import { findProjectRoot, projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
-import { writeCurrentSession, clearCurrentSession } from "../current-session.js";
+import {
+  writeCurrentSession,
+  clearCurrentSession,
+  readCurrentSession,
+} from "../current-session.js";
 import { resolveServerUrl, serverFetch, ServerHttpError } from "../server-http.js";
 import { formatRecoveryBlock } from "./recovery.js";
 import { getOutputMode, emit } from "../output.js";
@@ -221,17 +225,24 @@ const printSessionShow = (result: SessionShowResult): void => {
   // `st.verifications` is a Map<id, VerificationState>; print the
   // most recent 5 in insertion order so the operator can see whether
   // the latest verify run passed/failed/errored at a glance.
-  const verifs = Array.from((st.verifications as ReadonlyMap<string, {
-    readonly id: string;
-    readonly command: string;
-    readonly type: string;
-    readonly state: string;
-    readonly exit_code: number | null;
-    readonly duration_ms: number | null;
-    readonly stdout_excerpt: string | null;
-    readonly stderr_excerpt: string | null;
-    readonly error: string | null;
-  }>).values());
+  const verifs = Array.from(
+    (
+      st.verifications as ReadonlyMap<
+        string,
+        {
+          readonly id: string;
+          readonly command: string;
+          readonly type: string;
+          readonly state: string;
+          readonly exit_code: number | null;
+          readonly duration_ms: number | null;
+          readonly stdout_excerpt: string | null;
+          readonly stderr_excerpt: string | null;
+          readonly error: string | null;
+        }
+      >
+    ).values(),
+  );
   if (verifs.length > 0) {
     const last = verifs.slice(-5);
     process.stdout.write(`\nVerifications (last ${last.length} of ${verifs.length}):\n`);
@@ -376,7 +387,10 @@ export function registerSession(program: Command): void {
     .option("--fork <bool>", "fork into a new session (default: true)")
     .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
     .option("--search <query>", "fuzzy-match open sessions by goal and pick most recent")
-    .option("--server-url <url>", "server base URL for --search and recovery (default: $COGNIT_SERVER_URL or http://127.0.0.1:6971)")
+    .option(
+      "--server-url <url>",
+      "server base URL for --search and recovery (default: $COGNIT_SERVER_URL or http://127.0.0.1:6971)",
+    )
     .action(async (ref: string, opts: SessionResumeOptions) => {
       const root = requireProjectRoot();
       const project = await loadProject(root);
@@ -395,9 +409,9 @@ export function registerSession(program: Command): void {
       if (opts.search !== undefined && opts.search.length > 0) {
         const base = resolveServerUrl({ serverUrl: opts.serverUrl });
         const qs = new URLSearchParams({ q: opts.search, status: "active" });
-        const env = (await serverFetch(base, `/api/sessions/search?${qs.toString()}`)) as
-          | { data?: { results?: ReadonlyArray<{ session_id: string; kind: string }> } }
-          | null;
+        const env = (await serverFetch(base, `/api/sessions/search?${qs.toString()}`)) as {
+          data?: { results?: ReadonlyArray<{ session_id: string; kind: string }> };
+        } | null;
         const data = env?.data ?? {};
         const hits = Array.isArray(data.results) ? data.results : [];
         if (hits.length === 0) {
@@ -410,7 +424,8 @@ export function registerSession(program: Command): void {
         // we can pick the most recent.
         const bySession = new Map<string, { sessionId: string; kind: string }>();
         for (const h of hits) {
-          if (!bySession.has(h.session_id)) bySession.set(h.session_id, { sessionId: h.session_id, kind: h.kind });
+          if (!bySession.has(h.session_id))
+            bySession.set(h.session_id, { sessionId: h.session_id, kind: h.kind });
         }
         const candidates = Array.from(bySession.values());
         const program = Effect.gen(function* () {
@@ -423,7 +438,9 @@ export function registerSession(program: Command): void {
           return rows.sort((a, b) => b.created_at.localeCompare(a.created_at));
         });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const sorted = (await Effect.runPromise(withAppLayer(root, program) as any)) as ReadonlyArray<SessionRow>;
+        const sorted = (await Effect.runPromise(
+          withAppLayer(root, program) as any,
+        )) as ReadonlyArray<SessionRow>;
         if (sorted.length === 0) {
           process.stderr.write(`cognit: no matching session\n`);
           process.exitCode = 1;
@@ -493,8 +510,7 @@ export function registerSession(program: Command): void {
             const t = top as Record<string, unknown>;
             const id = typeof t["id"] === "string" ? (t["id"] as string) : "";
             const text = typeof t["text"] === "string" ? (t["text"] as string) : "";
-            const score =
-              typeof t["score"] === "number" ? (t["score"] as number).toFixed(3) : "-";
+            const score = typeof t["score"] === "number" ? (t["score"] as number).toFixed(3) : "-";
             if (id || text) {
               process.stdout.write(
                 `Suggested next step: ${text}  (gravity: ${score}, id: ${id})\n`,
@@ -570,5 +586,102 @@ export function registerSession(program: Command): void {
           }
         }),
       );
+    });
+
+  // `cognit session ensure [--goal "..."]` — Phase A.3.
+  //
+  // AI hooks call this on every turn. The contract is:
+  //   - If `.cognit/current-session` points at an active or paused
+  //     session, return its id (no new event, no new pointer write).
+  //   - Otherwise, create a new session with `--goal` (or an
+  //     auto-generated goal), update the sticky pointer, return the
+  //     new id.
+  //   - Print `id\n` on stdout as the first line so hooks can capture
+  //     it via `awk 'NR==1'`. JSON mode prints the v1 envelope.
+  //
+  // Hidden by default; only AI callers + power users see it. Listed
+  // in `--internal` help alongside `create`/`resume`/`pause`/`close`.
+  session
+    .command("ensure")
+    .description("return the active session id, creating one if none exists (AI/hook entry point)")
+    .option("-g, --goal <text>", "goal text used when creating a new session")
+    .option("--actor <name:type>", 'actor override (default "cognit-cli:system")')
+    .action(async (opts: { goal?: string; actor?: string }) => {
+      const root = requireProjectRoot();
+      const project = await loadProject(root);
+      const actor = parseActor(opts.actor, "cognit-cli", "system");
+
+      // Step 1: try the sticky pointer. If it resolves to an open
+      // session, short-circuit — no event, no DB write. The pointer
+      // file is convenience, but resolving it here keeps `ensure`
+      // idempotent and cheap (single file read + one SELECT).
+      const pointer = readCurrentSession(root);
+      if (pointer) {
+        const existing = await Effect.runPromise(
+          withAppLayer(
+            root,
+            Effect.gen(function* () {
+              const service = yield* SessionService;
+              try {
+                return yield* service.show(pointer.sessionId);
+              } catch (_e) {
+                // Stale or unknown id — fall through to create.
+                return null;
+              }
+            }) as Effect.Effect<SessionShowResult | null, unknown, never>,
+          ),
+        ).catch(() => null as SessionShowResult | null);
+        if (
+          existing &&
+          (existing.session.status === "active" || existing.session.status === "paused")
+        ) {
+          if (pointer.stale) {
+            process.stderr.write(
+              `cognit: warning — sticky session pointer is older than 24h; reusing it anyway.\n`,
+            );
+          }
+          if (getOutputMode() === "json") {
+            emit("json", "session.ensure", { id: existing.session.id, status: "resumed" });
+          } else {
+            process.stdout.write(`${existing.session.id}\n`);
+            process.stderr.write(`session: ${existing.session.id} (resumed)\n`);
+          }
+          return;
+        }
+      }
+
+      // Step 2: create a new session. Default goal is timestamped so
+      // the operator can spot auto-created sessions in the dashboard.
+      const goalText =
+        opts.goal && opts.goal.length > 0 ? opts.goal : `session at ${new Date().toISOString()}`;
+
+      let createdId = "";
+      await runCommand(
+        root,
+        Effect.gen(function* () {
+          const service = yield* SessionService;
+          const r = yield* service.create({
+            projectId: project.id,
+            goal: goalText,
+            parentSessionId: null,
+            actor,
+          });
+          createdId = r.session.id;
+          try {
+            writeCurrentSession(root, r.session.id);
+          } catch (e) {
+            process.stderr.write(
+              `cognit: warning — failed to write sticky session pointer: ${(e as Error).message}\n`,
+            );
+          }
+        }),
+      );
+
+      if (getOutputMode() === "json") {
+        emit("json", "session.ensure", { id: createdId, status: "created", goal: goalText });
+      } else {
+        process.stdout.write(`${createdId}\n`);
+        process.stderr.write(`session: ${createdId} (created)\n`);
+      }
     });
 }

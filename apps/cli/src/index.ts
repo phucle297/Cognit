@@ -29,13 +29,14 @@ import { registerImport } from "./commands/import.js";
 import { registerRecovery } from "./commands/recovery.js";
 import { registerAgent } from "./commands/agent.js";
 import { registerAsk } from "./commands/ask.js";
-import { setOutputMode, type OutputMode } from "./output.js";
+import { setOutputMode } from "./output.js";
+import { applyInternalVisibility, setShowInternal } from "./visibility.js";
 
 const program = new Command();
 
 program
   .name("cognit")
-  .description("Git for AI cognition. Local-first persistent decision and knowledge layer.")
+  .description("Cognit — remembers why your code looks like this. Local-first.")
   .version("0.0.0");
 
 // Global --json flag (3b). When set, every command's stdout switches
@@ -43,11 +44,16 @@ program
 // in a module-level so commands can read it from their `action`.
 // We register BEFORE `register*()` so the option is attached to the
 // program root (visible to all subcommands via `program.opts()`).
-program.option("--json", "emit a stable JSON envelope on stdout").hook("preAction", (thisCommand) => {
-  const opts = thisCommand.opts<{ json?: boolean }>();
-  const mode: OutputMode = opts.json ? "json" : "text";
-  setOutputMode(mode);
-});
+program.option("--json", "emit a stable JSON envelope on stdout");
+
+// Global --internal. When set, every internal command (and hidden
+// subcommand under `session`) appears in `cognit help`. Defaults
+// off so the public surface — init / session ls / dashboard — is
+// all a new user sees. Phase A: we hide, we do not delete.
+program.option(
+  "--internal",
+  "reveal internal commands in help (intended for AI callers and power users)",
+);
 
 // Global `--root <path>`. Lets the docker entrypoint pass it before
 // the subcommand (`cognit --root /data init`). Per-subcommand `--root`
@@ -58,6 +64,17 @@ program.option(
   "--root <path>",
   "project root (default: $COGNIT_ROOT or current directory); applies to every subcommand",
 );
+
+// Resolve visibility + output mode before any action runs. We read
+// from `thisCommand.optsWithGlobals()` so the flags work whether they
+// were placed before the subcommand (`cognit --internal help`) or
+// after (`cognit help --internal`).
+program.hook("preAction", (thisCommand) => {
+  const opts = thisCommand.optsWithGlobals() as { json?: boolean; internal?: boolean };
+  setOutputMode(opts.json ? "json" : "text");
+  setShowInternal(opts.internal === true);
+  applyInternalVisibility(program as unknown as Parameters<typeof applyInternalVisibility>[0]);
+});
 
 registerInit(program);
 registerConfig(program);
@@ -89,6 +106,29 @@ registerImport(program);
 registerRecovery(program);
 registerAgent(program);
 registerAsk(program);
+
+// Initial visibility pass — public help shows only init / session ls
+// / dashboard until the user passes --internal.
+applyInternalVisibility(program as unknown as Parameters<typeof applyInternalVisibility>[0]);
+
+// Re-apply visibility right before help renders. Commander dispatches
+// `--help` via `_outputHelpIfRequested` BEFORE `preAction` fires, so
+// the preAction hook never runs for `cognit --internal --help`.
+// `beforeHelp` is the documented hook for "I'm about to render help",
+// which is the earliest point we can react to the parsed options.
+// We register on every subcommand so `cognit session --help --internal`
+// applies visibility to the session subcommand tree.
+const wireBeforeHelp = (cmd: { on: (e: string, l: (...a: unknown[]) => void) => unknown }) => {
+  cmd.on("beforeHelp", () => {
+    const opts = program.opts<{ internal?: boolean }>();
+    setShowInternal(opts.internal === true);
+    applyInternalVisibility(program as unknown as Parameters<typeof applyInternalVisibility>[0]);
+  });
+};
+wireBeforeHelp(program);
+for (const sub of program.commands) {
+  wireBeforeHelp(sub as unknown as { on: (e: string, l: (...a: unknown[]) => void) => unknown });
+}
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`cognit: ${(err as Error).message}\n`);

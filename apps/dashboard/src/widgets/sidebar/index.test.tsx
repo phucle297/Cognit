@@ -15,33 +15,45 @@ const renderSidebar = (initialPath = "/") =>
   );
 
 describe("Sidebar", () => {
-  it("renders the 8 primary nav links + 3 Quick Actions + section headers", () => {
+  it("renders the 4 public nav links + 1 Quick Action + section header", () => {
     renderSidebar();
     const aside = screen.getByRole("complementary");
-    // 8 primary nav links (Main / Explore / Admin) + 3 Quick Actions = 11 total links.
+    // Phase A.6: 4 public nav links (Overview / Timeline / Graph /
+    // Settings) + 1 Quick Action (New Session) = 5 total links.
     const links = within(aside).getAllByRole("link");
-    expect(links).toHaveLength(11);
+    expect(links).toHaveLength(5);
 
-    // Primary nav links (Main / Explore / Admin).
+    // Public nav links.
     expect(within(aside).getByRole("link", { name: "Overview" })).toHaveAttribute("href", "/");
-    expect(within(aside).getByRole("link", { name: "Timeline" })).toHaveAttribute("href", "/timeline");
-    expect(within(aside).getByRole("link", { name: "Knowledge Graph" })).toHaveAttribute("href", "/knowledge-graph");
-    expect(within(aside).getByRole("link", { name: "Decision Graph" })).toHaveAttribute("href", "/decision-graph");
-    expect(within(aside).getByRole("link", { name: "Verification" })).toHaveAttribute("href", "/verification");
-    expect(within(aside).getByRole("link", { name: "AI Reasoning" })).toHaveAttribute("href", "/ai-reasoning");
-    expect(within(aside).getByRole("link", { name: "Recovery" })).toHaveAttribute("href", "/recovery-center");
-    expect(within(aside).getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+    expect(within(aside).getByRole("link", { name: "Timeline" })).toHaveAttribute(
+      "href",
+      "/timeline",
+    );
+    expect(within(aside).getByRole("link", { name: "Graph" })).toHaveAttribute(
+      "href",
+      "/knowledge-graph",
+    );
+    expect(within(aside).getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
 
-    // Section headers.
-    expect(within(aside).getByText("Main")).toBeInTheDocument();
-    expect(within(aside).getByText("Explore")).toBeInTheDocument();
-    expect(within(aside).getByText("Admin")).toBeInTheDocument();
+    // Section header (the nav block label "Cognit" — distinct from
+    // the brand wordmark which shares the text but lives in the
+    // header strip).
+    expect(within(aside).getAllByText("Cognit").length).toBeGreaterThanOrEqual(1);
 
-    // Quick Actions block + entries.
+    // Quick Actions block.
     expect(within(aside).getByText("Quick Actions")).toBeInTheDocument();
     expect(within(aside).getByRole("link", { name: /New Session/i })).toBeInTheDocument();
-    expect(within(aside).getByRole("link", { name: /Rules/i })).toBeInTheDocument();
-    expect(within(aside).getByRole("link", { name: /Snapshots/i })).toBeInTheDocument();
+
+    // Internal pages must NOT be in the sidebar.
+    expect(within(aside).queryByRole("link", { name: "Decision Graph" })).toBeNull();
+    expect(within(aside).queryByRole("link", { name: "Verification" })).toBeNull();
+    expect(within(aside).queryByRole("link", { name: "AI Reasoning" })).toBeNull();
+    expect(within(aside).queryByRole("link", { name: "Recovery" })).toBeNull();
+    expect(within(aside).queryByRole("link", { name: /Rules/i })).toBeNull();
+    expect(within(aside).queryByRole("link", { name: /Snapshots/i })).toBeNull();
   });
 
   it("toggles collapsed state via the toggle button", async () => {
@@ -60,7 +72,9 @@ describe("Sidebar", () => {
     // link is still in the DOM (queried by href because the visible label
     // is unmounted when collapsed)
     expect(
-      within(aside).getAllByRole("link").find((a) => a.getAttribute("href") === "/"),
+      within(aside)
+        .getAllByRole("link")
+        .find((a) => a.getAttribute("href") === "/"),
     ).toBeDefined();
 
     // toggle back: Expand sidebar button now present

@@ -25,7 +25,8 @@ import { GraphControls } from "@/components/GraphControls";
 
 const AUTO_CONSTELLATION_THRESHOLD = 200;
 
-const buildPath = (sessionId: string): string => `/api/sessions/${encodeURIComponent(sessionId)}/graph`;
+const buildPath = (sessionId: string): string =>
+  `/api/sessions/${encodeURIComponent(sessionId)}/graph`;
 
 type EventsResp = {
   readonly events: ReadonlyArray<{
@@ -47,7 +48,9 @@ export const KnowledgeGraphPage = (): JSX.Element => {
   const [selectedNode, setSelectedNode] = useState<GraphResp["nodes"][number] | null>(null);
   const [remountKey, setRemountKey] = useState(0);
 
-  const events = useApi<EventsResp>(sessionId ? `/api/sessions/${sessionId}/events?limit=50` : null);
+  const events = useApi<EventsResp>(
+    sessionId ? `/api/sessions/${sessionId}/events?limit=50` : null,
+  );
 
   useEffect(() => {
     if (!data) return;
@@ -69,7 +72,9 @@ export const KnowledgeGraphPage = (): JSX.Element => {
     [data, sessionId],
   );
 
-  const relatedEvents = useMemo<ReadonlyArray<{ id: string; type: string; created_at: string }>>(() => {
+  const relatedEvents = useMemo<
+    ReadonlyArray<{ id: string; type: string; created_at: string }>
+  >(() => {
     if (!selectedNode || !events.data) return [];
     const entityId = selectedNode.entity_id;
     return events.data.events
@@ -87,11 +92,11 @@ export const KnowledgeGraphPage = (): JSX.Element => {
   if (!sessionId) {
     return (
       <div className="flex flex-col gap-3" data-testid="kg-page">
-        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Knowledge Graph" }]} />
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
         <EmptyState
           icon={Share2}
           title="No session selected"
-          description="Open the Knowledge Graph from a session timeline to inspect its entity graph."
+          description="Open the Graph from a session timeline to inspect its reasoning graph."
         />
       </div>
     );
@@ -100,7 +105,7 @@ export const KnowledgeGraphPage = (): JSX.Element => {
   if (loading) {
     return (
       <div className="flex flex-col gap-3" data-testid="kg-page">
-        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Knowledge Graph" }]} />
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
         <Skeleton className="h-[60vh] w-full" />
       </div>
     );
@@ -109,7 +114,7 @@ export const KnowledgeGraphPage = (): JSX.Element => {
   if (error) {
     return (
       <div className="flex flex-col gap-3" data-testid="kg-page">
-        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Knowledge Graph" }]} />
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
         <ErrorState
           message={error.message}
           onRetry={(): void => refetch()}
@@ -120,9 +125,12 @@ export const KnowledgeGraphPage = (): JSX.Element => {
   }
 
   return (
-    <div className="-mx-[var(--space-page-x)] -my-[var(--space-page-y)] flex h-[calc(100vh-3rem)] flex-col" data-testid="kg-page">
+    <div
+      className="-mx-[var(--space-page-x)] -my-[var(--space-page-y)] flex h-[calc(100vh-3rem)] flex-col"
+      data-testid="kg-page"
+    >
       <div className="flex items-center justify-between border-b px-[var(--space-page-x)] py-2">
-        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Knowledge Graph" }]} />
+        <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
         <div className="text-xs text-muted-foreground" data-testid="kg-node-count">
           {nodeCount} node{nodeCount === 1 ? "" : "s"}
         </div>
@@ -183,13 +191,18 @@ export const KnowledgeGraphPage = (): JSX.Element => {
               <div data-testid="kg-node-label">{selectedNode.label}</div>
             </div>
             <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Related events</div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                Related events
+              </div>
               {relatedEvents.length === 0 ? (
                 <div className="text-xs text-muted-foreground">No related events found.</div>
               ) : (
                 <ul className="mt-1 flex flex-col gap-1" data-testid="kg-related-events">
                   {relatedEvents.map((e) => (
-                    <li key={e.id} className="flex items-center justify-between gap-2 rounded border bg-muted/40 px-2 py-1 text-xs">
+                    <li
+                      key={e.id}
+                      className="flex items-center justify-between gap-2 rounded border bg-muted/40 px-2 py-1 text-xs"
+                    >
                       <span className="font-mono">{e.type}</span>
                       <span className="font-mono text-muted-foreground">{e.id.slice(0, 8)}…</span>
                     </li>

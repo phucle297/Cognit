@@ -212,13 +212,29 @@ describe("phase 3 E2E — AC1: every cognition-entity subcommand", () => {
   });
 
   it("`cognit --help` lists every shipped cognition-entity subcommand", () => {
-    const r = runCli(tmp, ["--help"]);
+    // Phase A: internal commands are hidden by default. The AC
+    // contract is unchanged — every command must be discoverable
+    // through help — but the flag is now `--internal --help`.
+    const r = runCli(tmp, ["--internal", "--help"]);
     expect(r.status).toBe(0);
     for (const cmd of ENTITY_COMMANDS) {
-      expect(r.stdout, `missing '${cmd.command}' in --help`).toContain(cmd.command);
+      expect(r.stdout, `missing '${cmd.command}' in --internal --help`).toContain(cmd.command);
     }
     // AC1 also requires `cognit events` (plan.xml:841).
     expect(r.stdout).toContain("events");
+  });
+
+  it("`cognit --help` hides internal commands from the public surface", () => {
+    const r = runCli(tmp, ["--help"]);
+    expect(r.status).toBe(0);
+    // Public surface must NOT mention internal commands as command
+    // names. Use a word-boundary check so the test does not match
+    // fragments inside unrelated descriptions.
+    for (const cmd of ENTITY_COMMANDS) {
+      const word = cmd.command.split(" ")[0]!;
+      const re = new RegExp(`\\b${word}\\b`);
+      expect(re.test(r.stdout), `public --help leaked '${word}'`).toBe(false);
+    }
   });
 
   it("`cognit events --session <id>` tails the event log", () => {

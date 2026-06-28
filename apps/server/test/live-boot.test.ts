@@ -2,7 +2,33 @@ import { describe, it, expect, afterAll } from "vitest";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
+import { fileURLToPath } from "node:url";
+
+// Resolve repo paths from this file's location so the test works from
+// any checkout (no hard-coded `/home/permees/...` absolute path).
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const APPS_DIR = path.resolve(__dirname, "..", "..");
+const CLI_ENTRY = path.join(APPS_DIR, "cli", "src", "index.ts");
+const SERVER_ENTRY = path.join(APPS_DIR, "server", "src", "index.ts");
+
+// Walk up to find a `node_modules/.bin/tsx` — handles pnpm hoisting
+// (workspace root `node_modules/.bin/tsx`) and per-package installs.
+const findTsx = (start: string): string => {
+  let dir = start;
+  while (true) {
+    const candidate = path.join(dir, "node_modules", ".bin", "tsx");
+    if (fsSync.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error("could not locate tsx binary in any ancestor node_modules");
+    }
+    dir = parent;
+  }
+};
+const TSX = findTsx(__dirname);
 
 const waitFor = async (pred: () => boolean, ms = 10000) => {
   const start = Date.now();
@@ -28,16 +54,16 @@ describe("production index.ts live boot", () => {
     // Seed a project row via the CLI so the server can boot.
     await new Promise<void>((resolve, reject) => {
       const init = spawn(
-        "npx",
-        ["tsx", "/home/permees/Projects/github-personal/phucle297/Cognit/apps/cli/src/index.ts", "init", "--root", tmpDir, "--project", "live-verify"],
-        { cwd: "/home/permees/Projects/github-personal/phucle297/Cognit", env: process.env, stdio: ["ignore", "pipe", "pipe"] },
+        TSX,
+        [CLI_ENTRY, "init", "--root", tmpDir, "--project", "live-verify"],
+        { cwd: APPS_DIR, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
       );
       let initErr = "";
       init.stderr?.on("data", (d) => { initErr += d.toString(); });
       init.on("exit", (code) => (code === 0 ? resolve() : reject(new Error("init failed: " + code + " err=" + initErr.slice(0,500)))));
     });
 
-    child = spawn("npx", ["tsx", "/home/permees/Projects/github-personal/phucle297/Cognit/apps/server/src/index.ts", "--root", tmpDir, "--port", "0", "--host", "127.0.0.1"], {
+    child = spawn(TSX, [SERVER_ENTRY, "--root", tmpDir, "--port", "0", "--host", "127.0.0.1"], {
       cwd: process.cwd(),
       env: {
         ...process.env,
