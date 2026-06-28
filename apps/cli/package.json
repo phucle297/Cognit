@@ -12,8 +12,12 @@
     "prepare": "pnpm run build",
     "copy-migrations": "rm -rf dist/migrations && cp -R ../../packages/db/src/schema/migrations dist/migrations",
     "typecheck": "tsgo --noEmit",
-    "test": "vitest --run",
-    "test:watch": "vitest",
+    "test": "pnpm run build && vitest --run --project unit --project integration",
+    "test:unit": "vitest --run --project unit",
+    "test:integration": "pnpm run build && vitest --run --project integration",
+    "test:e2e": "pnpm run build && vitest --run --project e2e",
+    "test:ci": "pnpm run build && vitest --run",
+    "test:watch": "vitest --project unit --project integration",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
