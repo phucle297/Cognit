@@ -11,6 +11,7 @@
     "./paths": "./src/paths.ts",
     "./redaction": "./src/redaction.ts",
     "./reducer": "./src/reducer.ts",
+    "./ranking": "./src/ranking.ts",
     "./state": "./src/state.ts"
   },
   "scripts": {

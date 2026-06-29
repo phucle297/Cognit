@@ -22,29 +22,20 @@ import { detectAndInstallHooks, type HookInstallResult } from "../hook-installer
  */
 const CLAUDE_MD = `# Cognit — memory for this project
 
-You have a local memory store. Call these commands yourself when
-the trigger matches. Do not ask the user to run them.
+You have a local memory store. Use it yourself — never ask the user to run it.
 
 | When | Command |
 |---|---|
-| You noticed something the user will want to remember | \`cognit observation "<one line>"\` |
+| You noticed something worth remembering | \`cognit observation "<one line>"\` |
 | You are about to make a non-trivial choice | \`cognit decision propose "<the choice>"\` |
-| You have evidence (a test, lint, build, exec) | \`cognit verification run "<cmd>"\` |
-| You are closing out a decision with that evidence | \`cognit conclusion propose "<claim>"\` |
-| You start a new turn and want context | \`cognit continue\` |
-| You need prior reasoning on a topic | \`cognit search "<query>"\` |
+| You ran a test, lint, build, or typecheck | \`cognit verification "<cmd>" --type test\|lint\|build\|typecheck\` |
+| You want to close a decision with that evidence | \`cognit conclusion propose "<claim>"\` |
+| You start a turn, or come back after a break | \`cognit continue\` |
+| You want prior reasoning on a topic | \`cognit search "<query>"\` |
 
-Rules:
-- Do not run \`cognit session create\`. Cognit auto-creates a session
-  on the first call. Just invoke the verb.
-- Keep each \`observation\` to one line. The dashboard and
-  \`cognit continue\` will summarise them.
+- A session is auto-created on first call. Don't run \`cognit session create\`.
 - Always run \`verification\` for tests, lint, build, typecheck.
-  Don't skip it.
-- At the start of every turn (after compaction, after a long break),
-  run \`cognit continue\` before answering.
-- The user is not expected to run Cognit commands. If a memory op
-  is needed, run it yourself via Bash.
+- Run \`cognit continue\` at the start of each turn.
 `;
 
 interface InitOptions {

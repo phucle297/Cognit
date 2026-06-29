@@ -1,41 +1,50 @@
 /**
  * apps/cli/src/commands/search.ts — `cognit search "<query>"`.
  *
- * M2.0 recall quality. Reads SQLite DIRECTLY (no Hono server). Returns:
+ * M2.0 recall quality + M2.1 ranking. Reads SQLite DIRECTLY (no Hono
+ * server). Returns:
  *
  *   - matching sessions (goal overlap)
  *   - per-session evidence (observations / decisions / conclusions)
- *     with WHY each matched
+ *     ranked by the deterministic scorer in @cognit/core/ranking
  *   - a suggested continue target — the most recent active session
  *     that matched, so the user can `cognit continue <id>` (or just
  *     re-run `cognit continue`) immediately
  *
- * Ranks with simple substring match + recency weight. The server has
- * FTS5 / vector scoring — the CLI is the fast path that always works.
+ * Ranking:
+ *   - use the deterministic scorer: verified > accepted > pending >
+ *     open, with recency + reference + query bonuses
+ *   - top-N per kind (top-2 decisions, top-2 conclusions, …)
+ *   - per-row "why this matched" reasons so the agent sees the
+ *     signal — no raw scores
+ *   - sessions ordered by their best ranked evidence, recency tiebreak
  *
- * Output (text): grouped per session, then per match line. JSON
- * envelope via `--json`.
+ * Output (text): grouped per session, then per match line with
+ * its ✓-bullets. JSON envelope via `--json`.
  */
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
 import { ProjectService, SessionService } from "@cognit/db";
-import { findProjectRoot, projectPaths } from "../paths.js";
+import {
+  DEFAULT_SEARCH_CAPS,
+  deduplicateMemories,
+  rankSessionMemories,
+  topNByKind,
+  type RankedMemory,
+} from "@cognit/core/ranking";
+import { projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
 import { requireProjectRoot } from "../auto-session.js";
 
-/** Human label for a field that matched. Stable, no event names. */
-type FieldKind = "goal" | "observation" | "decision" | "conclusion";
-
 interface MatchRow {
-  readonly kind: FieldKind;
-  /** Why this row matched — short, single-line, never raw payload. */
+  readonly kind: string;
   readonly reason: string;
-  /** Short snippet of the matching text. */
   readonly snippet: string;
   readonly score: number;
   readonly created_at: string;
+  readonly reasons: ReadonlyArray<string>;
 }
 
 interface SessionMatches {
@@ -43,9 +52,7 @@ interface SessionMatches {
   readonly goal: string;
   readonly status: string;
   readonly created_at: string;
-  /** Best score across all rows in this session. */
   readonly score: number;
-  /** True if the session is non-closed (eligible as continue target). */
   readonly is_open: boolean;
   readonly matches: ReadonlyArray<MatchRow>;
 }
@@ -54,11 +61,6 @@ interface SearchResponse {
   readonly q: string;
   readonly count: number;
   readonly results: ReadonlyArray<SessionMatches>;
-  /**
-   * Best continue target — most recent open session in the result set,
-   * or `null` when nothing matched or all matches are on closed
-   * sessions. The user can pipe this into `cognit continue <id>`.
-   */
   readonly continue_target: string | null;
 }
 
@@ -68,37 +70,26 @@ interface SearchOptions {
   status?: string;
 }
 
-const escapeLike = (q: string): string =>
-  q.replace(/[\\%_]/g, (c) => `\\${c}`);
-
-const scoreMatch = (query: string, target: string): number => {
-  if (!target) return 0;
-  const q = query.toLowerCase();
-  const t = target.toLowerCase();
-  if (t === q) return 1.0;
-  if (t.includes(q)) {
-    // Shorter targets score higher (more specific).
-    return 0.6 + 0.3 * (q.length / t.length);
-  }
-  // Token overlap: how many query tokens appear in target.
-  const qTokens = q.split(/\s+/).filter((s) => s.length > 0);
-  if (qTokens.length === 0) return 0;
-  const hits = qTokens.filter((tok) => t.includes(tok)).length;
-  return hits === qTokens.length ? 0.4 : (hits / qTokens.length) * 0.3;
-};
-
 /**
- * Why a match was returned — single short sentence, never an event
- * name. e.g. `goal match`, `decision text match`.
+ * Project a RankedMemory into the per-row shape the CLI emits.
+ * `created_at` is derived from the SQL row timestamp (we carry it
+ * through on the ranked memory via createdAtMs by re-emitting the
+ * caller's pass-through timestamp).
  */
-const reasonFor = (kind: FieldKind, score: number): string => {
-  if (score >= 1.0) return `${kind} exact match`;
-  if (score >= 0.6) return `${kind} match`;
-  return `${kind} partial match`;
+const toMatchRow = (
+  m: RankedMemory,
+  createdAt: string,
+): MatchRow => {
+  const primary = m.reasons[0] ?? "match";
+  return {
+    kind: m.kind,
+    reason: primary,
+    snippet: m.text,
+    score: m.score,
+    created_at: createdAt,
+    reasons: m.reasons,
+  };
 };
-
-const truncate = (s: string, n: number): string =>
-  s.length > n ? s.slice(0, n - 1) + "…" : s;
 
 const renderText = (q: string, response: SearchResponse): string => {
   if (response.results.length === 0) {
@@ -120,10 +111,11 @@ const renderText = (q: string, response: SearchResponse): string => {
   for (const s of response.results) {
     const tag = s.is_open ? `[${s.status}]` : `[closed]`;
     lines.push(`  ${tag} ${s.session_id}  ${truncate(s.goal, 60)}`);
-    // Cap per-session matches to keep output compact.
     const visible = s.matches.slice(0, 5);
     for (const m of visible) {
-      lines.push(`     ${m.reason.padEnd(24)}  ${truncate(m.snippet, 60)}`);
+      lines.push(`     ${m.kind.padEnd(12)} ${truncate(m.snippet, 60)}`);
+      const bullets = m.reasons.slice(0, 3);
+      for (const b of bullets) lines.push(`        ✓ ${b}`);
     }
     if (s.matches.length > visible.length) {
       lines.push(`     ... ${s.matches.length - visible.length} more`);
@@ -140,6 +132,9 @@ const renderText = (q: string, response: SearchResponse): string => {
   }
   return lines.join("\n") + "\n";
 };
+
+const truncate = (s: string, n: number): string =>
+  s.length > n ? s.slice(0, n - 1) + "…" : s;
 
 export function registerSearch(program: Command): void {
   program
@@ -190,78 +185,44 @@ export function registerSearch(program: Command): void {
               } satisfies SearchResponse;
             }
 
+            const nowMs = Date.now();
             const sessionMatches: SessionMatches[] = [];
 
             for (const s of rows) {
-              const matches: MatchRow[] = [];
               const isOpen = s.status !== "closed";
 
-              // Goal match — session-level signal.
-              const goalScore = scoreMatch(query, s.goal);
-              if (goalScore > 0) {
-                matches.push({
-                  kind: "goal",
-                  reason: reasonFor("goal", goalScore),
-                  snippet: s.goal,
-                  score: goalScore,
-                  created_at: s.created_at,
-                });
-              }
+              // Rank this session's memories with the deterministic
+              // scorer. Same-project boost = full bonus. Query = the
+              // search term. Branch hint = the session's current
+              // hypothesis (cheap proxy for "this session's branch").
+              const showResult = yield* sessions
+                .show(s.id)
+                .pipe(Effect.catchAll(() => Effect.succeed(null)));
+              if (!showResult) continue;
+              const ranked = rankSessionMemories(
+                showResult.state,
+                { nowMs, query, projectId: project.id, branchHint: showResult.state.current_hypothesis_id },
+                { includeObservations: true },
+              );
+              if (ranked.length === 0) continue;
+              // Search must filter to memories that actually overlap the
+              // query — otherwise a session with old, unrelated memories
+              // gets surfaced for any query.
+              const matching = ranked.filter((m) =>
+                m.reasons.some((r) => r.startsWith("matches")),
+              );
+              if (matching.length === 0) continue;
+              const deduped = deduplicateMemories(matching);
+              const capped = topNByKind(deduped, DEFAULT_SEARCH_CAPS);
+              if (capped.length === 0) continue;
 
-              // Fold events once per session — cheaper than a per-row query.
-              let state: Awaited<ReturnType<typeof sessions.show>>["state"] | null = null;
-              try {
-                const show = yield* sessions.show(s.id);
-                state = show.state;
-              } catch (_e) {
-                continue;
-              }
+              // Session-level score = its best memory score.
+              const best = capped.reduce((acc, m) => (m.score > acc ? m.score : acc), 0);
 
-              for (const o of state.observations) {
-                const t = (o as unknown as { text?: string }).text ?? "";
-                const sc = scoreMatch(query, t);
-                if (sc > 0) {
-                  matches.push({
-                    kind: "observation",
-                    reason: reasonFor("observation", sc),
-                    snippet: t,
-                    score: sc,
-                    created_at: (o as unknown as { created_at: string }).created_at,
-                  });
-                }
-              }
-
-              for (const d of state.decisions.values()) {
-                const sc = scoreMatch(query, d.text) * 0.9;
-                if (sc > 0) {
-                  matches.push({
-                    kind: "decision",
-                    reason: reasonFor("decision", sc),
-                    snippet: d.text,
-                    score: sc,
-                    created_at: s.created_at,
-                  });
-                }
-              }
-
-              for (const c of state.conclusions.values()) {
-                const sc = scoreMatch(query, c.text) * 0.85;
-                if (sc > 0) {
-                  matches.push({
-                    kind: "conclusion",
-                    reason: reasonFor("conclusion", sc),
-                    snippet: c.text,
-                    score: sc,
-                    created_at: s.created_at,
-                  });
-                }
-              }
-
-              if (matches.length === 0) continue;
-
-              // Best score drives session ordering.
-              const best = matches.reduce((acc, m) => (m.score > acc ? m.score : acc), 0);
-              // Within session: score desc, then recency desc.
+              const matches: MatchRow[] = capped.map((m) =>
+                toMatchRow(m, s.created_at),
+              );
+              // Sort within session: score desc, then trust, then recency.
               matches.sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
                 return b.created_at.localeCompare(a.created_at);
@@ -286,10 +247,9 @@ export function registerSearch(program: Command): void {
 
             const limited = sessionMatches.slice(0, limit);
 
-            // Continue target: the most recent open session in the
-            // (limited) result set, by created_at desc. If nothing open
-            // matched, fall back to the most recent of any open session
-            // for the project (so the user can always resume somewhere).
+            // Continue target: most recent open session in the
+            // result set, with an overall fallback so the user is
+            // never stranded.
             const open = limited.filter((s) => s.is_open);
             let continueTarget: string | null = null;
             if (open.length > 0) {
@@ -298,8 +258,6 @@ export function registerSearch(program: Command): void {
               );
               continueTarget = sorted[0]!.session_id;
             } else if (limited.length > 0) {
-              // No open sessions matched — suggest the most recent open
-              // session overall (if any), so the user is never stranded.
               const allRows = yield* sessions.list({ projectId: project.id });
               const openOverall = allRows
                 .filter((r) => r.status !== "closed")

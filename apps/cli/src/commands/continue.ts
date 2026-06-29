@@ -1,19 +1,29 @@
 /**
  * apps/cli/src/commands/continue.ts — `cognit continue`.
  *
- * M2.0 recall quality. Reads SQLite DIRECTLY (no Hono server). Answers
- * the six questions a returning agent asks before picking up work:
+ * M2.0 recall quality + M2.1 memory selection. Reads SQLite DIRECTLY
+ * (no Hono server). Answers the six questions a returning agent
+ * asks before picking up work:
  *
- *   - What was I doing?       (last observation + session goal)
- *   - What was decided?       (accepted decisions)
- *   - What is still open?     (open hypotheses + open verifications)
- *   - What was verified?      (verified conclusions)
+ *   - What was I doing?       (last observation)
+ *   - What was decided?       (top accepted decisions)
+ *   - What is still open?     (top open hypotheses + verifications)
+ *   - What was verified?      (top verified conclusions)
  *   - What should I do next?  (suggested next step)
  *   - Can I trust this?       (trust markers: verified|accepted|
  *                              rejected|pending|open)
  *
- * Output stays compact — six labelled sections + a suggested next
- * step. No internal event names leak unless `--json` is set.
+ * M2.1 selection rules:
+ *   - rank every decision/conclusion/hypothesis/verification with
+ *     the deterministic scorer in @cognit/core/ranking
+ *   - collapse duplicates, prefer verified > newer > accepted
+ *   - cap per kind (top-3 decisions, top-3 conclusions, top-3
+ *     hypotheses, top-2 verifications)
+ *   - render ✓ bullets per memory so the agent sees WHY each was
+ *     selected — never a bare score
+ *
+ * Output stays compact — labelled sections + a suggested next step.
+ * No internal event names leak unless `--json` is set.
  *
  * Empty state: a single onboarding block with concrete next actions
  * (`cognit observation "..."` etc.). No stack traces, no DB paths.
@@ -25,19 +35,24 @@ import {
   SessionService,
   type SessionRow,
 } from "@cognit/db";
-import { findProjectRoot, projectPaths } from "../paths.js";
+import {
+  DEFAULT_CONTINUE_CAPS,
+  deduplicateMemories,
+  topNByKind,
+  rankSessionMemories,
+  type RankedMemory,
+} from "@cognit/core/ranking";
+import { projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
 import { requireProjectRoot } from "../auto-session.js";
 import { readCurrentSession, writeCurrentSession } from "../current-session.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 interface ContinueOptions {
   root?: string;
-  /** Show only the last 24h (default true). */
   recent?: boolean;
+  all?: boolean;
 }
 
 const truncate = (s: string, n: number): string =>
@@ -46,14 +61,18 @@ const truncate = (s: string, n: number): string =>
 /** Trust marker vocabulary — the only labels text output may emit. */
 type TrustMarker = "verified" | "accepted" | "rejected" | "pending" | "open";
 
+interface RankedMemoryView {
+  readonly id: string;
+  readonly kind: string;
+  readonly text: string;
+  readonly trust: TrustMarker;
+  readonly reasons: ReadonlyArray<string>;
+  readonly score: number;
+}
+
 /**
- * Map the reduced SessionState into a printable continue block.
- *
- * Internal lifecycle states (`proposed`, `weakened`, `superseded`,
- * `unverified`, `started`, `errored`, etc.) are translated to one of
- * the five trust markers at this seam — text output never names the
- * raw state names. JSON output (`--json`) keeps the raw `state` field
- * for tooling.
+ * Map the reduced SessionState into a printable continue block. M2.1
+ * selection: memories are ranked, deduplicated, then top-N'd per kind.
  */
 interface ContinueSummary {
   sessionId: string;
@@ -62,57 +81,72 @@ interface ContinueSummary {
   lastActivityAt: string | null;
   /** Most recent observation — answers "what was I doing?". */
   doing: { text: string; created_at: string } | null;
-  verifiedConclusions: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
-  acceptedDecisions: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
-  rejectedDecisions: ReadonlyArray<{ id: string; text: string; reason: string | null; marker: TrustMarker }>;
-  proposedDecisions: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
-  openHypotheses: ReadonlyArray<{ id: string; title: string; marker: TrustMarker }>;
-  openVerifications: ReadonlyArray<{ id: string; command: string; state: string; marker: TrustMarker }>;
+  /** Top decisions in rank order. */
+  decisions: ReadonlyArray<RankedMemoryView>;
+  /** Top conclusions in rank order. */
+  conclusions: ReadonlyArray<RankedMemoryView>;
+  /** Top hypotheses (filtered to open) with their reasons. */
+  hypotheses: ReadonlyArray<RankedMemoryView>;
+  /** Top verifications (filtered to open) with their reasons. */
+  verifications: ReadonlyArray<RankedMemoryView>;
   suggestedNextStep: { id: string; text: string; source: string } | null;
   /** Counts only — emitted in the trust footer line. */
   trustCounts: Readonly<Record<TrustMarker, number>>;
+  /** How many raw memories were ranked before caps. */
+  rankedCount: number;
+  /** How many duplicates were collapsed. */
+  collapsedCount: number;
+  /**
+   * Legacy M2.0 buckets preserved so existing JSON consumers keep
+   * working. Re-derived from the M2.1 deduped set — not separate
+   * data. Always present when a M2.0 contract consumer reads it.
+   */
+  readonly verifiedConclusions?: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
+  readonly acceptedDecisions?: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
+  readonly rejectedDecisions?: ReadonlyArray<{ id: string; text: string; reason: string | null; marker: TrustMarker }>;
+  readonly proposedDecisions?: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
+  readonly openHypotheses?: ReadonlyArray<{ id: string; title: string; marker: TrustMarker }>;
+  readonly openVerifications?: ReadonlyArray<{ id: string; command: string; state: string; marker: TrustMarker }>;
 }
+
+const viewOf = (m: RankedMemory): RankedMemoryView => ({
+  id: m.id,
+  kind: m.kind,
+  text: m.text,
+  trust: m.trust,
+  reasons: m.reasons,
+  score: m.score,
+});
 
 const summarize = (
   session: SessionRow,
-  state: {
-    readonly observations: ReadonlyArray<{ readonly text: string; readonly created_at: string }>;
-    readonly hypotheses: ReadonlyMap<
-      string,
-      {
-        readonly id: string;
-        readonly title: string;
-        readonly current_state: string;
-        readonly last_updated_at: string | null;
-      }
-    >;
-    readonly decisions: ReadonlyMap<
-      string,
-      {
-        readonly id: string;
-        readonly text: string;
-        readonly state: string;
-        readonly last_updated_at: string | null;
-        readonly reason: string | null;
-      }
-    >;
-    readonly conclusions: ReadonlyMap<
-      string,
-      { readonly id: string; readonly text: string; readonly state: string }
-    >;
-    readonly verifications: ReadonlyMap<
-      string,
-      {
-        readonly id: string;
-        readonly command: string;
-        readonly state: string;
-        readonly last_updated_at: string | null;
-      }
-    >;
-  },
+  state: Parameters<typeof rankSessionMemories>[0],
+  nowMs: number,
 ): ContinueSummary => {
-  // Trust counts — drives the footer "Trust: verified x, accepted y…"
-  // line. Counted once, used for both the marker list and the totals.
+  // M2.1: rank → dedup → cap. Same-project memories get a full boost
+  // (CROSS_PROJECT_PENALTY = 0). No query (continue has no query).
+  const ranked = rankSessionMemories(state, {
+    nowMs,
+    projectId: session.project_id,
+    branchHint: state.current_hypothesis_id,
+  });
+  const deduped = deduplicateMemories(ranked);
+  const collapsed = ranked.length - deduped.length;
+  const capped = topNByKind(deduped, DEFAULT_CONTINUE_CAPS);
+
+  const decisions: RankedMemoryView[] = [];
+  const conclusions: RankedMemoryView[] = [];
+  const hypotheses: RankedMemoryView[] = [];
+  const verifications: RankedMemoryView[] = [];
+
+  for (const m of capped) {
+    const v = viewOf(m);
+    if (m.kind === "decision") decisions.push(v);
+    else if (m.kind === "conclusion") conclusions.push(v);
+    else if (m.kind === "hypothesis") hypotheses.push(v);
+    else verifications.push(v);
+  }
+
   const trustCounts: Record<TrustMarker, number> = {
     verified: 0,
     accepted: 0,
@@ -120,48 +154,22 @@ const summarize = (
     pending: 0,
     open: 0,
   };
+  // Trust counts reflect the full ranked set, not just dedup
+  // survivors — otherwise rejected memories vanish from the footer
+  // line even though they were ranked.
+  for (const m of ranked) trustCounts[m.trust] += 1;
 
-  const verifiedConclusions = Array.from(state.conclusions.values())
-    .filter((c) => c.state === "verified")
-    .map((c) => ({ id: c.id, text: c.text, marker: "verified" as TrustMarker }));
-  trustCounts.verified += verifiedConclusions.length;
-
-  const rejectedDecisions = Array.from(state.decisions.values())
-    .filter((d) => d.state === "rejected")
-    .map((d) => ({ id: d.id, text: d.text, reason: d.reason, marker: "rejected" as TrustMarker }));
-  trustCounts.rejected += rejectedDecisions.length;
-
-  const acceptedDecisions = Array.from(state.decisions.values())
-    .filter((d) => d.state === "accepted")
-    .map((d) => ({ id: d.id, text: d.text, marker: "accepted" as TrustMarker }));
-  trustCounts.accepted += acceptedDecisions.length;
-
-  const proposedDecisions = Array.from(state.decisions.values())
-    .filter((d) => d.state === "proposed")
-    .map((d) => ({ id: d.id, text: d.text, marker: "pending" as TrustMarker }));
-  trustCounts.pending += proposedDecisions.length;
-
-  const openHypotheses = Array.from(state.hypotheses.values())
-    .filter((h) => h.current_state === "proposed" || h.current_state === "weakened" || h.current_state === "active")
-    .map((h) => ({ id: h.id, title: h.title, marker: "open" as TrustMarker }));
-  trustCounts.open += openHypotheses.length;
-
-  const openVerifications = Array.from(state.verifications.values())
-    .filter((v) => v.state !== "passed" && v.state !== "failed" && v.state !== "errored" && v.state !== "cancelled")
-    .map((v) => ({ id: v.id, command: v.command, state: v.state, marker: "open" as TrustMarker }));
-  trustCounts.open += openVerifications.length;
-
-  // Suggested next step: prefer the most recent open hypothesis, fall
-  // back to the most recent accepted decision. Simple v0 — server-side
-  // gravity ranking (suggested_next_steps in the recovery envelope) is
-  // the richer source when the server is up.
+  // Suggested next step: prefer the top open hypothesis, fall back to
+  // the top accepted decision.
   let suggested: ContinueSummary["suggestedNextStep"] = null;
-  if (openHypotheses.length > 0) {
-    const h = openHypotheses[openHypotheses.length - 1]!;
-    suggested = { id: h.id, text: h.title, source: "open-hypothesis" };
-  } else if (acceptedDecisions.length > 0) {
-    const d = acceptedDecisions[acceptedDecisions.length - 1]!;
-    suggested = { id: d.id, text: d.text, source: "last-accepted-decision" };
+  const topHyp = hypotheses[0];
+  if (topHyp) {
+    suggested = { id: topHyp.id, text: topHyp.text, source: "top-hypothesis" };
+  } else {
+    const topDec = decisions.find((d) => d.trust === "accepted");
+    if (topDec) {
+      suggested = { id: topDec.id, text: topDec.text, source: "top-accepted-decision" };
+    }
   }
 
   const doing = state.observations.length > 0
@@ -176,20 +184,57 @@ const summarize = (
       ? state.observations[state.observations.length - 1]!.created_at
       : session.created_at;
 
+  // Legacy M2.0 buckets — derived from the deduped set so existing
+  // JSON consumers keep working without a parallel pipeline.
+  const verifiedConclusions = conclusions
+    .filter((c) => c.trust === "verified")
+    .map((c) => ({ id: c.id, text: c.text, marker: "verified" as TrustMarker }));
+  const acceptedDecisions = decisions
+    .filter((d) => d.trust === "accepted")
+    .map((d) => ({ id: d.id, text: d.text, marker: "accepted" as TrustMarker }));
+  const rejectedDecisions = decisions
+    .filter((d) => d.trust === "rejected")
+    .map((d) => ({
+      id: d.id,
+      text: d.text,
+      reason: state.decisions.get(d.id)?.reason ?? null,
+      marker: "rejected" as TrustMarker,
+    }));
+  const proposedDecisions = decisions
+    .filter((d) => d.trust === "pending")
+    .map((d) => ({ id: d.id, text: d.text, marker: "pending" as TrustMarker }));
+  const openHypotheses = hypotheses
+    .filter((h) => h.trust === "open")
+    .map((h) => ({ id: h.id, title: h.text, marker: "open" as TrustMarker }));
+  const openVerifications = verifications
+    .filter((v) => v.trust === "open")
+    .map((v) => ({
+      id: v.id,
+      command: v.text,
+      state: "open",
+      marker: "open" as TrustMarker,
+    }));
+
   return {
     sessionId: session.id,
     goal: session.goal,
     status: session.status,
     lastActivityAt,
     doing,
+    decisions,
+    conclusions,
+    hypotheses,
+    verifications,
+    suggestedNextStep: suggested,
+    trustCounts,
+    rankedCount: ranked.length,
+    collapsedCount: collapsed,
     verifiedConclusions,
     acceptedDecisions,
     rejectedDecisions,
     proposedDecisions,
     openHypotheses,
     openVerifications,
-    suggestedNextStep: suggested,
-    trustCounts,
   };
 };
 
@@ -203,6 +248,17 @@ const renderTrustLine = (counts: Readonly<Record<TrustMarker, number>>): string 
   if (counts.rejected > 0) parts.push(`${counts.rejected} rejected`);
   return parts.length === 0 ? "  (none yet)" : "  " + parts.join("  ·  ");
 };
+
+/** Build the ✓-bullet block for one memory. Always a multi-line block. */
+const renderReasons = (reasons: ReadonlyArray<string>, indent: string): string => {
+  if (reasons.length === 0) return "";
+  // Reasons already end up short; cap to 5 so output stays compact.
+  const visible = reasons.slice(0, 5);
+  return visible.map((reason) => `${indent}  ✓ ${reason}`).join("\n");
+};
+
+/** Short trust tag shown on the [tag] line. */
+const trustTag = (t: TrustMarker): string => `[${t}]`;
 
 const renderText = (s: ContinueSummary): string => {
   const lines: string[] = [];
@@ -219,15 +275,13 @@ const renderText = (s: ContinueSummary): string => {
     lines.push("");
   }
 
-  const hasHistory =
-    s.verifiedConclusions.length +
-      s.acceptedDecisions.length +
-      s.proposedDecisions.length +
-      s.rejectedDecisions.length >
-    0;
-  const hasOpen = s.openHypotheses.length + s.openVerifications.length > 0;
+  const empty =
+    s.decisions.length === 0 &&
+    s.conclusions.length === 0 &&
+    s.hypotheses.length === 0 &&
+    s.verifications.length === 0;
 
-  if (!hasHistory && !hasOpen && !s.doing) {
+  if (empty && !s.doing) {
     lines.push("No reasoning recorded yet for this session.");
     lines.push("");
     lines.push("Try:");
@@ -239,41 +293,35 @@ const renderText = (s: ContinueSummary): string => {
     return lines.join("\n") + "\n";
   }
 
-  if (hasHistory) {
-    lines.push("Decided:");
-    for (const c of s.verifiedConclusions) {
-      lines.push(`  [verified]  ${truncate(c.text, 70)}`);
-    }
-    for (const d of s.acceptedDecisions) {
-      lines.push(`  [accepted]  ${truncate(d.text, 70)}`);
-    }
-    for (const d of s.proposedDecisions) {
-      lines.push(`  [pending]   ${truncate(d.text, 70)}`);
-    }
-    for (const d of s.rejectedDecisions) {
-      const reason = d.reason ? `  (${truncate(d.reason, 40)})` : "";
-      lines.push(`  [rejected]  ${truncate(d.text, 70)}${reason}`);
-    }
-    lines.push("");
-  }
-
-  if (hasOpen) {
-    lines.push("Open:");
-    for (const h of s.openHypotheses) {
-      lines.push(`  [open] hypothesis    ${truncate(h.title, 65)}`);
-    }
-    for (const v of s.openVerifications) {
-      lines.push(`  [open] verify        ${truncate(v.command, 60)}`);
-    }
-    lines.push("");
-  }
-
-  // Verified section (kept separate from "Decided" so the agent sees
-  // proven facts in their own bucket).
-  if (s.verifiedConclusions.length > 0) {
+  // Verified conclusions come first — proven facts are the highest-
+  // value recall payload.
+  if (s.conclusions.length > 0) {
     lines.push("Verified:");
-    for (const c of s.verifiedConclusions) {
-      lines.push(`  [verified]  ${truncate(c.text, 70)}`);
+    for (const c of s.conclusions) {
+      lines.push(`  ${trustTag(c.trust)}  ${truncate(c.text, 70)}`);
+      lines.push(renderReasons(c.reasons, "    "));
+    }
+    lines.push("");
+  }
+
+  if (s.decisions.length > 0) {
+    lines.push("Decided:");
+    for (const d of s.decisions) {
+      lines.push(`  ${trustTag(d.trust)}  ${truncate(d.text, 70)}`);
+      lines.push(renderReasons(d.reasons, "    "));
+    }
+    lines.push("");
+  }
+
+  if (s.hypotheses.length + s.verifications.length > 0) {
+    lines.push("Open:");
+    for (const h of s.hypotheses) {
+      lines.push(`  [hypothesis] ${truncate(h.text, 65)}`);
+      lines.push(renderReasons(h.reasons, "    "));
+    }
+    for (const v of s.verifications) {
+      lines.push(`  [verify]     ${truncate(v.text, 60)}`);
+      lines.push(renderReasons(v.reasons, "    "));
     }
     lines.push("");
   }
@@ -287,6 +335,13 @@ const renderText = (s: ContinueSummary): string => {
   }
   lines.push("");
 
+  if (s.collapsedCount > 0) {
+    const noun = s.collapsedCount === 1 ? "duplicate" : "duplicates";
+    lines.push(`Selected: ${s.rankedCount} ranked, ${s.collapsedCount} ${noun} collapsed.`);
+  } else if (s.rankedCount > 0) {
+    lines.push(`Selected: ${s.rankedCount} ranked memories.`);
+  }
+  lines.push("");
   lines.push(`Trust:${renderTrustLine(s.trustCounts)}`);
   return lines.join("\n") + "\n";
 };
@@ -345,7 +400,6 @@ export function registerContinue(program: Command): void {
               }
             }
             if (!target) {
-              // Otherwise: most recent active or paused session for the project.
               const list = yield* sessions.list({ projectId: project.id });
               const candidates = list
                 .filter((s) => s.status !== "closed")
@@ -353,7 +407,6 @@ export function registerContinue(program: Command): void {
               target = candidates[0] ?? null;
             }
             if (!target) {
-              // Last resort: most recent of any status.
               const list = yield* sessions.list({ projectId: project.id });
               const sorted = [...list].sort((a, b) =>
                 b.created_at.localeCompare(a.created_at),
@@ -363,9 +416,8 @@ export function registerContinue(program: Command): void {
             if (!target) return null;
 
             const show = yield* sessions.show(target.id);
-            // Update sticky pointer so subsequent calls stay sticky.
             writeCurrentSession(root, show.session.id);
-            return { row: show.session, state: show.state };
+            return { row: show.session, state: show.state, projectId: project.id };
           }),
         ),
       );
@@ -392,12 +444,10 @@ export function registerContinue(program: Command): void {
 
       const { row, state } = exit.value as {
         row: SessionRow;
-        state: Parameters<typeof summarize>[1];
+        state: Parameters<typeof rankSessionMemories>[0];
+        projectId: string;
       };
-      const summary = summarize(row, state);
-      // --all is accepted for forward compat; trust + structure is the
-      // same regardless of recency — the freshness signal lives in
-      // `lastActivityAt` and the trust counts.
+      const summary = summarize(row, state, Date.now());
       void opts.all;
       if (getOutputMode() === "json") {
         emit("json", "continue", summary);

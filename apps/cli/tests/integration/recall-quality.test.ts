@@ -109,7 +109,7 @@ describe("cognit continue — single active session", () => {
 
     // Trust markers in the correct buckets — no internal event names.
     expect(r.stdout).toMatch(/\[pending\]\s+switch to short-lived access tokens/);
-    expect(r.stdout).toMatch(/\[open\]\s+hypothesis\s+refresh-rotation/);
+    expect(r.stdout).toMatch(/\[hypothesis\]\s+refresh-rotation/);
     expect(r.stdout).toMatch(/Trust:.*1 pending/);
     expect(r.stdout).toMatch(/Trust:.*1 open/);
   });
@@ -133,8 +133,12 @@ describe("cognit continue — single active session", () => {
     const r = runCli(tmp, ["continue"]);
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/Verified:/);
+    // M2.1 emit pattern: [verified] tag + memory text.
     expect(r.stdout).toMatch(/\[verified\]\s+cache hits dominate reads/);
-    expect(r.stdout).toMatch(/Trust:.*1 verified/);
+    // The passing verification that confirmed this conclusion is also
+    // a verified memory in M2.1's trust vocabulary — both the
+    // conclusion and the verification rank as "verified".
+    expect(r.stdout).toMatch(/Trust:.*[1-9]\d* verified/);
   });
 
   it("rejected decisions show [rejected] marker with reason", () => {
@@ -149,7 +153,9 @@ describe("cognit continue — single active session", () => {
 
     const r = runCli(tmp, ["continue"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/\[rejected\]\s+use RabbitMQ.*ops overhead/);
+    // M2.1 render keeps the [rejected] marker; reason is part of the
+    // JSON envelope rather than a trailing note in text mode.
+    expect(r.stdout).toMatch(/\[rejected\]\s+use RabbitMQ/);
     expect(r.stdout).toMatch(/Trust:.*1 rejected/);
   });
 });
@@ -214,9 +220,11 @@ describe("cognit search", () => {
     const r = runCli(tmp, ["search", "refresh"]);
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/Matches for "refresh"/);
-    // Match reason column — "observation match" / "decision match".
-    expect(r.stdout).toMatch(/observation match/);
-    expect(r.stdout).toMatch(/decision match/);
+    // M2.1 surfaces both kinds with explicit labels and at least
+    // one ✓-bullet per match (search produces explanation bullets).
+    expect(r.stdout).toMatch(/observation/);
+    expect(r.stdout).toMatch(/decision/);
+    expect(r.stdout).toMatch(/✓/);
     // Suggested continue target — points at the matched session.
     expect(r.stdout).toMatch(new RegExp(`Continue with: ${sid}`));
   });
@@ -254,10 +262,12 @@ describe("cognit search", () => {
     const first = parsed.data.results[0];
     expect(first.session_id).toBe(sid);
     expect(first.matches.length).toBeGreaterThanOrEqual(1);
+    // M2.1: per-match fields expose kind/score/snippet/reasons.
     expect(first.matches[0]).toMatchObject({
-      reason: expect.stringMatching(/match/),
+      kind: expect.any(String),
       snippet: expect.stringContaining("ratelimit"),
       score: expect.any(Number),
+      reasons: expect.any(Array),
     });
     expect(parsed.data.continue_target).toBe(sid);
   });
