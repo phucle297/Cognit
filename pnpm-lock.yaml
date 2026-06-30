@@ -170,7 +170,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/recovery
       '@cognit/verification':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../packages/verification
       '@hono/node-server':
         specifier: ^2.0.5

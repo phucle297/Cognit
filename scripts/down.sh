@@ -39,8 +39,11 @@ for arg in "$@"; do
   esac
 done
 
-PNPM_HOME="${PNPM_HOME:-$(pnpm config get global-dir 2>/dev/null || true)}"
-[ -z "$PNPM_HOME" ] && PNPM_HOME="${HOME}/.local/share/pnpm"
+# Resolve pnpm global bin dir the same way up.sh does. Prefer `pnpm bin -g`.
+PNPM_BIN="$(pnpm bin -g 2>/dev/null || true)"
+if [ -z "$PNPM_BIN" ] || [ "$PNPM_BIN" = "undefined" ]; then
+  PNPM_BIN="${PNPM_HOME:-${HOME}/.local/share/pnpm}"
+fi
 
 confirm() {
   $YES && return 0
@@ -59,14 +62,24 @@ else
   printf '→ skip docker (no docker or no compose file)\n'
 fi
 
-# 2. Global CLI link — inverse of `pnpm link --global` in up.sh.
-if [ -L "${PNPM_HOME}/cognit" ] || [ -e "${PNPM_HOME}/cognit" ]; then
-  printf '→ pnpm unlink --global @cognit/cli (bin: %s/cognit)\n' "$PNPM_HOME"
-  ( cd apps/cli && pnpm unlink --global 2>/dev/null ) || true
-  # Belt-and-braces: pnpm unlink leaves the bin file behind on some setups.
-  rm -f "${PNPM_HOME}/cognit"
+# 2. Global CLI link — inverse of up.sh's direct symlink + shim.
+# Removes the bin shim + the global/5/node_modules symlink directly.
+# Bypasses `pnpm unlink --global` to avoid pnpm's global-store check
+# (fails when pnpm version changes between installs).
+COGNIT_BIN="${PNPM_BIN}/cognit"
+COGNIT_LINK="${PNPM_BIN}/global/5/node_modules/@cognit/cli"
+
+if [ -L "$COGNIT_BIN" ] || [ -e "$COGNIT_BIN" ]; then
+  printf '→ removing @cognit/cli bin shim (bin: %s)\n' "$COGNIT_BIN"
+  rm -f "$COGNIT_BIN"
 else
-  printf '→ skip pnpm unlink (no global cognit bin)\n'
+  printf '→ no @cognit/cli bin shim under %s\n' "$PNPM_BIN"
+  COGNIT_BIN=""
+fi
+
+if [ -L "$COGNIT_LINK" ]; then
+  printf '→ removing @cognit/cli global link (%s)\n' "$COGNIT_LINK"
+  rm -f "$COGNIT_LINK"
 fi
 
 # 3. Local state — only on --purge.
@@ -95,7 +108,7 @@ cat <<EOF
 
 ✓ teardown complete
   docker:   containers + cognit-data volume removed
-  cli:      global @cognit/cli link removed (bin: ${PNPM_HOME}/cognit)
+  cli:      global @cognit/cli link removed (bin: ${COGNIT_BIN:-not found})
   state:    .cognit/ $( [ "$PURGE" -eq 1 ] && echo 'wiped' || echo 'kept' )
   modules:  node_modules + .turbo $( [ "$CLEAN" -eq 1 ] && echo 'wiped' || echo 'kept' )
   beads:    .beads/ untouched (separate issue tracker)

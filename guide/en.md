@@ -23,23 +23,40 @@ The supervisor (an AI worker) reads the session state, reasons about it, and emi
 
 ## 2. Install
 
-Requirements: **Node.js 22+** (Node 24 LTS fine), **pnpm 9**, **git**.
+Requirements: **Node.js 22+** (Node 24 LTS fine), **pnpm 9**, **git**. Docker is optional — only needed if you want the bundled server in a container.
+
+### 2.0 One-command bootstrap (recommended)
 
 ```bash
-pnpm install
-pnpm build
+git clone <cognit-repo-url>
+cd cognit
+scripts/up.sh                # installs deps, builds, links `cognit` to PATH, starts Docker server
+scripts/up.sh --no-docker    # same, but skip Docker (use `cognit server` on the host instead)
+```
+
+`scripts/up.sh` prints the absolute path to the linked `cognit` binary when it finishes. If `cognit` isn't on `PATH` afterwards, the script prints the exact `export PATH=…` line to add.
+
+### 2.0.1 Manual bootstrap (step-by-step)
+
+If you'd rather run each step yourself:
+
+```bash
+pnpm install                 # also runs `pnpm build` for each workspace via `prepare`
+pnpm build                   # rebuild dist/ for @cognit/cli (tsup + copy-migrations)
 cd apps/cli/ && pnpm link --global
 ```
+
+> Why the link step? `apps/cli` is a tsup-bundled ESM binary. Linking it on the host (instead of running it inside Docker) gives `better-sqlite3` the glibc prebuild that matches your host libc — the Alpine-based Docker image would otherwise produce the musl prebuild, which won't load on glibc Linux or macOS.
 
 Verify:
 
 ```bash
-cognit --version
-cognit agent --help    # confirms the supervisor subcommand is wired
-cognit ask --help      # confirms the one-shot Gateway command is wired
+cognit --version             # 0.0.0 (or current)
+cognit --help                # shows the public-tier command list
+cognit doctor                # healthcheck — should print "All checks passed."
 ```
 
-> Tip: workspace exec also works. From repo root: `pnpm exec cognit <subcommand>`.
+> Tip: workspace exec also works. From repo root: `pnpm exec cognit <subcommand>`. For a teardown that mirrors `up.sh`, see `scripts/down.sh --help`. The root `package.json` also exposes `pnpm setup` and `pnpm remove` as thin wrappers for those scripts.
 
 ### 2.1 LiteLLM proxy (for real LLM calls)
 
@@ -132,9 +149,9 @@ End-to-end first run. Uses the **mock provider** — no API key needed, decision
 cd your-project
 cognit init
 
-# 2. create a session
-SID=$(cognit session create "Investigate the test flake" | awk '/^Session:/{print $2}')
-# or just copy the ULID printed to stdout
+# 2. create a session (sticky pointer is auto-set; you usually don't need $SID)
+SID=$(cognit session create "Investigate the test flake" | awk '/^session:/{print $2}')
+# or just copy the ULID printed after `session:`
 
 # 3. feed it observations (raw facts)
 cognit observe "test_foo fails ~1 in 5 runs on CI"
@@ -147,6 +164,7 @@ cognit agent run --session "$SID" --once --model mock-1
 # 5. see what the AI produced
 cognit events --type hypothesis_ranked --session "$SID"
 cognit recovery "$SID"
+cognit continue "$SID"        # one-screen summary
 ```
 
 If you don't pass `--model mock-1`, the supervisor reads `llm.default_model` from `cognit.yaml` and routes through the Gateway (§2.1). Mock runs skip the Gateway entirely — useful for smoke tests and CI.
@@ -294,9 +312,10 @@ cognit ask --model anthropic/claude-sonnet-4-6 --prompt "explain <details>"
 cognit ask --prompt "summarise" --max-output-tokens 256 --temperature 0.2
 
 # Stable JSON envelope for downstream tooling
-cognit ask --json --prompt "explain <details>"
+cognit --json ask --prompt "explain <details>"
 # → { version: 1, kind: "ask", data: { schema_version, model,
 #      prompt_tokens, completion_tokens, text, attachments } }
+# (--json is a GLOBAL flag, not on `cognit ask`)
 ```
 
 **Multimodal input** — attach a local image, a URL, a file, or a clipboard snapshot:
@@ -350,7 +369,11 @@ Each `RankedHypothesis` carries a `source: "ai" | "rule"` so you can tell which 
 ### 4.7 Inspect the recovery surface
 
 ```bash
-# full v0.2 recovery envelope for one session
+# one-screen summary of the active session (default: last 24h)
+cognit continue                       # alias: cog
+cognit continue --all                 # bypass 24h filter
+
+# full v0.2 recovery envelope for any session
 cognit recovery <session-id>
 
 # fuzzy search across sessions
@@ -362,6 +385,24 @@ cognit session show <id-or-goal>
 # live-tail hypothesis ranks
 cognit events --type hypothesis_ranked --follow
 ```
+
+`cognit continue` output shape (text mode):
+
+```text
+Session:    <goal or "no goal">
+Status:     active | paused | closed
+Last work:  <iso timestamp>
+
+Doing:      <latest observation, truncated>
+Verified:   <conclusions with trust tag + reason bullets>
+Decided:    <decisions with trust tag + reason bullets>
+Open:       <hypotheses / verifications with reason bullets>
+Next:       <top open hypothesis or accepted decision, else "(nothing open)">
+
+Trust:  N verified · N accepted · N pending · N open · N rejected
+```
+
+Add `--json` for the envelope (`{ version: 1, kind: "continue", data: {...} }`).
 
 ### 4.8 Steer the loop
 
@@ -378,22 +419,26 @@ Direct CLI commands still exist. Use them to inspect, patch, or seed state — n
 
 ```bash
 # seed a theory / hypothesis manually for testing
-cognit theory add "HMR resource retention"
-cognit hypothesis add "Turbopack cache is leaking memory" \
-  --belongs-to "HMR resource retention" --confidence 0.7
+cognit theory add "HMR resource retention" --text "root cause area for the Next.js memory leak"
+cognit hypothesis propose "Turbopack cache is leaking memory" \
+  --text "HMR resource retention is plausibly caused by Turbopack's on-disk cache." \
+  --confidence 0.7
 
 # run an experiment manually
-cognit experiment add "Disable Turbopack and measure memory growth" \
-  --tests "Turbopack cache is leaking memory"
-cognit experiment complete \
+cognit experiment add \
+  --tests-hypothesis <h-id-from-propose> \
+  --design "Disable Turbopack and measure memory growth"
+cognit experiment complete --id <exp-id> \
   --result "Memory still increases after disabling Turbopack" \
-  --contradicts "Turbopack cache is leaking memory"
+  --contradicts <h-id-from-propose>
 
 # reject a hypothesis with a typed reason
-cognit hypothesis reject "Turbopack cache is leaking memory" \
-  --reason "Disabling Turbopack did not stop memory growth" \
-  --reason-type evidence
+cognit hypothesis reject --id <h-id> \
+  --reason-type evidence \
+  --reason "Disabling Turbopack did not stop memory growth"
 ```
+
+The `<h-id>` is the ULID printed by `cognit hypothesis propose`. Theory and experiment commands are soft-deprecated and emit a one-time warning; suppress with `COGNIT_QUIET_DEPRECATIONS=1`.
 
 Use these for one-off debugging. The AI supervisor is the canonical writer of these events.
 
@@ -423,7 +468,7 @@ In `.claude/settings.json`:
 {
   "hooks": {
     "PostToolUse": "cognit observe",
-    "PreToolUse": "cognit hypothesis add"
+    "PreToolUse": "cognit decision propose"
   }
 }
 ```
@@ -559,9 +604,9 @@ cognit events --type verification_failed --follow
 cognit recovery <session-id>
 cognit recovery search "memory leak"
 
-# JSON envelope (scriptable)
+# JSON envelope (scriptable). Note: --limit is not on `events`; pipe to jq or head
 cognit --json session list
-cognit --json events --type hypothesis_ranked --limit 5 | jq '.data[0].payload'
+cognit --json events --type hypothesis_ranked | jq '.data[0].payload'
 ```
 
 `cognit --json <command>` wraps every command in a stable envelope `{ version: 1, kind, data }` parseable by `jq`.
@@ -574,7 +619,7 @@ cognit --json events --type hypothesis_ranked --limit 5 | jq '.data[0].payload'
 cognit dashboard
 ```
 
-Opens `http://localhost:6970` (default).
+Opens `http://localhost:5173` (default — vite dev mode). Use `--docker` (or set `COGNIT_DOCKER=1`) to run the docker-compose stack on `http://localhost:6970`.
 
 | Page                | Shows                                                                                                                            |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
@@ -587,7 +632,7 @@ Opens `http://localhost:6970` (default).
 | **AI Reasoning**    | Live SSE feed of `hypothesis_ranked` events, AI rank history, decision log. Compare AI score vs rule-based score per hypothesis. |
 | **Settings**        | Project config, redaction patterns, cleanup policy, storage usage, export/import.                                                |
 
-If port `6970` is busy: `--port <n>`. The API server runs separately on `6971` (read-only Hono on loopback).
+If the default port is taken: `--port <n>`. The read-only API server runs separately on `:6971` (Hono on loopback; `cognit server` to start). `cognit doctor` probes it.
 
 ---
 
@@ -626,17 +671,24 @@ cognit redaction test "Authorization: Bearer eyJhbGciOi...xyz"
 A verification is a typed, reproducible run.
 
 ```bash
-# start a verification (the command is positional, not a flag)
-cognit verify --type benchmark "pnpm run bench:memory" \
+# run a command (positional command, --type is required-ish for non-exec kinds)
+cognit verify "pnpm test" --type test
+cognit verify "/usr/bin/time -v pnpm run bench:memory" --type exec \
   --linked-hypothesis <hypothesis-id>
 
-# explicit lifecycle control (for custom runners)
-cognit verify pass --id <verification-id>
-cognit verify fail --id <verification-id>
+# explicit lifecycle control (for custom runners / external drivers)
+cognit verify pass <verification-id>
+cognit verify fail <verification-id>
+cognit verify error <verification-id> --reason "could not run"
 
-# rerun — previous run linked via parent_verification_id
-cognit verify rerun <parent-verification-id> --type test "pnpm test"
+# cancel an in-flight verification
+cognit verify cancel --id <verification-id> --reason "stopped manually"
+
+# rerun chains to a previous run via parent_verification_id
+cognit verify rerun <parent-verification-id>
 ```
+
+Supported `--type` values: `test`, `lint`, `build`, `exec`, `typecheck`. `exec` is the catch-all for ad-hoc shell commands.
 
 | State       | Meaning                                     |
 | ----------- | ------------------------------------------- |
@@ -648,30 +700,34 @@ cognit verify rerun <parent-verification-id> --type test "pnpm test"
 
 `failed` and `errored` are different on purpose — distinguish "code under test broke" from "harness couldn't run". Output > 1 KB is captured as a sha256-keyed artifact under `.cognit/artifacts/`.
 
+Aliases for `verify`: `verification` (LLM-facing) and `check` (user-facing). Pick the one you remember; they all hit the same code path.
+
 ---
 
 ## 13. Constraints — automatic hypothesis pruning
 
+Constraints (a.k.a. guardrails) are typed rules that fire on matching events and block downstream state from being accepted.
+
 ```bash
 cognit constraint add --json '{
-  "condition": {
-    "all": [
-      { "event": "experiment_completed", "contradicts_includes": "$h.id" },
-      { "entity": "hypothesis", "id": "$h.id", "state": "active" },
-      { "entity": "hypothesis", "id": "$h.id", "confidence": { "lt": 0.3 } }
-    ]
-  },
-  "actions": [
-    {
-      "type": "reject_hypothesis",
-      "reason": "Contradicted by experiment and low confidence",
-      "reason_type": "constraint"
-    }
-  ]
+  "when":  { "event": "verification_failed", "verification_type": "test" },
+  "then":  "block",
+  "reason": "blocking merges on failing tests"
 }'
 ```
 
-Rules fire on `experiment_completed` and `verification_failed`. Available actions: `reject_hypothesis`, `weaken_hypothesis`, `promote_hypothesis`, `create_finding`. One contradicting experiment can prune a branch automatically.
+Schema is `{ when: <event-predicate>, then: "block", reason: <text> }`. `when` accepts the same shape as `cognit constraint test --payload …` (event-name, entity predicates, comparison operators). `then` is currently a single literal: `"block"`. Rules fire on `verification_failed`, `experiment_completed`, and any other event matching the `when` clause. Dry-run a rule before saving:
+
+```bash
+cognit constraint test --type verification_failed \
+  --payload '{"verification_id": "01HXY..."}'
+```
+
+List active rules:
+
+```bash
+cognit constraint list [--session <id>]
+```
 
 ---
 
@@ -702,85 +758,93 @@ Every command below matches `cognit <subcommand> --help` output exactly.
 
 ```bash
 # project
-cognit init [options]
-cognit config [--edit] [--show]                # opens $EDITOR or prints effective config
-cognit schema-dump                            # v1 JSON envelope shape as TS
+cognit init [options]                                   # bootstrap .cognit/, wire hooks, drop CLAUDE.md
+cognit config [--edit] [--show]                         # opens $EDITOR or prints effective config
+cognit env [key] [--shell]                              # print hook-relevant env vars for this project
+cognit schema-dump                                      # v1 JSON envelope shape as TS
+cognit doctor [--fix]                                   # healthcheck: tree, db, hooks, inbox, server
+cognit reset [--yes] [--keep-config]                    # wipe .cognit/ (interactive confirm)
+cognit update                                           # pnpm update -g cognit wrapper
 
 # session lifecycle
-cognit session create "goal" [--parent <session-id>]
-cognit session list   [--status active|paused|closed]
+cognit session create "goal" [--parent <session-id>] [--actor name:type]
+cognit session list   [--status active|paused|closed]   # alias: ls
 cognit session show   <id-or-goal>
-cognit session resume "goal-or-id" [--fork=true|false] [--id <ulid>]
-cognit session pause
-cognit session close
+cognit session resume <id-or-goal> [--fork true|false] [--search <query>]
+cognit session pause  <id-or-goal> [--actor name:type]
+cognit session close  <id-or-goal> [--actor name:type]
 # sticky session pointer — set automatically by create / resume
 # override any command with --session <id>
 
 # ingest (raw input for the supervisor)
 cognit observe "text" [--session <id>] [--confidence 0..1] [--actor name:type]
-cognit finding "text" [--related <obs-id,obs-id>]
-cognit append [options]                        # generic raw-event append
-cognit wrap -- <command> [args...]              # capture stderr/exit → observations + verification
+cognit finding "text" [--related <obs-id,obs-id>] [--confidence 0..1]
+cognit append --type <event-type> [--payload <json|file>] [--session <id>]
+cognit wrap -- <command> [args...]                       # capture stderr/exit → observations + verification
 
 # snapshot
-cognit snapshot [options]
+cognit snapshot [--session <id>]
 
 # AI supervisor (§4.3)
 cognit agent run    [--session <id>] [--model <provider/id>]
                     [--once] [--max-ticks N] [--tick-interval-ms N]
 cognit agent status [--session <id>]
-cognit agent stop   [--session <id>]  # mock layer triggered by --model mock-1
+cognit agent stop   [--session <id>]                    # mock layer triggered by --model mock-1
 
 # one-shot LLM query (§4.4)
 cognit ask --prompt "..." [--model <id>] [--input <path|url|-|clipboard>]
-          [--max-output-tokens N] [--temperature F]
+          [--max-output-tokens N] [--temperature F]     # --json is a GLOBAL flag, not on ask
 
-# entity lifecycle (manual fallback / debug)
-cognit hypothesis propose "title" [--text "body"] [--confidence 0..1]
-cognit hypothesis weaken  --id <h-id> --reason-type evidence|superseded|constraint
-cognit hypothesis reject  --id <h-id> --reason "..."
-cognit hypothesis promote --id <h-id>
-cognit theory add     "title" [--text "body"]
-cognit theory update  --id <t-id> [--title ...] [--text ...]
+# entity lifecycle (manual fallback / debug) -- canonical verbs; aliases in parens
+cognit hypothesis propose <title> --text <body> [--confidence 0..1]
+cognit hypothesis weaken  --id <h-id> --reason <text>
+cognit hypothesis reject  --id <h-id> --reason-type evidence|superseded|constraint [--superseded-by <h-id>]
+cognit hypothesis promote --id <h-id> --to-theory <t-id>
+cognit theory add     <title> --text <body>             # soft-deprecated; set COGNIT_QUIET_DEPRECATIONS=1
+cognit theory update  --id <t-id> --text <body>
 cognit theory merge   --id <src-id> --into <target-id>
 cognit theory archive --id <t-id>
-cognit experiment add      "text" --tests <h-id[,h-id]>
-cognit experiment complete --id <exp-id> --result "text" [--contradicts <h-id>]
-cognit decision propose   "text" [--based-on <conclusion-id[,id]>]
-cognit decision accept    --id <d-id> --reason "..."
-cognit decision reject    --id <d-id> --reason "..."
-cognit decision supersede --id <d-id> --with "new text" [--based-on ...]
-cognit conclusion propose "text" [--based-on <h-id[,id]>]
-cognit conclusion verify  --id <c-id> --with <verification-id>
-cognit conclusion reject  --id <c-id> --reason "..."
+cognit experiment add      --tests-hypothesis <h-id> --design <text>   # soft-deprecated
+cognit experiment complete --id <exp-id> --result <text> [--contradicts <h-id,id>]
 
-# verifications
-cognit verify [--type build|test|lint|typecheck|benchmark|custom]
-              <cmd> [--linked-hypothesis <h-id>] [--timeout-ms N]   # default action: run
-cognit verify cancel --id <v-id>
-cognit verify pass   <verification-id>    # inject verification_passed
-cognit verify fail   <verification-id>    # inject verification_failed
-cognit verify error  <verification-id> --reason "..."
-cognit verify rerun  <parent-v-id> [--type ...] <cmd>
+# decision (alias: decide) and conclusion (alias: conclude) -- alias names are public tier
+cognit decision propose   <text> [--based-on <conclusion-id,id>]
+cognit decision accept    --id <d-id> [--based-on <conclusion-id,id>]
+cognit decision reject    --id <d-id> --reason <text>
+cognit decision supersede --id <d-id> --by <new-decision-id>
+
+cognit conclusion propose <text> [--confidence 0..1]
+cognit conclusion verify  --id <c-id> --verification <vid> --evidence <h-id,e-id>
+cognit conclusion reject  --id <c-id> --reason <text>
+
+# verifications (alias: check, verification)
+cognit verify [--type test|lint|build|exec|typecheck]
+              <cmd> [args...] [--linked-hypothesis <h-id>]   # default action: run
+cognit verify cancel --id <v-id> --reason <text>
+cognit verify pass   <v-id> [--exit-code N] [--duration-ms N] [--stdout-excerpt <text>]
+cognit verify fail   <v-id> --stderr-excerpt <text> [--exit-code N]
+cognit verify error  <v-id> --error <text> [--error-code <code>] [--duration-ms N]
+cognit verify rerun  <parent-v-id>
 
 # evidence
-cognit artifact add <path> [--session <id>] [--kind <k>] [--label "..."]
+cognit artifact add --id <artifact-id> --role evidence|code|log|config [--session <id>]
 
 # edges
-cognit edge add  --from-type <t> --from-id <id> --to-type <t> --to-id <id> \
-                 --kind <edge_type>
-cognit edge list [--session <id>] [--kind <kind>]
+cognit edge add  --from-type <t> --from-id <id> --to-type <t> --to-id <id> --kind <edge_type>
+cognit edge list [--session <id>]
 
 # constraints
-cognit constraint add  --json '{...}' [--session <id>]
+cognit constraint add  --json '{"when":{...},"then":"block","reason":"..."}' [--session <id>]
 cognit constraint list [--session <id>]
 cognit constraint test --type <event-type> [--payload <json|file>]
 
 # inspect
-cognit events            [--session <id>] [--type <event-type>] [--limit <n>] [--follow]
+cognit events            [--session <id>] [--type <event-type>] [--follow]
 cognit recovery <session-id>
-cognit recovery search "<query>"
+cognit recovery search "<query>" [--status active|paused|closed]
 cognit redaction test "<raw string>"
+cognit continue [--all]   # summary of active session; --all bypasses 24h filter
+cognit search  "<query>" [--limit N] [--status <s>]
 
 # ops
 cognit inbox    [--watch|--process]                # chokidar watcher
@@ -788,7 +852,7 @@ cognit export   --output <bundle.tar.gz> [--include-artifacts]
 cognit import   --input <bundle.tar.gz> [--merge-strategy skip|overwrite|fork]
 cognit gc       [--dry-run] [--force] [--max-age-days N]
 cognit server   [--host <ip>] [--port <n>]         # Hono read API on :6971
-cognit dashboard [--port <n>]                       # Vite SPA on :6970
+cognit dashboard [--port <n>] [--docker] [--no-open]   # vite :5173 (default), docker :6970
 ```
 
 Global flags (apply to every command):
@@ -890,6 +954,13 @@ rm -rf .cognit
 cognit init
 ```
 
+…or use the wrapper that also tears down Docker and unlinks the global CLI:
+
+```bash
+scripts/down.sh --purge --yes   # wipe .cognit/, drop cognit-server + cognit-data volume
+scripts/up.sh --no-docker       # rebuild + re-link CLI
+```
+
 ### Watch the supervisor's ranks in real time
 
 ```bash
@@ -905,11 +976,11 @@ cognit --json recovery <session-id> | jq '.data.suggested_next_steps[0]'
 ### Replay-debug an AI rank decision
 
 ```bash
-cognit --json events --type hypothesis_ranked --limit 1 | \
-  jq '.data[0].payload | {hypothesis_id, score, reasoning, context_event_ids}'
+cognit --json events --type hypothesis_ranked | jq '.data[0].payload |
+  {hypothesis_id, score, reasoning, context_event_ids}'
 ```
 
-`context_event_ids` lists which prior events the AI saw when it decided. Use it to reconstruct the AI's view.
+`context_event_ids` lists which prior events the AI saw when it decided. Use it to reconstruct the AI's view. (Events has no `--limit`; pipe through `head`, `jq`, or `tail`.)
 
 ### Backup before risky experiments
 
@@ -954,9 +1025,12 @@ docker compose down -v && docker compose up -d
 
 | Symptom                                   | Cause                                                       | Fix                                                            |
 | ----------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------- |
-| `command not found: cognit`               | `pnpm link` not run, or PATH missing global bin             | `pnpm link --global` and check `pnpm bin -g`                   |
+| `command not found: cognit`               | `pnpm link` not run, or PATH missing global bin             | `cd apps/cli && pnpm link --global && pnpm bin -g`            |
+| Install script failed on better-sqlite3   | Wrong libc prebuild (musl vs glibc)                          | Re-run on the host: `scripts/up.sh --no-docker` (or run `pnpm rebuild better-sqlite3` in the workspace that pulled the wrong prebuild) |
 | `no current session`                      | Sticky pointer unset                                        | `cognit session create "..."` or pass `--session <id>`         |
-| Dashboard won't open                      | Port `6970` taken                                           | `cognit dashboard --port 7770`                                 |
+| Dashboard won't open on `:5173`            | Vite default port taken                                     | `cognit dashboard --port 5174`                                 |
+| Dashboard silent / blank page             | You opened the docker URL (`:6970`) but ran local mode (`:5173`), or vice-versa | `cognit dashboard` for local; `cognit dashboard --docker` for nginx on `:6970` |
+| Hooks not firing in Claude Code           | `cognit init` was never run, or `~/.claude/settings.json` was edited since | `cognit doctor --fix` (re-installs hooks + re-writes `cognit.yaml`) |
 | Worker events not picked up               | File written without atomic rename                          | Write `.tmp`, `fsync`, then `mv` to `.json`                    |
 | `hypothesis_ranked` ignored               | Target hypothesis missing (orphan rank)                     | Check session state; ensure `hypothesis_created` precedes rank |
 | AI score clamped or fallback used         | Out-of-range or non-finite `score`                          | Verify LLM output is finite number in `[0, 1]`                 |
@@ -967,7 +1041,9 @@ docker compose down -v && docker compose up -d
 | Supervisor errors on first tick           | Missing API key for chosen provider                         | `export LITELLM_MASTER_KEY=...` (LiteLLM proxy) or use `--model mock-1` for canned |
 | Secret in old event                       | Redaction is ingest-only                                    | Restore from earlier `cognit export`, re-import                |
 | `cognit recovery --session <id>` rejected | Subcommand takes positional `<session-id>`, not `--session` | `cognit recovery <session-id>`                                 |
+| `verify --type benchmark …` rejected      | Benchmark is not a registered `--type`                      | Use `--type test\|lint\|build\|exec\|typecheck`                |
 | Migration error on start                  | Schema version drift                                        | Inspect `.cognit/cognit.db`; re-init if local-only             |
+| Need a health snapshot                    | Anything off after an upgrade                               | `cognit doctor` — prints PASS/FAIL per check + `--fix` for safe repairs |
 
 ---
 
@@ -985,17 +1061,87 @@ docker compose down -v && docker compose up -d
 | `@cognit/sdk`          | Programmatic API for workers.                                                                |
 | `@cognit/recovery`     | v0.2 recovery envelope + fuzzy search.                                                       |
 | `apps/cli`             | `cognit` binary — commander command tree, layer build.                                       |
-| `apps/server`          | Hono read API on loopback `:6971`.                                                           |
-| `apps/dashboard`       | Vite + React 19 SPA on `:6970`.                                                              |
+| `apps/server`          | Hono read API on loopback `:6971` (`cognit server`).                                        |
+| `apps/dashboard`       | Vite + React 19 SPA on `:5173` (local) / `:6970` (docker via `cognit dashboard --docker`).  |
 
 ---
 
 ## 20. Where to next
 
 - `README.md` — full reference (architecture, schema, event types).
-- `ARCHITECTURE.md` — system view, package map.
-- `STACK.md` — Node 24, pnpm 9, Effect, Drizzle, Hono, Vite.
+- `docs/architecture.md` — system view, package map.
+- `docs/cli.md` — CLI reference (every flag).
+- `docs/data-model.md` — event types, reducer shape.
+- `docs/configuration.md` — `cognit.yaml` schema (full).
 - `CONVENTIONS.md` — naming, layout, anti-patterns.
-- `plan.xml` — data model and feature spec.
-- Dashboard at `http://localhost:6970` after `cognit dashboard`.
+- `plans/plan.xml` — data model and feature spec.
+- Dashboard at `http://localhost:5173` after `cognit dashboard` (local vite) — or `http://localhost:6970` with `cognit dashboard --docker`.
+- `cognit doctor` — healthcheck + `--fix` for safe repairs.
+- `scripts/up.sh` / `scripts/down.sh` — single-command install + teardown (also `--no-docker` / `--purge --clean --yes`).
 - AI Reasoning tab — live `hypothesis_ranked` feed on the dashboard.
+
+---
+
+## 21. Development workflow (contributors)
+
+If you're hacking on Cognit itself (not just running it), the root `package.json` exposes a small set of aggregate scripts. All of them delegate to the per-workspace scripts via Turbo.
+
+```bash
+pnpm install               # installs deps + runs `prepare` → build for each workspace
+pnpm build                 # turbo run build — rebuilds dist/ for @cognit/cli + @cognit/server + @cognit/dashboard
+pnpm setup                 # alias for `bash scripts/up.sh` (cold install + start)
+pnpm remove                # alias for `bash scripts/down.sh --yes` (teardown)
+
+# quality gate — runs everything in sequence; fail-fast
+pnpm check                 # typecheck && lint && test
+
+# individual gates
+pnpm typecheck             # turbo run typecheck (tsgo --noEmit across workspaces)
+pnpm lint                  # oxlint .
+pnpm test                  # turbo run test (workspace tier scripts — unit + integration)
+pnpm test:watch            # turbo watch — per-workspace vitest in watch mode
+
+# formatter (oxfmt)
+pnpm format                # write
+pnpm format:check          # CI-friendly dry run
+
+# dev mode — watches every workspace
+pnpm dev                   # turbo watch dev (tsx for cli/server, vite for dashboard)
+
+# full nuke
+pnpm clean                 # turbo run clean && rm -rf node_modules .turbo
+```
+
+Per-workspace scripts (most useful when you're inside one package):
+
+```bash
+# apps/cli
+pnpm --filter @cognit/cli test          # builds + runs unit + integration
+pnpm --filter @cognit/cli test:unit     # no build, unit only
+pnpm --filter @cognit/cli test:e2e      # builds + runs e2e (RUN_E2E=1 to actually execute)
+pnpm --filter @cognit/cli dev           # tsx watch — no bundling, fastest iteration
+
+# apps/server
+pnpm --filter @cognit/server dev        # tsx watch on src/index.ts
+pnpm --filter @cognit/server build      # tsup → dist/index.js (the Docker image target)
+
+# apps/dashboard
+pnpm --filter @cognit/dashboard dev     # vite dev on :5173
+pnpm --filter @cognit/dashboard build   # vite build (production bundle)
+```
+
+The test tiers are wired in `apps/cli/vitest.config.ts`:
+
+| Tier          | Path                                | Default? | Notes                                              |
+| ------------- | ----------------------------------- | -------- | -------------------------------------------------- |
+| `unit`        | `tests/unit/**/*.test.ts`           | yes      | pure modules, no child process                     |
+| `integration` | `tests/integration/**/*.test.ts`    | yes      | spawns `node dist/index.js` against a tempdir     |
+| `e2e`         | `tests/e2e/**/*.test.ts`            | no       | full server + watch + import/export; gated by `RUN_E2E=1` |
+
+> **Heads up — `pnpm check` and the current typecheck.** Right now `pnpm typecheck` fails on a handful of `exactOptionalPropertyTypes` violations inside `apps/cli/src/commands/` (the strict mode flag in `tsconfig.base.json`). These are upstream source bugs, not package.json issues, and they don't block `pnpm install` → `pnpm build` → `cognit init`. The CLI bundles via tsup (esbuild), which doesn't run `tsc`. CI gates see them; users don't. Track fixes in `bd` once you start working through them.
+
+Workspace conventions:
+
+- All workspace packages (`@cognit/*`) ship TypeScript source directly — `main`/`types`/`exports` all point at `src/index.ts`. Only `apps/cli` and `apps/server` actually `tsup`-bundle.
+- New dep → add to the right workspace's `package.json`. The pnpm workspace resolver hoists via the catalog-less default (`workspace:*` for internal).
+- New public command → register in `apps/cli/src/index.ts` + add a file under `apps/cli/src/commands/`. Visibility (public vs `--internal`) is controlled by `apps/cli/src/visibility.ts`.
