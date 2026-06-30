@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Strip auth + login (local app, no auth needed)
+search: M2.1 — Memory Selection
 queue: 
-next: Cognit-8ix.9.4
+next: Cognit-sfl
