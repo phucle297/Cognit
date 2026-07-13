@@ -104,7 +104,6 @@
 │  ├─ core/            # types, Effect Schema, reducer, redaction, Effect services
 │  ├─ db/              # Drizzle + appendEvent
 │  ├─ cli/             # cognit binary
-│  ├─ sdk/             # programmatic API for workers
 │  └─ verification/    # subprocess engine
 ├─ examples/
 │  ├─ cognit.yaml

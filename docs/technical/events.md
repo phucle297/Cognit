@@ -63,36 +63,40 @@ definitions.
 
 Cognit's payload schema has three registered versions (`1.0.0`,
 `1.1.0`, `1.2.0`) keyed in `PAYLOAD_SCHEMAS_BY_VERSION`
-(`packages/db/src/event-schema.ts:356-362`). The migration runner
+(`packages/db/src/event-schema.ts`). The migration runner
 (`packages/db/src/migrate.ts`) walks a payload from its row version
 to the current target using the registry in `TRANSFORMS`
-(`packages/db/src/migrate.ts:42-53`).
+(`packages/db/src/migrate.ts`).
 
-**Both registered transforms are identity at the payload level.**
-There is no field rewrite inside the runner:
+### Production transforms (current)
 
-| Step           | Payload transform | Why                                                                                          |
-|----------------|-------------------|----------------------------------------------------------------------------------------------|
-| `1.0.0 → 1.1.0`| identity          | v1.1.0 schemas are a strict superset of v1.0.0 (all new fields optional with `null` defaults). |
-| `1.1.0 → 1.2.0`| identity          | The new `hypothesis_ranked` type is purely additive; existing payloads are untouched.        |
+**Both registered production transforms are identity at the payload
+level.** There is no field rewrite in production `TRANSFORMS` today:
 
-The `EnvelopeSchema` (`packages/db/src/event-schema.ts:65-78`) is
-**already FLAT in v1.0.0** — `actor_name` / `actor_type` are
-top-level fields, never nested under `actor:`. The wire field name
-is `version` (no underscore) from v1.0.0 onward; `schema_version`
-appears only in test fixtures and earlier prototypes, never in the
-canonical registry.
+| Step            | Payload transform | Why                                                                                            |
+|-----------------|-------------------|------------------------------------------------------------------------------------------------|
+| `1.0.0 → 1.1.0` | identity          | v1.1.0 schemas are a strict superset of v1.0.0 (all new fields optional with `null` defaults). |
+| `1.1.0 → 1.2.0` | identity          | The new `hypothesis_ranked` type is purely additive; existing payloads are untouched.          |
 
-What the runner does do:
+Do **not** invent a breaking change solely to exercise the runner.
+When a real incompatible field change is required, follow the process
+below.
 
-1. **Pick** the schema map for the target version
-   (`schemaMapFor`, `packages/db/src/migrate.ts:76-77`).
+The `EnvelopeSchema` is **already FLAT in v1.0.0** — `actor_name` /
+`actor_type` are top-level fields, never nested under `actor:`. The
+wire field name is `version` (no underscore) from v1.0.0 onward;
+`schema_version` appears only in test fixtures and earlier prototypes,
+never in the canonical registry.
+
+What the runner does:
+
+1. **Pick** the schema map for the target version (`schemaMapFor`).
 2. **Walk** the registered transform path
-   (`transformsFor` → `TRANSFORMS`, `migrate.ts:42-53`).
+   (`transformsFor` → `TRANSFORMS`).
 3. **Re-validate** the lifted payload against the target version's
-   schema (`Schema.decodeUnknownEither`, `migrate.ts:127-138`). This
-   is defence-in-depth: a payload that ever drifted between versions
-   fails here rather than silently downstream.
+   schema (`Schema.decodeUnknownEither`). This is defence-in-depth: a
+   payload that ever drifted between versions fails here rather than
+   silently downstream.
 
 If you have legacy envelopes with nested `actor:` blocks or a
 `schema_version` field (e.g. imported from a pre-1.0 prototype), they
@@ -101,6 +105,39 @@ MUST be normalized at ingestion — the watcher rejects them with
 (malformed). There is no "v1.0.0 nested actor" registry entry, and
 none is planned; the canonical v1.0.0 envelope has always been the
 FLAT shape documented above.
+
+### Payload evolution process (when a real break is required)
+
+When an event payload field must change **incompatibly** (rename,
+remove, change type, or otherwise break existing bytes), do **not**
+rewrite historical rows up front. Follow this process:
+
+1. **Bump payload version** — advance `CURRENT_VERSION` and register a
+   new entry in `PAYLOAD_SCHEMAS_BY_VERSION` (and the envelope
+   `version` literal the inbox accepts). Producers start emitting the
+   new version only after the consumer path is ready.
+2. **Add a non-identity pure `Transform`** in
+   `packages/db/src/migrate.ts` `TRANSFORMS` with `from` / `to` set to
+   the adjacent versions. `fn` must be pure (no DB, no clock, no I/O)
+   so migration stays replay-deterministic and unit-testable. Scope
+   with `type` when the rewrite applies to only one event family.
+3. **Golden fixtures** — commit old payload bytes → expected new
+   payload (and a negative case if useful). At least one non-identity
+   fixture must land with the first real field rewrite.
+4. **Re-validate with the target schema** — after `fn`,
+   `migratePayload` already decodes against the target version's
+   schema; ensure the rewritten shape passes that step.
+5. **Prefer read-time migrate** — lift payloads when events are read
+   (or on the hot path that already calls `migratePayload`). Avoid a
+   rewrite-all DB migration unless operational necessity forces it
+   (e.g. indexes on payload fields that cannot be derived at read
+   time). Stored `version` on older rows stays historical; the runner
+   bridges to `CURRENT_VERSION`.
+
+Unit tests may inject ad-hoc non-identity transforms via the
+`transformsFor` argument to `migratePayload` without registering them
+in production `TRANSFORMS` or bumping `CURRENT_VERSION`. That proves
+the runner path without shipping a wire break.
 
 ### Failure categories at migration time
 
@@ -125,5 +162,10 @@ See [hooks/README.md](../hooks/README.md) for the canonical category list.
   (the envelope schema accepts `1.0.0`, `1.1.0`, and `CURRENT_VERSION`;
   anything else surfaces here).
 - Bumping `version` is a wire-protocol change and ships with a
-  migration runner entry. Producers MUST stay on the latest version
-  the inbox accepts (currently v1.2.0).
+  migration runner entry (see [Payload evolution process](#payload-evolution-process-when-a-real-break-is-required)).
+  Additive-only schema changes may still use identity transforms;
+  incompatible field changes require a non-identity pure `Transform`
+  plus golden fixtures. Prefer read-time migrate over rewrite-all DB.
+- Producers MUST stay on the latest version the inbox accepts
+  (currently v1.2.0). Production `TRANSFORMS` are identity-only until
+  a real incompatible payload change lands.

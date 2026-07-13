@@ -1,7 +1,7 @@
 /**
  * apps/server/test/gravity-inputs.test.ts — unit tests for
- * `rankActiveHypothesesFromState`, the server-side AI-rank override
- * mirror of `packages/gravity/src/scoring.ts:rankHypotheses`.
+ * `rankActiveHypothesesFromState` (re-export of
+ * `@cognit/gravity.rankHypotheses`).
  *
  * Why a unit test instead of an HTTP-level test: the only way to push
  * an `ai_rank_score` of `±Infinity` into state via HTTP is for the

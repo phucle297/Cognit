@@ -12,7 +12,7 @@ import { PAYLOAD_SCHEMAS_V1 } from "../src/event-schema";
 import { applyMigrations } from "../src/schema/migrations";
 import { PRAGMAS } from "../src/schema/tables";
 import type { SqliteHandle } from "../src/context";
-import { MigrationRegistryLive } from "../src/migrate";
+import { MigrationRegistryLive, type Transform } from "../src/migrate";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -396,5 +396,73 @@ describe("migratePayload — v1.1.0 → v1.2.0", () => {
       ]);
     });
     await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
+  });
+});
+
+/**
+ * D-M3-01: prove migratePayload can apply a non-identity field rewrite
+ * and re-validate — without registering production TRANSFORMS or
+ * bumping CURRENT_VERSION. Transforms are injected only via the
+ * `transformsFor` parameter (test-local).
+ */
+describe("migratePayload — test-local non-identity transform", () => {
+  it("rewrites old field names then re-validates against the target schema", async () => {
+    // Simulated historical shape: observation_recorded used `summary`
+    // instead of `text`. This is NOT a production wire change — only
+    // the ad-hoc transform below understands `summary`.
+    const oldPayloadBytes = { summary: "tool Edit returned" };
+
+    const testOnlyTransforms: ReadonlyArray<Transform> = [
+      {
+        from: "1.0.0",
+        to: "1.2.0",
+        type: "observation_recorded",
+        fn: (payload) => {
+          const p = payload as { summary?: unknown; text?: unknown };
+          if (typeof p.summary === "string" && p.text === undefined) {
+            return { text: p.summary };
+          }
+          return payload;
+        },
+      },
+    ];
+    const transformsFor = (): ReadonlyArray<Transform> => testOnlyTransforms;
+
+    const migrated = (await Effect.runPromise(
+      migratePayload(
+        "observation_recorded",
+        "1.0.0",
+        "1.2.0",
+        oldPayloadBytes,
+        transformsFor,
+      ),
+    )) as { text: string };
+
+    expect(migrated).toEqual({ text: "tool Edit returned" });
+  });
+
+  it("fails re-validation when a non-identity transform yields an invalid shape", async () => {
+    const testOnlyTransforms: ReadonlyArray<Transform> = [
+      {
+        from: "1.0.0",
+        to: "1.2.0",
+        type: "observation_recorded",
+        // Deliberately produce a shape that fails observation_recorded
+        // (requires non-empty `text`).
+        fn: () => ({ summary: "still the old field" }),
+      },
+    ];
+    const transformsFor = (): ReadonlyArray<Transform> => testOnlyTransforms;
+
+    const result = await Effect.runPromiseExit(
+      migratePayload(
+        "observation_recorded",
+        "1.0.0",
+        "1.2.0",
+        { summary: "tool Edit returned" },
+        transformsFor,
+      ),
+    );
+    expect(Exit.isFailure(result)).toBe(true);
   });
 });

@@ -15,23 +15,31 @@
  * 10. weights config validator: sum within ±0.001 of 1.0 passes
  * 11. freshness fn: 0.5 at exactly one half-life
  * 12. clamp defence: out-of-range inputs are clamped, not propagated
+ * 13. state-level axes: evidence / reproducibility / confidence from
+ *     SessionState (not hard-coded 0); rankHypotheses uses full band
  */
 import { describe, it, expect } from "vitest";
 import { defaultConfig, parseCognitConfig } from "@cognit/core/config";
 import {
   emptySessionState,
+  type ConclusionState,
+  type FindingState,
   type HypothesisState,
   type SessionState,
+  type VerificationState,
 } from "@cognit/core/state";
 import {
   ageDaysFromFiredAt,
   defaultFreshnessHalfLifeDays,
   defaultGravityWeights,
+  evidenceStrengthFor,
   freshness,
   freshnessForHypothesis,
   meanActorTrust,
   rankHypotheses,
+  reproducibilityFor,
   scoreHypothesis,
+  verificationConfidenceFor,
   type ContributingActor,
 } from "../src/scoring.js";
 
@@ -656,6 +664,246 @@ describe("rankHypotheses — AI rank override (v1.2.0)", () => {
     expect(out[0]?.source).toBe("rule");
     expect(out[1]?.id).toBe("H-1");
     expect(out[1]?.source).toBe("ai");
+  });
+});
+
+/**
+ * Full-axis helpers (formerly server-only in gravity-inputs.ts).
+ * rankHypotheses must use these so evidence / reproducibility /
+ * confidence are not hard-coded to 0 when SessionState has signal.
+ */
+describe("state-level axis helpers", () => {
+  const baseActive = (id: string, overrides: Partial<HypothesisState> = {}): HypothesisState => ({
+    id,
+    title: id,
+    text: id,
+    current_state: "active",
+    current_confidence: null,
+    current_reason: null,
+    reason_type: null,
+    superseded_by_id: null,
+    promoted_to_theory_id: null,
+    belongs_to_theory_id: null,
+    created_at: "2026-06-19T00:00:00.000Z",
+    last_event_id: id,
+    last_event_at: "2026-06-19T00:00:00.000Z",
+    gravity_fired_at: 1_700_000_000,
+    ai_rank_score: null,
+    ai_rank_reasoning: null,
+    ai_rank_evaluator: null,
+    ai_rank_at: null,
+    ai_rank_event_id: null,
+    ...overrides,
+  });
+
+  const finding = (id: string): FindingState => ({
+    id,
+    text: id,
+    related_observation_ids: [],
+    created_at: "2026-06-19T00:00:00.000Z",
+    last_event_id: id,
+  });
+
+  const conclusion = (
+    id: string,
+    state: ConclusionState["state"],
+    supporting: ReadonlyArray<string>,
+  ): ConclusionState => ({
+    id,
+    text: id,
+    state,
+    verification_id: null,
+    supporting_evidence_ids: supporting,
+    reason: null,
+    created_at: "2026-06-19T00:00:00.000Z",
+    last_event_id: id,
+    last_event_at: "2026-06-19T00:00:00.000Z",
+  });
+
+  const verification = (
+    id: string,
+    hypId: string,
+    state: VerificationState["state"],
+    started_at: string,
+  ): VerificationState => ({
+    id,
+    command: "true",
+    type: "test",
+    linked_hypothesis_id: hypId,
+    state,
+    stderr_excerpt: null,
+    error: null,
+    parent_verification_id: null,
+    started_at,
+    ended_at: started_at,
+    expected_duration_ms: null,
+    duration_ms: null,
+    exit_code: state === "passed" ? 0 : 1,
+    stdout_excerpt: null,
+    created_artifact_id: null,
+    last_event_id: id,
+  });
+
+  it("evidenceStrengthFor: 0 findings/conclusions → 0", () => {
+    const s = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    const h = baseActive("H-1");
+    expect(evidenceStrengthFor(s, h)).toBe(0);
+  });
+
+  it("evidenceStrengthFor: 1 finding → n/(n+3) = 0.25", () => {
+    const base = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    const s: SessionState = {
+      ...base,
+      findings: [finding("F-1")],
+      hypotheses: new Map([["H-1", baseActive("H-1")]]),
+    };
+    expect(evidenceStrengthFor(s, baseActive("H-1"))).toBeCloseTo(0.25, 10);
+  });
+
+  it("evidenceStrengthFor: verified conclusion supporting hyp counts; unverified does not", () => {
+    const base = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    const h = baseActive("H-1");
+    const s: SessionState = {
+      ...base,
+      conclusions: new Map([
+        ["C-ok", conclusion("C-ok", "verified", ["H-1"])],
+        ["C-no", conclusion("C-no", "unverified", ["H-1"])],
+        ["C-other", conclusion("C-other", "verified", ["H-other"])],
+      ]),
+      hypotheses: new Map([["H-1", h]]),
+    };
+    // only C-ok → total=1 → 1/4 = 0.25
+    expect(evidenceStrengthFor(s, h)).toBeCloseTo(0.25, 10);
+  });
+
+  it("reproducibilityFor: no verifications → 0; single pass → 1", () => {
+    const base = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    const h = baseActive("H-1");
+    expect(reproducibilityFor(base, h)).toBe(0);
+    const s: SessionState = {
+      ...base,
+      verifications: new Map([
+        ["V-1", verification("V-1", "H-1", "passed", "2026-06-19T01:00:00.000Z")],
+      ]),
+      hypotheses: new Map([["H-1", h]]),
+    };
+    expect(reproducibilityFor(s, h)).toBe(1);
+  });
+
+  it("reproducibilityFor: fail then pass weights recency (recent pass pulls up)", () => {
+    const base = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    const h = baseActive("H-1");
+    const s: SessionState = {
+      ...base,
+      verifications: new Map([
+        ["V-old", verification("V-old", "H-1", "failed", "2026-06-19T01:00:00.000Z")],
+        ["V-new", verification("V-new", "H-1", "passed", "2026-06-19T02:00:00.000Z")],
+      ]),
+      hypotheses: new Map([["H-1", h]]),
+    };
+    // weights: oldest 0.5, newest 1.0 → (0*0.5 + 1*1.0) / 1.5 = 2/3
+    expect(reproducibilityFor(s, h)).toBeCloseTo(2 / 3, 10);
+  });
+
+  it("verificationConfidenceFor: current_confidence 0..100 scaled; >1 means percent", () => {
+    const s = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    expect(verificationConfidenceFor(s, baseActive("H-1", { current_confidence: 80 }))).toBeCloseTo(
+      0.8,
+      10,
+    );
+    expect(verificationConfidenceFor(s, baseActive("H-1", { current_confidence: 0.4 }))).toBeCloseTo(
+      0.4,
+      10,
+    );
+  });
+
+  it("verificationConfidenceFor: falls back to latest verification outcome", () => {
+    const base = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    const h = baseActive("H-1");
+    const s: SessionState = {
+      ...base,
+      verifications: new Map([
+        ["V-old", verification("V-old", "H-1", "failed", "2026-06-19T01:00:00.000Z")],
+        ["V-new", verification("V-new", "H-1", "passed", "2026-06-19T03:00:00.000Z")],
+      ]),
+      hypotheses: new Map([["H-1", h]]),
+    };
+    expect(verificationConfidenceFor(s, h)).toBe(1);
+  });
+
+  it("rankHypotheses: findings/verifications raise rule score above freshness-only", () => {
+    const hBare = baseActive("H-bare");
+    const hRich = baseActive("H-rich", { current_confidence: 1 });
+    const base = emptySessionState({ session_id: "S", project_id: "P", goal: "g" });
+    // Bare state: no findings/verifs; H-bare has no confidence signal.
+    const bareState: SessionState = {
+      ...base,
+      hypotheses: new Map([["H-bare", hBare]]),
+    };
+    // Rich state: 3 findings (session-scoped), 1 passing verification,
+    // hypothesis confidence = 1.0.
+    const richState: SessionState = {
+      ...base,
+      findings: [finding("F-1"), finding("F-2"), finding("F-3")],
+      verifications: new Map([
+        ["V-1", verification("V-1", "H-rich", "passed", "2026-06-19T01:00:00.000Z")],
+      ]),
+      hypotheses: new Map([["H-rich", hRich]]),
+    };
+    const now = 1_700_000_000;
+    const bareOut = rankHypotheses(
+      bareState,
+      baseCfg(),
+      new Map(),
+      new Map([["H-bare", now]]),
+      now,
+    );
+    const richOut = rankHypotheses(
+      richState,
+      baseCfg(),
+      new Map(),
+      new Map([["H-rich", now]]),
+      now,
+    );
+    const bareScore = bareOut.find((r) => r.id === "H-bare")?.score ?? 0;
+    const richScore = richOut.find((r) => r.id === "H-rich")?.score ?? 0;
+    // Bare: only freshness=1 → weight 0.10.
+    // Rich: evidence 3/(3+3)=0.5, repro=1, confidence=1, freshness=1.
+    expect(bareScore).toBeCloseTo(defaultGravityWeights.freshness, 10);
+    expect(richScore).toBeGreaterThan(bareScore);
+    expect(richScore).toBeCloseTo(
+      defaultGravityWeights.evidence * 0.5 +
+        defaultGravityWeights.reproducibility * 1 +
+        defaultGravityWeights.confidence * 1 +
+        defaultGravityWeights.freshness * 1,
+      10,
+    );
+    // In a mixed session, H-rich outranks H-bare (verifs + confidence
+    // are per-hypothesis; findings raise both equally).
+    const mixed: SessionState = {
+      ...base,
+      findings: [finding("F-1")],
+      verifications: new Map([
+        ["V-1", verification("V-1", "H-rich", "passed", "2026-06-19T01:00:00.000Z")],
+      ]),
+      hypotheses: new Map([
+        ["H-bare", hBare],
+        ["H-rich", hRich],
+      ]),
+    };
+    const ordered = rankHypotheses(
+      mixed,
+      baseCfg(),
+      new Map(),
+      new Map([
+        ["H-bare", now],
+        ["H-rich", now],
+      ]),
+      now,
+    );
+    expect(ordered[0]?.id).toBe("H-rich");
+    expect(ordered[0]?.source).toBe("rule");
+    expect(ordered[1]?.id).toBe("H-bare");
   });
 });
 

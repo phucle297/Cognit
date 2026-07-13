@@ -27,8 +27,8 @@ three working surfaces and one shared core:
   - `packages/core` — pure reducer (`packages/core/src/reducer.ts`), config
     schema, state-machine types.
   - `packages/agent`, `packages/llm`, `packages/gravity`, `packages/recovery`,
-    `packages/sdk`, `packages/verification`, `packages/wrap` — feature
-    services layered on top of `db` + `core`.
+    `packages/verification`, `packages/wrap` — feature services layered on top
+    of `db` + `core`.
 
 There is no top-level `plugins/` directory; the integration points live in two
 places instead:

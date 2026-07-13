@@ -9,8 +9,12 @@
  *      trust:0.10, freshness:0.10}.
  *   - `defaultFreshnessHalfLifeDays` — 14.
  *   - `freshness(ageDays, halfLifeDays)` — half-life decay: 0.5 ** (age / halfLife).
- *   - `rankHypotheses(state, cfg, contributingActorsById)` — stable-sort
- *     active hypotheses by (score desc, id asc).
+ *   - `rankHypotheses(state, cfg, contributingActorsById, ...)` — stable-sort
+ *     active hypotheses by (score desc, id asc); full 5-axis formula
+ *     (evidence / reproducibility / confidence from SessionState).
+ *   - `evidenceStrengthFor` / `reproducibilityFor` /
+ *     `verificationConfidenceFor` — pure axis helpers used by ranking
+ *     (exported for tests and rule-score recomputation).
  *
  * The package never depends on `@cognit/server` or `@cognit/dashboard`.
  * It does depend on `@cognit/core` for the typed `CognitConfig` shape.
@@ -23,6 +27,9 @@ export {
   ageDaysFromFiredAt,
   defaultFreshnessHalfLifeDays,
   defaultGravityWeights,
+  evidenceStrengthFor,
+  reproducibilityFor,
+  verificationConfidenceFor,
   rankHypotheses,
   type GravityScoreInput,
   type GravityWeights,

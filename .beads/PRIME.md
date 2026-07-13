@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: M2 — DX & distribution
+search: M3: Unify gravity scoring into @cognit/gravity
 queue: 
 next: Cognit-22d

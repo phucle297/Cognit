@@ -6,9 +6,9 @@
  * module maps them to a real number in [0, 1].
  *
  * 5 inputs, all in [0, 1]:
- *   - evidence_strength         (count of supporting findings / conclusions)
- *   - reproducibility           (passed verifications × recency)
- *   - verification_confidence   (latest exit signal)
+ *   - evidence_strength         (findings + verified conclusions → n/(n+3))
+ *   - reproducibility           (passed verifications × recency weight)
+ *   - verification_confidence   (hypothesis confidence or latest exit signal)
  *   - actor_trust               (mean of contributing actors' trust_score)
  *   - freshness_decay           (half-life decay from gravity_fired_at)
  *
@@ -40,6 +40,7 @@ import type { CognitConfig } from "@cognit/core/config";
 import type {
   HypothesisState,
   SessionState,
+  VerificationState,
 } from "@cognit/core/state";
 
 /** Default weights from plan §Open decisions #3 (resolved 2026-06-19). */
@@ -181,6 +182,119 @@ export const freshnessForHypothesis = (
 };
 
 /**
+ * Count of distinct findings + verified conclusions that supply
+ * evidence to this hypothesis, normalised to [0, 1] via a
+ * monotonic saturation curve. We use `n / (n + k)` with `k=3` so
+ * 0 → 0, 1 → 0.25, 3 → 0.5, 9 → 0.75 — the score asymptotes to 1
+ * without ever reaching it. This avoids the brittle "max=10"
+ * heuristic that would make a 10-finding hypothesis score
+ * identically to a 100-finding one.
+ *
+ * `Findings` are session-scoped (no per-hypothesis link in v0.1),
+ * so we treat every finding as evidence for every active
+ * hypothesis. The dashboard surfaces this caveat in the gravity
+ * card; the constraint engine refines it post-append.
+ */
+export const evidenceStrengthFor = (
+  state: SessionState,
+  h: HypothesisState,
+): number => {
+  const findings = state.findings.length;
+  let supportingConclusions = 0;
+  for (const c of state.conclusions.values()) {
+    if (c.state !== "verified") continue;
+    if (c.supporting_evidence_ids.includes(h.id)) supportingConclusions += 1;
+  }
+  const total = findings + supportingConclusions;
+  if (total <= 0) return 0;
+  return total / (total + 3);
+};
+
+/**
+ * Reproducibility — fraction of this hypothesis's verifications
+ * that passed, weighted by recency (more recent verifications
+ * count more). Implementation: pass_count / total_count over the
+ * verifications whose `linked_hypothesis_id === h.id`. Recency is
+ * a simple linear weight (most-recent run weighted 1.0, earliest
+ * 0.5) so a single passing run after several failing ones still
+ * pulls the score up.
+ *
+ * Returns 0 when no verifications target this hypothesis (the
+ * scorer treats "no data" as "no evidence", consistent with
+ * `evidence_strength`).
+ */
+export const reproducibilityFor = (
+  state: SessionState,
+  h: HypothesisState,
+): number => {
+  const verifs: VerificationState[] = [];
+  for (const v of state.verifications.values()) {
+    if (v.linked_hypothesis_id === h.id) verifs.push(v);
+  }
+  if (verifs.length === 0) return 0;
+  // Sort by started_at ascending (oldest first) so the recency
+  // weight runs from 0.5 → 1.0.
+  verifs.sort((a, b) => a.started_at.localeCompare(b.started_at));
+  let weighted = 0;
+  let weightSum = 0;
+  for (let i = 0; i < verifs.length; i++) {
+    const recencyWeight =
+      verifs.length === 1
+        ? 1
+        : 0.5 + (0.5 * i) / (verifs.length - 1);
+    const v = verifs[i]!;
+    const passed = v.state === "passed" ? 1 : 0;
+    weighted += passed * recencyWeight;
+    weightSum += recencyWeight;
+  }
+  if (weightSum <= 0) return 0;
+  return clamp(weighted / weightSum, 0, 1);
+};
+
+/**
+ * Verification confidence — uses the hypothesis's
+ * `current_confidence` when present (0..100 → 0..1) and falls back
+ * to the latest verification outcome:
+ *
+ *   passed     → 1.0
+ *   failed     → 0.0
+ *   errored    → 0.2  (signal degraded by tooling)
+ *   cancelled  → 0.4  (no signal but not negative)
+ *   started    → 0.5  (in-flight; neutral)
+ *
+ * Returns 0 when there is no signal at all (neither confidence
+ * nor any verification touching this hypothesis).
+ */
+export const verificationConfidenceFor = (
+  state: SessionState,
+  h: HypothesisState,
+): number => {
+  if (h.current_confidence !== null) {
+    const c = h.current_confidence;
+    const scaled = c > 1 ? c / 100 : c;
+    return clamp(scaled, 0, 1);
+  }
+  let latest: VerificationState | null = null;
+  for (const v of state.verifications.values()) {
+    if (v.linked_hypothesis_id !== h.id) continue;
+    if (latest === null || v.started_at > latest.started_at) latest = v;
+  }
+  if (latest === null) return 0;
+  switch (latest.state) {
+    case "passed":
+      return 1;
+    case "failed":
+      return 0;
+    case "errored":
+      return 0.2;
+    case "cancelled":
+      return 0.4;
+    default:
+      return 0.5;
+  }
+};
+
+/**
  * Rank all ACTIVE hypotheses in a session by their gravity score.
  * Stable sort: score DESC, then hypothesis id ASC. Hypotheses
  * with `state !== "active"` are excluded (AC-8.5).
@@ -192,6 +306,10 @@ export const freshnessForHypothesis = (
  * for hypotheses the AI has not yet scored. This matches the plan
  * design where AI judgement is authoritative and the formula is
  * the default until the supervisor has had a turn.
+ *
+ * Rule-based axes are derived from `SessionState` (evidence,
+ * reproducibility, verification confidence), contributing actors
+ * (trust), and `firedAtByHypothesis` (freshness).
  *
  * `contributingActorsByHypothesis` is a map from hypothesis id to
  * the list of contributing actors (built by
@@ -234,9 +352,9 @@ export const rankHypotheses = (
     const firedAt = firedAtByHypothesis.get(h.id) ?? 0;
     const score = scoreHypothesis(
       {
-        evidence_strength: 0, // wired by phase 8g.4 (needs state-level selector)
-        reproducibility: 0,
-        verification_confidence: 0,
+        evidence_strength: evidenceStrengthFor(state, h),
+        reproducibility: reproducibilityFor(state, h),
+        verification_confidence: verificationConfidenceFor(state, h),
         actor_trust: meanActorTrust(actors),
         freshness_decay: freshnessForHypothesis(firedAt, nowSec, halfLife),
       },
