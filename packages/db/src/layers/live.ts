@@ -2,7 +2,7 @@ import { Layer } from "effect";
 import { DbConnection, EventStore, LoggerNoop, RedactionConfig } from "../context";
 import { DbConnectionLive } from "../connection";
 import { EventStoreLive } from "../event-store";
-import { RedactionConfigDefault, RedactorLiveWithDefault } from "../redaction";
+import { RedactionConfigDefault, RedactorLive, RedactorLiveWithDefault } from "../redaction";
 import { MigrationRegistryLive } from "../migrate";
 import { UuidLive } from "../ulid";
 import { ProjectService, ProjectServiceLive } from "../project-service";
@@ -90,11 +90,15 @@ export const DbLive = (
   // footgun and gets "Service not found" at runtime.
   const dbConn = DbConnectionLive(dbPath);
   // Rebuild leafs with the caller-supplied RedactionConfig so user
-  // patterns from `cognit.yaml` actually take effect. When the
-  // default config is in play, this is identical to the module-level
-  // `leafs` (modulo a fresh layer object).
+  // patterns from `cognit.yaml` actually take effect.
+  //
+  // IMPORTANT (D-M1-04): `RedactorLiveWithDefault` already satisfies
+  // `RedactionConfig` with empty defaults (R=`never`), so
+  // `Layer.provide(RedactorLiveWithDefault, redactionConfig)` is a
+  // no-op. Wire `RedactorLive` (which requires RedactionConfig) and
+  // provide the caller's config instead.
   const localLeafs = Layer.mergeAll(
-    Layer.provide(RedactorLiveWithDefault, redactionConfig),
+    Layer.provide(RedactorLive, redactionConfig),
     MigrationRegistryLive,
     UuidLive,
     LoggerNoop,

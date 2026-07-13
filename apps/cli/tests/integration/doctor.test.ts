@@ -104,6 +104,11 @@ describe("cognit doctor", () => {
     // Server is never running in the test environment — skip is
     // the expected outcome, not fail (loopback probe best-effort).
     expect(byId.get("server")?.status).toBe("skip");
+    // D-M1-01 capture signals present (soft warn on empty project).
+    expect(byId.get("capture.events")?.status).toMatch(/pass|warn/);
+    expect(byId.get("capture.last_event_age")?.status).toMatch(/pass|warn/);
+    expect(byId.get("capture.inbox_pending")?.status).toMatch(/pass|warn/);
+    expect(byId.get("capture.inbox_errors")?.status).toMatch(/pass|warn/);
   });
 
   it("--json envelope shape: { kind: 'doctor', data: { root, checks: [...], ok } }", () => {

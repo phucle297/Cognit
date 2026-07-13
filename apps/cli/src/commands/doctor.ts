@@ -36,7 +36,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import { Effect } from "effect";
-import { ProjectService } from "@cognit/db";
+import { DbConnection, ProjectService, SessionService } from "@cognit/db";
 import { COGNIT_SUBDIRS, projectPaths, isCognitProject } from "../paths.js";
 import { withAppLayer } from "../layer-build.js";
 import { detectAndInstallHooks, type HookInstallResult } from "../hook-installer.js";
@@ -93,6 +93,139 @@ const probeServer = async (): Promise<CheckResult> => {
   } finally {
     clearTimeout(timer);
   }
+};
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Capture reliability signals (D-M1-01). Soft warnings only — brand-new
+ * projects with zero events are not a hard fail.
+ */
+const checkCaptureHealth = async (projectRoot: string): Promise<CheckResult[]> => {
+  const checks: CheckResult[] = [];
+  try {
+    const stats = await Effect.runPromise(
+      withAppLayer(
+        projectRoot,
+        Effect.gen(function* () {
+          const conn = yield* DbConnection;
+          const sessions = yield* SessionService;
+          const eventCount =
+            conn.handle.get<{ c: number }>("SELECT COUNT(*) AS c FROM events")?.c ?? 0;
+          const last = conn.handle.get<{ created_at: string }>(
+            "SELECT created_at FROM events ORDER BY created_at DESC, id DESC LIMIT 1",
+          );
+          const projectService = yield* ProjectService;
+          const projectList = yield* projectService.list();
+          const projectId = projectList[0]?.id ?? null;
+          let activeSessionEvents = 0;
+          if (projectId) {
+            const list = yield* sessions.list({ projectId });
+            const active = list
+              .filter((s) => s.status === "active")
+              .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+            if (active) {
+              activeSessionEvents =
+                conn.handle.get<{ c: number }>(
+                  "SELECT COUNT(*) AS c FROM events WHERE session_id = ?",
+                  [active.id],
+                )?.c ?? 0;
+            }
+          }
+          return {
+            eventCount,
+            lastEventAt: last?.created_at ?? null,
+            activeSessionEvents,
+          };
+        }),
+      ),
+    );
+
+    checks.push({
+      id: "capture.events",
+      label: "capture: event count",
+      status: stats.eventCount === 0 ? "warn" : "pass",
+      detail:
+        stats.eventCount === 0
+          ? "0 events (model may not be writing — check CLAUDE.md / hooks)"
+          : `${stats.eventCount} event(s)`,
+    });
+
+    if (stats.lastEventAt) {
+      const ageMs = Date.now() - Date.parse(stats.lastEventAt);
+      const ageHours = Math.max(0, Math.round(ageMs / (60 * 60 * 1000)));
+      const stale = Number.isFinite(ageMs) && ageMs > SEVEN_DAYS_MS;
+      checks.push({
+        id: "capture.last_event_age",
+        label: "capture: last event age",
+        status: stale ? "warn" : "pass",
+        detail: stale
+          ? `${ageHours}h ago (no events in 7d while project exists)`
+          : `${ageHours}h ago (${stats.lastEventAt})`,
+      });
+    } else {
+      checks.push({
+        id: "capture.last_event_age",
+        label: "capture: last event age",
+        status: "warn",
+        detail: "no events yet",
+      });
+    }
+
+    checks.push({
+      id: "capture.active_session",
+      label: "capture: active session events",
+      status: "pass",
+      detail: `${stats.activeSessionEvents} event(s) on newest active session`,
+    });
+  } catch (e) {
+    checks.push({
+      id: "capture.events",
+      label: "capture: event count",
+      status: "skip",
+      detail: `skipped: ${(e as Error).message}`,
+    });
+  }
+
+  // Inbox pending / error sidecars (filesystem, no DB).
+  const inboxDir = projectPaths(projectRoot).inbox;
+  const processedDir = path.join(inboxDir, "processed");
+  const errorDir = path.join(inboxDir, "_error");
+  const countJsonFiles = (dir: string): number => {
+    if (!fs.existsSync(dir)) return 0;
+    try {
+      return fs.readdirSync(dir).filter((f) => f.endsWith(".json")).length;
+    } catch {
+      return 0;
+    }
+  };
+  // Pending = top-level *.json in inbox (not in subdirs).
+  let pending = 0;
+  if (fs.existsSync(inboxDir)) {
+    try {
+      pending = fs
+        .readdirSync(inboxDir, { withFileTypes: true })
+        .filter((d) => d.isFile() && d.name.endsWith(".json")).length;
+    } catch {
+      pending = 0;
+    }
+  }
+  const errors = countJsonFiles(errorDir);
+  void processedDir;
+  checks.push({
+    id: "capture.inbox_pending",
+    label: "capture: inbox pending",
+    status: pending > 50 ? "warn" : "pass",
+    detail: `${pending} file(s) waiting (run \`cognit inbox --process\`)`,
+  });
+  checks.push({
+    id: "capture.inbox_errors",
+    label: "capture: inbox errors",
+    status: errors > 0 ? "warn" : "pass",
+    detail: errors > 0 ? `${errors} error sidecar(s) in inbox/_error` : "0 error sidecars",
+  });
+
+  return checks;
 };
 
 /**
@@ -299,6 +432,8 @@ export function registerDoctor(program: Command): void {
         checks.push(...checkHooks());
         // 6. inbox
         checks.push(checkInbox(projectRoot));
+        // 7. capture reliability signals (D-M1-01)
+        checks.push(...(await checkCaptureHealth(projectRoot)));
       }
 
       // 7. server (always — not gated on local project state)

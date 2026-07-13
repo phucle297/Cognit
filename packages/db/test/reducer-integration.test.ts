@@ -322,18 +322,16 @@ describe("reducer integration — the done_when", () => {
           });
         }
         const r = yield* service.show(sessionId);
-        // tail_event_count == 5 means exactly 5 events were folded
-        // after the snapshot, so timeline.length is the snapshot's
-        // serialized timeline of 101 plus the 5 tail events = 106.
+        // D-M1-02: slim snapshots store empty timeline; show folds only
+        // the SQL tail, so timeline length === tail_event_count (5).
         expect(r.tail_event_count).toBe(5);
         expect(r.snapshot).not.toBeNull();
         expect(r.snapshot?.event_count).toBe(101);
-        expect(r.state.timeline.length).toBe(106);
+        expect(r.state.timeline.length).toBe(5);
 
-        // The timeline on the snapshot+tail path must contain the 5
-        // tail observation events we just appended (in addition to
-        // whatever the snapshot's serialized state had).
-        const tailTexts = r.state.timeline.slice(-5).map((e) => JSON.parse(e.payload_json).text);
+        // The timeline on the snapshot+tail path is exactly the 5 tail
+        // observation events we just appended (slim base has timeline []).
+        const tailTexts = r.state.timeline.map((e) => JSON.parse(e.payload_json).text);
         expect(tailTexts).toEqual(["tail-0", "tail-1", "tail-2", "tail-3", "tail-4"]);
 
         // Rich state assertions on the snapshot+tail path. Before the

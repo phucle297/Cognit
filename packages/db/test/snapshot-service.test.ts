@@ -316,22 +316,18 @@ describe("SnapshotService", () => {
     );
   });
 
-  it("write is deterministic: same state → byte-equal state_json", async () => {
+  it("write is deterministic: same state + same eventId → byte-equal state_json", async () => {
     await runWithLayer(
       Effect.gen(function* () {
         const conn = yield* DbConnection;
         const service = yield* SnapshotService;
         const { sessionId, eventId } = setupProjectAndSession(conn);
-        const e2 = "01eventxxxxxxxxxxxxxxxxxx2";
-        seedEvent(conn, e2, "2026-01-01T00:00:00.002Z", sessionId);
         // sampleState() has a fixed field order; build two distinct
-        // state-shaped objects with shuffled insertion orders of the
-        // nested maps/arrays. The serializer should sort keys at every
-        // level so the resulting JSON is byte-equal.
-        const state1 = {
-          ...sampleState(),
-          // override with field insertion that goes from a to z alphabetically
-        };
+        // state-shaped objects. The serializer sorts keys at every
+        // level so the resulting JSON is byte-equal. snapshot_event_id
+        // is stamped from eventId (D-M1-03 envelope), so both writes
+        // must use the same eventId for byte equality.
+        const state1 = { ...sampleState() };
         const state2 = { ...sampleState() };
         const a = yield* service.write({
           sessionId,
@@ -342,10 +338,11 @@ describe("SnapshotService", () => {
         const b = yield* service.write({
           sessionId,
           state: state2,
-          eventId: e2,
-          eventCount: 2,
+          eventId,
+          eventCount: 1,
         });
         expect(a.state_json).toBe(b.state_json);
+        expect(JSON.parse(a.state_json).schema_version).toBe(1);
       }),
     );
   });
@@ -419,11 +416,17 @@ describe("SnapshotService", () => {
           eventId,
           eventCount: 1,
         });
-        // The serialized JSON must contain the Map's entries by key.
-        const parsed = JSON.parse(written.state_json) as { hypotheses: Record<string, unknown> };
-        expect(parsed.hypotheses).toBeDefined();
-        expect(Object.keys(parsed.hypotheses)).toContain("h1");
-        expect((parsed.hypotheses.h1 as { id: string }).id).toBe("h1");
+        // D-M1-03: versioned envelope; D-M1-02: slim timeline.
+        // Map entries live under envelope.state.
+        const parsed = JSON.parse(written.state_json) as {
+          schema_version: number;
+          state: { hypotheses: Record<string, unknown>; timeline: unknown[] };
+        };
+        expect(parsed.schema_version).toBe(1);
+        expect(parsed.state.hypotheses).toBeDefined();
+        expect(Object.keys(parsed.state.hypotheses)).toContain("h1");
+        expect((parsed.state.hypotheses.h1 as { id: string }).id).toBe("h1");
+        expect(parsed.state.timeline).toEqual([]);
       }),
     );
   });

@@ -1,0 +1,116 @@
+{
+  "artifacts": {},
+  "conclusions": {
+    "01EV000000000000000000000A": {
+      "created_at": "2026-01-01T00:00:10.000Z",
+      "id": "01EV000000000000000000000A",
+      "last_event_at": "2026-01-01T00:00:11.000Z",
+      "last_event_id": "01EV000000000000000000000B",
+      "reason": null,
+      "state": "verified",
+      "supporting_evidence_ids": [
+        "01EV0000000000000000000009"
+      ],
+      "text": "finally-release fixes refresh loop",
+      "verification_id": "01EV0000000000000000000008"
+    }
+  },
+  "current_conclusion_id": "01EV000000000000000000000A",
+  "current_decision_id": "01EV0000000000000000000006",
+  "current_hypothesis_id": "01EV0000000000000000000005",
+  "current_theory_id": null,
+  "current_verification_id": null,
+  "decisions": {
+    "01EV0000000000000000000006": {
+      "based_on_conclusion_ids": [],
+      "created_at": "2026-01-01T00:00:06.000Z",
+      "id": "01EV0000000000000000000006",
+      "last_event_at": "2026-01-01T00:00:07.000Z",
+      "last_event_id": "01EV0000000000000000000007",
+      "reason": null,
+      "state": "accepted",
+      "superseded_by_decision_id": null,
+      "text": "add finally-release on refresh path"
+    }
+  },
+  "edges": [],
+  "experiments": {},
+  "findings": [
+    {
+      "created_at": "2026-01-01T00:00:04.000Z",
+      "id": "01EV0000000000000000000004",
+      "last_event_id": "01EV0000000000000000000004",
+      "related_observation_ids": [
+        "01EV0000000000000000000002",
+        "01EV0000000000000000000003"
+      ],
+      "text": "refresh loop under concurrent load"
+    }
+  ],
+  "goal": "investigate auth leak",
+  "hypotheses": {
+    "01EV0000000000000000000005": {
+      "ai_rank_at": null,
+      "ai_rank_evaluator": null,
+      "ai_rank_event_id": null,
+      "ai_rank_reasoning": null,
+      "ai_rank_score": null,
+      "belongs_to_theory_id": null,
+      "created_at": "2026-01-01T00:00:05.000Z",
+      "current_confidence": 0.6,
+      "current_reason": null,
+      "current_state": "active",
+      "gravity_fired_at": 1767225605,
+      "id": "01EV0000000000000000000005",
+      "last_event_at": "2026-01-01T00:00:05.000Z",
+      "last_event_id": "01EV0000000000000000000005",
+      "promoted_to_theory_id": null,
+      "reason_type": null,
+      "superseded_by_id": null,
+      "text": "mutex not released on error path",
+      "title": "stale lock"
+    }
+  },
+  "last_event_at": "2026-01-01T00:00:10.000Z",
+  "last_event_id": "01EV000000000000000000000A",
+  "observations": [
+    {
+      "created_at": "2026-01-01T00:00:02.000Z",
+      "id": "01EV0000000000000000000002",
+      "last_event_id": "01EV0000000000000000000002",
+      "text": "tokens refresh every request"
+    },
+    {
+      "created_at": "2026-01-01T00:00:03.000Z",
+      "id": "01EV0000000000000000000003",
+      "last_event_id": "01EV0000000000000000000003",
+      "text": "cache miss on /me"
+    }
+  ],
+  "parent_session_id": null,
+  "project_id": "01PROJECTGOLDENV10000000001",
+  "session_id": "01SESSIONGOLDENV10000000001",
+  "snapshot_event_id": null,
+  "status": "active",
+  "theories": {},
+  "verifications": {
+    "01EV0000000000000000000008": {
+      "command": "pnpm test",
+      "created_artifact_id": null,
+      "duration_ms": 1200,
+      "ended_at": "2026-01-01T00:00:09.000Z",
+      "error": null,
+      "exit_code": 0,
+      "expected_duration_ms": null,
+      "id": "01EV0000000000000000000008",
+      "last_event_id": "01EV0000000000000000000009",
+      "linked_hypothesis_id": "01EV0000000000000000000005",
+      "parent_verification_id": null,
+      "started_at": "2026-01-01T00:00:08.000Z",
+      "state": "passed",
+      "stderr_excerpt": null,
+      "stdout_excerpt": "ok",
+      "type": "test"
+    }
+  }
+}

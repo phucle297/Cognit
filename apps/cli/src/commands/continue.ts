@@ -284,6 +284,9 @@ const renderText = (s: ContinueSummary): string => {
   if (empty && !s.doing) {
     lines.push("No reasoning recorded yet for this session.");
     lines.push("");
+    lines.push("If this project has been active but memory stays empty, the model may");
+    lines.push("not be calling Cognit — verify the CLAUDE.md Cognit block / hooks.");
+    lines.push("");
     lines.push("Try:");
     lines.push(`  cognit observation "what you're working on"`);
     lines.push(`  cognit decision propose "what you decided"`);
@@ -352,6 +355,9 @@ const renderOnboarding = (): string =>
     "",
     "Open Claude Code. Work normally.",
     "Run `cognit continue` again to see what's been remembered.",
+    "",
+    "If memory stays empty after real work, verify the CLAUDE.md Cognit block",
+    "and that hooks are installed (`cognit doctor`).",
     "",
     "Try:",
     '  cognit observation "auth uses refresh tokens"',

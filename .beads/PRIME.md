@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Update plan: golden replay + M1 reorder
+search: M1 — Reliability (golden replay, redaction, snapshots, capture signals)
 queue: 
 next: Cognit-sfl

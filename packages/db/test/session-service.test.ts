@@ -22,6 +22,8 @@ import {
 } from "../src";
 import { EventStoreDefault } from "../src/event-store";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy";
+import { reduce } from "@cognit/core/reducer";
+import { emptySessionState } from "@cognit/core/state";
 
 /**
  * Test layer composing all the services the SessionService test needs.
@@ -921,6 +923,65 @@ describe("SessionService.appendEvent (auto-snapshot)", () => {
     expect(r.r3.snapshotTaken).toBe(false);
     expect(r.snapCount?.n).toBe(1);
     expect(r.snap?.event_count).toBe(3);
+  });
+
+  it("auto-snapshot + show: entity state keeps session_id/project_id (D-M1-02 equality)", async () => {
+    const r = await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const projectId = setupProject(conn);
+        const created = yield* service.create({
+          projectId,
+          goal: "equality-goal",
+          actor: ACTOR,
+        });
+        const sid = created.session.id;
+        // everyN=3: first observation triggers auto-snapshot.
+        yield* service.appendEvent({
+          sessionId: sid,
+          type: "observation_recorded",
+          payload: { text: "a" },
+          actor: ACTOR,
+        });
+        // Tail after snapshot.
+        yield* service.appendEvent({
+          sessionId: sid,
+          type: "observation_recorded",
+          payload: { text: "tail-obs" },
+          actor: ACTOR,
+        });
+        const show = yield* service.show(sid);
+        // Full cold reduce for entity equality (same seed as production build).
+        const all = conn.handle.all(
+          "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+          [sid],
+        );
+        const full = reduce(
+          all,
+          emptySessionState({
+            session_id: sid,
+            project_id: projectId,
+            goal: "equality-goal",
+          }),
+        );
+        return {
+          show,
+          fullSessionId: full.session_id,
+          fullProjectId: full.project_id,
+          fullObs: full.observations.length,
+        };
+      }),
+      Layer.succeed(SessionPolicy)({ everyN: 3, forkOnResume: true }),
+    );
+    expect(r.show.snapshot).not.toBeNull();
+    expect(r.show.tail_event_count).toBeGreaterThan(0);
+    expect(r.show.state.session_id).toBe(r.fullSessionId);
+    expect(r.show.state.project_id).toBe(r.fullProjectId);
+    expect(r.show.state.project_id).not.toBe("");
+    expect(r.show.state.session_id).not.toBe("");
+    expect(r.show.state.observations.length).toBe(r.fullObs);
+    expect(r.show.state.goal).toBe("equality-goal");
   });
 
   it("appendEvent on a closed session fails with SessionClosed", async () => {

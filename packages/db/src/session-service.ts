@@ -41,7 +41,8 @@ import {
   type EmitConstraintEvent,
 } from "./constraint-engine";
 import { emptySessionState, type SessionState } from "@cognit/core/state";
-import { SnapshotService } from "./snapshot-service";
+import { parseSnapshotStateJson } from "@cognit/core/serialize-state";
+import { rehydrateSessionState, SnapshotService } from "./snapshot-service";
 import { SessionPolicy } from "./session-policy";
 import { EventBus } from "./bus";
 import type { AppendEventInput } from "./event-store";
@@ -284,44 +285,6 @@ const foldSession = (
     return { state, events };
   });
 
-/**
- * Field names on `SessionState` that hold a `ReadonlyMap`. Used by
- * `rehydrateSessionState` to convert the JSON object form back to
- * Maps. Adding a new Map field to `SessionState`? Add it here.
- */
-const MAP_FIELDS: ReadonlySet<string> = new Set([
-  "hypotheses",
-  "theories",
-  "experiments",
-  "decisions",
-  "conclusions",
-  "verifications",
-  "artifacts",
-]);
-
-/**
- * Convert the JSON-parsed `state_json` of a snapshot back into a
- * `SessionState` shape that the reducer accepts. Map-typed fields
- * are rebuilt from their object form (the serializer converts each
- * Map to a key-sorted plain object on write).
- */
-const rehydrateSessionState = (parsed: Record<string, unknown>): SessionState => {
-  const out: Record<string, unknown> = { ...parsed };
-  for (const k of MAP_FIELDS) {
-    const v = out[k];
-    if (v && typeof v === "object" && !Array.isArray(v)) {
-      const m = new Map<string, unknown>();
-      for (const [id, val] of Object.entries(v as Record<string, unknown>)) {
-        m.set(id, val);
-      }
-      out[k] = m;
-    } else {
-      out[k] = new Map();
-    }
-  }
-  return out as unknown as SessionState;
-};
-
 export const SessionServiceLive: Layer.Layer<
   SessionService,
   never,
@@ -360,14 +323,6 @@ export const SessionServiceLive: Layer.Layer<
         if (!row) {
           return yield* Effect.fail(new UnknownSession({ sessionId }));
         }
-        const events = yield* trySync(
-          () =>
-            conn.handle.all<EventRow>(
-              "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
-              [sessionId],
-            ),
-          (e) => new DbError({ message: "session show: list events", cause: e }),
-        );
         const snapshot = yield* trySync(
           () =>
             conn.handle.get<SnapshotRow>(
@@ -376,25 +331,64 @@ export const SessionServiceLive: Layer.Layer<
             ),
           (e) => new DbError({ message: "session show: latest snapshot", cause: e }),
         );
+
         let base: SessionState | undefined;
         let tail: ReadonlyArray<EventRow>;
+        let usableSnapshot: SnapshotRow | null = snapshot ?? null;
+
         if (snapshot) {
-          try {
-            const parsed = JSON.parse(snapshot.state_json) as Record<string, unknown>;
-            base = rehydrateSessionState(parsed);
-          } catch (e) {
+          const parsed = parseSnapshotStateJson(snapshot.state_json);
+          if (parsed) {
+            base = rehydrateSessionState(parsed.state);
+            // Belt-and-braces: never trust blank session/project ids from
+            // legacy snapshots written with bare `reduce` (pre-M1).
+            base = {
+              ...base,
+              session_id: base.session_id || row.id,
+              project_id: base.project_id || row.project_id,
+              goal: base.goal || row.goal,
+              parent_session_id: base.parent_session_id ?? row.parent_session_id,
+              snapshot_event_id: base.snapshot_event_id ?? snapshot.event_id,
+            };
+            // D-M1-02: tail SQL — only events after the snapshot id.
+            // ULID string order ≡ chronological for this product.
+            tail = yield* trySync(
+              () =>
+                conn.handle.all<EventRow>(
+                  "SELECT * FROM events WHERE session_id = ? AND id > ? ORDER BY created_at ASC, id ASC",
+                  [sessionId, snapshot.event_id],
+                ),
+              (e) => new DbError({ message: "session show: list tail events", cause: e }),
+            );
+          } else {
             yield* logger.log(
               "warning",
-              { sessionId, snapshotId: snapshot.id, error: String(e) },
-              "session show: snapshot state_json corrupt, falling back to full replay",
+              { sessionId, snapshotId: snapshot.id },
+              "session show: snapshot schema unsupported or corrupt, falling back to full replay",
             );
             base = undefined;
+            usableSnapshot = null;
+            tail = yield* trySync(
+              () =>
+                conn.handle.all<EventRow>(
+                  "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+                  [sessionId],
+                ),
+              (e) => new DbError({ message: "session show: list events", cause: e }),
+            );
           }
-          tail = events.filter((e) => e.id > snapshot.event_id);
         } else {
           base = undefined;
-          tail = events;
+          tail = yield* trySync(
+            () =>
+              conn.handle.all<EventRow>(
+                "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+                [sessionId],
+              ),
+            (e) => new DbError({ message: "session show: list events", cause: e }),
+          );
         }
+
         const initial: SessionState =
           base ??
           emptySessionState({
@@ -407,7 +401,7 @@ export const SessionServiceLive: Layer.Layer<
         return {
           session: row,
           state,
-          snapshot: snapshot ?? null,
+          snapshot: usableSnapshot,
           tail_event_count: tail.length,
           eventsAfterSnapshot: tail.length,
         };
@@ -555,7 +549,7 @@ export const SessionServiceLive: Layer.Layer<
           }
         }
 
-        const row = yield* trySync(
+        const countRow = yield* trySync(
           () =>
             conn.handle.get<{ c: number }>(
               "SELECT COUNT(*) AS c FROM events WHERE session_id = ?",
@@ -563,13 +557,30 @@ export const SessionServiceLive: Layer.Layer<
             ),
           (e) => new DbError({ message: "session append: count events", cause: e }),
         );
-        const count = row?.c ?? 0;
+        const count = countRow?.c ?? 0;
+        // Seed emptySessionState from the sessions row so cold reduce
+        // (first snapshot / invalid prior) keeps session_id + project_id.
+        // Bare `build: reduce` left those fields "" forever after rehydrate
+        // (D-M1-02 equality AC / quality-gate finding).
+        const sessionRow = yield* trySync(
+          () => fetchSession(conn, input.sessionId),
+          (e) => new DbError({ message: "session append: fetch session", cause: e }),
+        );
         const result = yield* snapshots
           .takeIfDue({
             sessionId: input.sessionId,
             currentEventCount: count,
             everyN: policy.everyN,
-            build: reduce,
+            build: (events) =>
+              reduce(
+                events,
+                emptySessionState({
+                  session_id: input.sessionId,
+                  project_id: sessionRow?.project_id ?? "",
+                  goal: sessionRow?.goal ?? "",
+                  parent_session_id: sessionRow?.parent_session_id ?? null,
+                }),
+              ),
           })
           .pipe(Effect.either);
         if (result._tag === "Left") {

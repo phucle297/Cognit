@@ -7,3 +7,4 @@ export * from "./redaction.js";
 export * from "./ranking.js";
 export * from "./state.js";
 export * from "./reducer.js";
+export * from "./serialize-state.js";

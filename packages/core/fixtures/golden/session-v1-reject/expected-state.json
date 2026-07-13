@@ -1,0 +1,78 @@
+{
+  "artifacts": {},
+  "conclusions": {
+    "01EVR000000000000000000007": {
+      "created_at": "2026-02-01T00:00:07.000Z",
+      "id": "01EVR000000000000000000007",
+      "last_event_at": "2026-02-01T00:00:08.000Z",
+      "last_event_id": "01EVR000000000000000000008",
+      "reason": "not yet verified",
+      "state": "rejected",
+      "supporting_evidence_ids": [],
+      "text": "need targeted index instead",
+      "verification_id": null
+    }
+  },
+  "current_conclusion_id": "01EVR000000000000000000007",
+  "current_decision_id": "01EVR000000000000000000004",
+  "current_hypothesis_id": "01EVR000000000000000000003",
+  "current_theory_id": null,
+  "current_verification_id": null,
+  "decisions": {
+    "01EVR000000000000000000004": {
+      "based_on_conclusion_ids": [],
+      "created_at": "2026-02-01T00:00:04.000Z",
+      "id": "01EVR000000000000000000004",
+      "last_event_at": "2026-02-01T00:00:05.000Z",
+      "last_event_id": "01EVR000000000000000000005",
+      "reason": "too broad; break other paths",
+      "state": "rejected",
+      "superseded_by_decision_id": null,
+      "text": "disable eager load globally"
+    }
+  },
+  "edges": [],
+  "experiments": {},
+  "findings": [],
+  "goal": "try risky approach",
+  "hypotheses": {
+    "01EVR000000000000000000003": {
+      "ai_rank_at": null,
+      "ai_rank_evaluator": null,
+      "ai_rank_event_id": null,
+      "ai_rank_reasoning": null,
+      "ai_rank_score": null,
+      "belongs_to_theory_id": null,
+      "created_at": "2026-02-01T00:00:03.000Z",
+      "current_confidence": 0.4,
+      "current_reason": "evidence",
+      "current_state": "rejected",
+      "gravity_fired_at": 1769904003,
+      "id": "01EVR000000000000000000003",
+      "last_event_at": "2026-02-01T00:00:06.000Z",
+      "last_event_id": "01EVR000000000000000000006",
+      "promoted_to_theory_id": null,
+      "reason_type": "evidence",
+      "superseded_by_id": null,
+      "text": "ORM loads relations eagerly",
+      "title": "N+1 queries"
+    }
+  },
+  "last_event_at": "2026-02-01T00:00:07.000Z",
+  "last_event_id": "01EVR000000000000000000007",
+  "observations": [
+    {
+      "created_at": "2026-02-01T00:00:02.000Z",
+      "id": "01EVR000000000000000000002",
+      "last_event_id": "01EVR000000000000000000002",
+      "text": "latency spike after deploy"
+    }
+  ],
+  "parent_session_id": null,
+  "project_id": "01PROJECTGOLDENV1REJECT00001",
+  "session_id": "01SESSIONGOLDENV1REJECT00001",
+  "snapshot_event_id": null,
+  "status": "active",
+  "theories": {},
+  "verifications": {}
+}

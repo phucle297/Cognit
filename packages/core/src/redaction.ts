@@ -34,4 +34,16 @@ export const BUILT_IN_REDACTION_PATTERNS: readonly BuiltInRedactionPattern[] = [
     regex: "(password|passwd|pwd)[\"']?\\s*[:=]\\s*[\"']?([^\\s\"',}{]+)",
     replacement: "$1=[REDACTED:password]",
   },
+  // High-value provider tokens (D-M1-04). Anchored with prefix +
+  // length floors to keep false positives low.
+  {
+    name: "openai_sk",
+    regex: "\\bsk-[A-Za-z0-9]{20,}\\b",
+    replacement: "[REDACTED:openai_sk]",
+  },
+  {
+    name: "github_pat",
+    regex: "\\b(ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\\b",
+    replacement: "[REDACTED:github_pat]",
+  },
 ];

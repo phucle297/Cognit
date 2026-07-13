@@ -1,0 +1,6 @@
+{
+  "fixture_format": 1,
+  "intent": "observation → decision accept → verification pass → conclusion verify",
+  "session_id": "01SESSIONGOLDENV10000000001",
+  "event_count": 11
+}

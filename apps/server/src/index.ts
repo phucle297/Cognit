@@ -84,6 +84,11 @@ const dbPath = `${root}/.cognit/cognit.db`;
 // Build the runtime layer. The server shares the same DbLive
 // composition the CLI uses. We add EventBusLive on top.
 //
+// Redaction (D-M1-04): server uses built-in patterns only. Loading
+// `cognit.yaml` redaction.patterns would require a YAML dependency
+// the server package does not carry; CLI paths load user patterns via
+// `withAppLayerAndConfig`. Documented parity gap — not silent.
+//
 // CRITICAL: use `ManagedRuntime` (not `Effect.provide(layer)`) so the
 // `EventBusLive` `Ref<subscribers>` is created ONCE at startup and
 // shared across every Hono request. With `Effect.provide` per-request,

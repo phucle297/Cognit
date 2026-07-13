@@ -22,6 +22,44 @@ import { DbError, trySync } from "./errors";
 import type { EventRow, SnapshotRow } from "./schema/rows";
 import { Uuid } from "./ulid";
 import type { SessionState } from "@cognit/core/state";
+import { reduce } from "@cognit/core/reducer";
+import { parseSnapshotStateJson, wrapSnapshotEnvelope } from "@cognit/core/serialize-state";
+
+/**
+ * Field names on `SessionState` that hold a `ReadonlyMap`. Shared
+ * with session-service rehydrate.
+ */
+const MAP_FIELDS: ReadonlySet<string> = new Set([
+  "hypotheses",
+  "theories",
+  "experiments",
+  "decisions",
+  "conclusions",
+  "verifications",
+  "artifacts",
+]);
+
+/** Convert JSON object form of Map fields back to Maps. */
+export const rehydrateSessionState = (parsed: Record<string, unknown>): SessionState => {
+  const out: Record<string, unknown> = { ...parsed };
+  for (const k of MAP_FIELDS) {
+    const v = out[k];
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const m = new Map<string, unknown>();
+      for (const [id, val] of Object.entries(v as Record<string, unknown>)) {
+        m.set(id, val);
+      }
+      out[k] = m;
+    } else {
+      out[k] = new Map();
+    }
+  }
+  // Slim snapshots store empty timeline; ensure array form.
+  if (!Array.isArray(out["timeline"])) {
+    out["timeline"] = [];
+  }
+  return out as unknown as SessionState;
+};
 
 type DbConnService = Context.Tag.Service<typeof DbConnection>;
 type UuidService = Context.Tag.Service<typeof Uuid>;
@@ -67,39 +105,19 @@ export class SnapshotService extends Context.Tag("@cognit/db/SnapshotService")<
 const nowIso = (): string => new Date().toISOString();
 
 /**
- * Serialize a SessionState to a deterministic JSON string. Object keys
- * are sorted at every nesting level so two snapshots of the same state
- * produce byte-equal output. This keeps snapshot dedup trivial.
- *
- * Map handling: `SessionState` carries several `ReadonlyMap`s
- * (hypotheses, decisions, …). `JSON.stringify` silently drops Map
- * contents because `Object.keys(new Map())` is `[]`. We explicitly
- * convert each Map to an object keyed by its entries (the map's `id`
- * field), then recurse into the values, so a snapshot round-trip
- * preserves the entity state.
+ * Serialize SessionState into the versioned snapshot envelope
+ * (D-M1-03) with a slim (empty) timeline (D-M1-02). Entity maps are
+ * converted to plain objects via `wrapSnapshotEnvelope`.
  */
-const serializeState = (state: SessionState): string => {
-  const sortKeys = (v: unknown): unknown => {
-    if (v instanceof Map) {
-      const obj: Record<string, unknown> = {};
-      for (const [k, val] of v.entries()) {
-        obj[String(k)] = val;
-      }
-      return sortKeys(obj);
-    }
-    if (Array.isArray(v)) return v.map(sortKeys);
-    if (v && typeof v === "object") {
-      const obj = v as Record<string, unknown>;
-      const sorted: Record<string, unknown> = {};
-      for (const k of Object.keys(obj).sort()) {
-        sorted[k] = sortKeys(obj[k]);
-      }
-      return sorted;
-    }
-    return v;
-  };
-  return JSON.stringify(sortKeys(state));
-};
+const serializeState = (state: SessionState, eventId: string): string =>
+  wrapSnapshotEnvelope(
+    {
+      ...state,
+      snapshot_event_id: eventId,
+      timeline: [],
+    },
+    { slimTimeline: true },
+  );
 
 export const SnapshotServiceLive: Layer.Layer<
   SnapshotService,
@@ -159,7 +177,7 @@ export const SnapshotServiceLive: Layer.Layer<
             id,
             session_id: input.sessionId,
             event_id: input.eventId,
-            state_json: serializeState(input.state),
+            state_json: serializeState(input.state, input.eventId),
             event_count: input.eventCount,
             created_at: createdAt,
           });
@@ -188,27 +206,80 @@ export const SnapshotServiceLive: Layer.Layer<
           if (input.currentEventCount - lastCount < input.everyN) {
             return null;
           }
-          // Read all events, build state, write snapshot at the latest event.
-          const events = yield* trySync(
-            () =>
-              conn.handle.all<EventRow>(
-                "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
-                [input.sessionId],
-              ),
-            (e) => new DbError({ message: "snapshot takeIfDue: list events", cause: e }),
-          );
-          if (events.length === 0) return null;
-          const state = input.build(events);
-          const lastEvent = events[events.length - 1];
-          if (!lastEvent) return null;
+
+          // D-M1-02: when a prior snapshot exists and rehydrates cleanly,
+          // load only the tail (`id > snapshot.event_id`) and fold onto
+          // the base. Otherwise cold-build from the full event list via
+          // the injected `build` callback.
+          let state: SessionState;
+          let lastEventId: string;
+          let eventCount: number;
+
+          if (latest) {
+            const parsed = parseSnapshotStateJson(latest.state_json);
+            const tail = yield* trySync(
+              () =>
+                conn.handle.all<EventRow>(
+                  "SELECT * FROM events WHERE session_id = ? AND id > ? ORDER BY created_at ASC, id ASC",
+                  [input.sessionId, latest.event_id],
+                ),
+              (e) => new DbError({ message: "snapshot takeIfDue: list tail events", cause: e }),
+            );
+            if (parsed) {
+              const base = rehydrateSessionState(parsed.state);
+              // Ensure snapshot_event_id is set so reduce skips correctly
+              // if any pre-snapshot events sneak into the list.
+              const initial: SessionState = {
+                ...base,
+                snapshot_event_id: base.snapshot_event_id ?? latest.event_id,
+                timeline: base.timeline ?? [],
+              };
+              state = reduce(tail, initial);
+              const lastTail = tail[tail.length - 1];
+              lastEventId = lastTail?.id ?? latest.event_id;
+              eventCount = latest.event_count + tail.length;
+            } else {
+              // Invalid/unsupported envelope → full rebuild.
+              const allEvents = yield* trySync(
+                () =>
+                  conn.handle.all<EventRow>(
+                    "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+                    [input.sessionId],
+                  ),
+                (e) => new DbError({ message: "snapshot takeIfDue: list events", cause: e }),
+              );
+              if (allEvents.length === 0) return null;
+              state = input.build(allEvents);
+              const lastEvent = allEvents[allEvents.length - 1];
+              if (!lastEvent) return null;
+              lastEventId = lastEvent.id;
+              eventCount = allEvents.length;
+            }
+          } else {
+            const allEvents = yield* trySync(
+              () =>
+                conn.handle.all<EventRow>(
+                  "SELECT * FROM events WHERE session_id = ? ORDER BY created_at ASC, id ASC",
+                  [input.sessionId],
+                ),
+              (e) => new DbError({ message: "snapshot takeIfDue: list events", cause: e }),
+            );
+            if (allEvents.length === 0) return null;
+            state = input.build(allEvents);
+            const lastEvent = allEvents[allEvents.length - 1];
+            if (!lastEvent) return null;
+            lastEventId = lastEvent.id;
+            eventCount = allEvents.length;
+          }
+
           const id = yield* uuid.make();
           const createdAt = nowIso();
           return yield* writeRaw({
             id,
             session_id: input.sessionId,
-            event_id: lastEvent.id,
-            state_json: serializeState(state),
-            event_count: events.length,
+            event_id: lastEventId,
+            state_json: serializeState(state, lastEventId),
+            event_count: eventCount,
             created_at: createdAt,
           });
         }),

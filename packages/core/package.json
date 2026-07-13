@@ -12,7 +12,8 @@
     "./redaction": "./src/redaction.ts",
     "./reducer": "./src/reducer.ts",
     "./ranking": "./src/ranking.ts",
-    "./state": "./src/state.ts"
+    "./state": "./src/state.ts",
+    "./serialize-state": "./src/serialize-state.ts"
   },
   "scripts": {
     "build": "echo \"core: no build (no emit)\"",
