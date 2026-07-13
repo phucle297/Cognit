@@ -47,6 +47,8 @@
 
 - Reader keeps accepting v0 and v1.
 
+**Prerequisite:** D-M1-00 golden replay green before merge.
+
 ## Tests required
 
 - Round-trip v1.

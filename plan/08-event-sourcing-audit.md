@@ -24,9 +24,9 @@ Scope: local single-user SQLite. Grades: **strong / adequate / weak**.
 | **Current** | Sort by `(created_at ASC, id ASC)`; ULID tie-break; snapshots rehydrate Maps |
 | **Strengths** | Explicit ordering; tests on reducer + integration |
 | **Weaknesses** | Snapshot rehydrate is cast-based; timeline content must not depend on wall clock outside event fields |
-| **Improve** | Snapshot version (M1-03); equality tests snapshot+tail vs full reduce |
-| **Fix now?** | Tests strengthen with M1 |
-| **Can wait?** | Core path OK |
+| **Improve** | **Golden fixtures (D-M1-00)** as permanent gate; then snapshot version (M1-03); snapshot+tail vs full reduce |
+| **Fix now?** | **M1-00 first** — before snapshot refactors |
+| **Can wait?** | Not past start of M1 |
 
 ---
 
@@ -160,12 +160,24 @@ Scope: local single-user SQLite. Grades: **strong / adequate / weak**.
 
 ---
 
+## Golden replay (cross-cutting)
+
+| | |
+|--|--|
+| **Current** | Missing as a product-level gate |
+| **Required** | `fixtures/…/events` → `reduce` → `expected-state` on every reducer-touching PR |
+| **Design** | [D-M1-00](./designs/D-M1-00-golden-replay.md) |
+| **Fix now?** | First item of M1 |
+| **Can wait?** | Must not wait until after snapshot I/O |
+
+---
+
 ## ES summary
 
 | Area | Grade | Milestone |
 |------|-------|-----------|
 | Reducer purity | strong | keep |
-| Determinism | strong–adequate | strengthen tests M1 |
+| Determinism | strong–adequate | **M1-00 golden gate** |
 | Ordering | adequate | keep |
 | Snapshot correctness | adequate design / weak I/O | M1-02 |
 | Invalidation | weak | M1-03 |

@@ -45,12 +45,15 @@ Out of scope (by product decision — **not defects**):
 3. **`--root` / `COGNIT_ROOT`** documented but ignored on most write/read commands.
 4. **Server migration packaging** — server dist cannot load SQL migrations; CLI already copies them.
 
-### Milestone 1 — Reliability (local power-user trust)
+### Milestone 1 — Reliability (architecture before product signals)
 
-5. Capture signals in `doctor` / continue empty-state honesty (measure, don’t pretend).
-6. Snapshot path: stop loading full event list when snapshot exists; slim timeline in snapshots.
+Order is intentional: **architecture gates first**, capture honesty last.
+
+5. **Golden replay fixtures** — frozen event logs → expected state; every reducer-touching PR re-runs.
+6. User redaction patterns wiring (Effect Layer override currently no-op).
 7. Snapshot schema version + invalidation.
-8. User redaction patterns wiring (Effect Layer override currently no-op).
+8. Snapshot path: tail SQL load + slim timeline in snapshots.
+9. Capture signals in `doctor` / continue empty-state honesty (does not change ES architecture).
 
 ### Milestone 2 — DX & distribution
 

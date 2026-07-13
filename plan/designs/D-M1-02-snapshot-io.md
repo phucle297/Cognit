@@ -30,7 +30,12 @@ Snapshot+tail fold is designed, but `_show` still `SELECT *` all session events 
 4. `takeIfDue`: prefer snapshot+tail build path instead of full list when prior snapshot exists.
 5. Keep full replay path for invalid snapshots.
 
-**Prerequisite:** D-M1-03 version bump so old fat snapshots still load or invalidate cleanly.
+**Prerequisites:**
+
+- **D-M1-00** golden replay green (entity equality contract).
+- **D-M1-03** version bump so old fat snapshots still load or invalidate cleanly.
+
+Any PR for this design **must** keep goldens green; if slim timeline changes compared fields, update compare policy in D-M1-00 (strip timeline) rather than deleting fixtures.
 
 ## Migration strategy
 

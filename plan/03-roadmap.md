@@ -29,24 +29,39 @@ Each milestone is **independently releasable**. Stop after any milestone and sti
 
 ## Milestone 1 — Reliability
 
-**Goal:** Months of solo use remain trustworthy; redaction works as documented; large sessions degrade gracefully.
+**Goal:** Months of solo use remain trustworthy; **event-sourcing contracts are gated by golden replay**; redaction and snapshots are correct before product-only signals.
 
-| ID | Work | PR type |
-|----|------|---------|
-| D-M1-04 | Redaction wiring + modest pattern expansion | `fix` |
-| D-M1-03 | Snapshot schema version + invalidation | `feat` (compat) |
-| D-M1-02 | Snapshot tail query + slim timeline | `perf` / `fix` |
-| D-M1-01 | Capture reliability signals | `feat` |
+**Order (binding):** architecture first, capture last.
+
+```text
+D-M1-00 golden replay
+    → D-M1-04 redaction
+    → D-M1-03 snapshot schema version
+    → D-M1-02 snapshot I/O + timeline slim
+    → D-M1-01 capture signals
+```
+
+| Order | ID | Work | PR type | Why this order |
+|------:|----|------|---------|----------------|
+| 1 | D-M1-00 | Golden replay fixtures + CI gate | `test` | Safety net before any ES mutation |
+| 2 | D-M1-04 | Redaction wiring + modest pattern expansion | `fix` | Safety; does not change reducer contract |
+| 3 | D-M1-03 | Snapshot schema version + invalidation | `feat` (compat) | Format before I/O rewrite |
+| 4 | D-M1-02 | Snapshot tail query + slim timeline | `perf` / `fix` | Needs version + goldens green |
+| 5 | D-M1-01 | Capture reliability signals | `feat` | Product honesty only; no ES architecture change |
+
+**Rationale:** Capture signals do not change the event model. Snapshot work does. Fix architecture under a golden gate before spending time on doctor UX.
 
 **Exit criteria**
 
+- [ ] Golden fixtures under `packages/core/fixtures/golden/` pass on every core test run.
+- [ ] Any PR touching reducer/state fails CI if goldens diverge (without silent regenerate).
 - [ ] User `redaction.patterns` apply on append (integration test).
 - [ ] Snapshots carry schema version; unknown → full replay.
 - [ ] `_show` does not load all events when snapshot exists.
+- [ ] Snapshot+tail entity state equals full reduce (goldens + targeted tests).
 - [ ] `doctor` reports capture health basics.
-- [ ] Snapshot+tail equals full reduce (determinism tests).
 
-**Release note angle:** “Trust local memory under real workloads.”
+**Release note angle:** “Trust local memory under real workloads — with replay contracts.”
 
 ---
 

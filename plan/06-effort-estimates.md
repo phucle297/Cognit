@@ -12,6 +12,7 @@ Scale:
 | D-M0-02 | Verify endpoint gate | **M** | Behavior change + server tests + docs |
 | D-M0-03 | Root resolution | **M** | Many command files; mechanical but must be complete |
 | D-M0-04 | Migration packaging | **S** | Copy step + smoke boot test |
+| D-M1-00 | Golden replay fixtures | **S–M** | Fixture corpus + compare harness; high leverage |
 | D-M1-04 | Redaction wiring | **S–M** | Layer fix + integration test + optional patterns |
 | D-M1-03 | Snapshot schema version | **M** | Serialize/rehydrate + invalidation tests |
 | D-M1-02 | Snapshot I/O + timeline slim | **M–L** | Correctness-critical; equality vs full reduce |

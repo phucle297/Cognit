@@ -22,6 +22,14 @@ Legend:
 
 ---
 
+## ES hygiene (promoted into M1)
+
+| Finding | Status | Severity | Evidence | Recommendation |
+|---------|--------|----------|----------|----------------|
+| **No golden replay corpus** | **Valid (gap)** | **P1 architecture** | Reducer unit tests exist; no frozen `events → expected state` fixtures re-run as a gate | Add [D-M1-00](./designs/D-M1-00-golden-replay.md) **before** snapshot PRs |
+
+---
+
 ## P1 hypotheses
 
 | Finding | Status | Severity | Evidence | Recommendation |
@@ -64,12 +72,13 @@ Legend:
 2. Verify shell gate  
 3. `--root` resolution  
 4. Migration packaging (server)  
-5. Redaction wiring  
-6. Snapshot I/O + timeline slim  
+5. **Golden replay fixtures**  
+6. Redaction wiring  
 7. Snapshot schema version  
-8. Capture signals  
-9. Exit codes  
-10. Docs alignment  
-11. Shell completion  
-12. npm package  
-13. Payload evolution (on demand)
+8. Snapshot I/O + timeline slim  
+9. Capture signals  
+10. Exit codes  
+11. Docs alignment  
+12. Shell completion  
+13. npm package  
+14. Payload evolution (on demand)

@@ -11,12 +11,13 @@ Each accepted change has a design under `designs/`. Implement **one design per P
 3. [D-M0-03 Root resolution](./designs/D-M0-03-root-resolution.md)
 4. [D-M0-04 Migration packaging](./designs/D-M0-04-migration-packaging.md)
 
-### Milestone 1
+### Milestone 1 (order binding)
 
-5. [D-M1-01 Capture signals](./designs/D-M1-01-capture-signals.md)
-6. [D-M1-02 Snapshot I/O](./designs/D-M1-02-snapshot-io.md)
+5. [D-M1-00 Golden replay](./designs/D-M1-00-golden-replay.md) — **first**
+6. [D-M1-04 Redaction wiring](./designs/D-M1-04-redaction-wiring.md)
 7. [D-M1-03 Snapshot schema version](./designs/D-M1-03-snapshot-schema-version.md)
-8. [D-M1-04 Redaction wiring](./designs/D-M1-04-redaction-wiring.md)
+8. [D-M1-02 Snapshot I/O](./designs/D-M1-02-snapshot-io.md)
+9. [D-M1-01 Capture signals](./designs/D-M1-01-capture-signals.md) — **last**
 
 ### Milestone 2
 

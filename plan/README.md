@@ -38,10 +38,11 @@ This directory is the implementation roadmap derived from architecture review fi
 | [D-M0-02](./designs/D-M0-02-verify-endpoint-gate.md) | M0 | Verify endpoint local safety |
 | [D-M0-03](./designs/D-M0-03-root-resolution.md) | M0 | `--root` / `COGNIT_ROOT` fix |
 | [D-M0-04](./designs/D-M0-04-migration-packaging.md) | M0 | Server migration packaging |
-| [D-M1-01](./designs/D-M1-01-capture-signals.md) | M1 | Capture reliability signals |
-| [D-M1-02](./designs/D-M1-02-snapshot-io.md) | M1 | Snapshot tail I/O + timeline slim |
-| [D-M1-03](./designs/D-M1-03-snapshot-schema-version.md) | M1 | Snapshot schema version |
+| [D-M1-00](./designs/D-M1-00-golden-replay.md) | M1 | Golden replay fixtures (ES gate) |
 | [D-M1-04](./designs/D-M1-04-redaction-wiring.md) | M1 | User redaction wiring fix |
+| [D-M1-03](./designs/D-M1-03-snapshot-schema-version.md) | M1 | Snapshot schema version |
+| [D-M1-02](./designs/D-M1-02-snapshot-io.md) | M1 | Snapshot tail I/O + timeline slim |
+| [D-M1-01](./designs/D-M1-01-capture-signals.md) | M1 | Capture reliability signals |
 | [D-M2-01](./designs/D-M2-01-exit-codes.md) | M2 | Exit code contract |
 | [D-M2-02](./designs/D-M2-02-shell-completion.md) | M2 | Shell completion |
 | [D-M2-03](./designs/D-M2-03-docs-alignment.md) | M2 | README / scope alignment |

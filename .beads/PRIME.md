@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: M2.1 — Memory Selection
+search: Update plan: golden replay + M1 reorder
 queue: 
 next: Cognit-sfl

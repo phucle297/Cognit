@@ -1,5 +1,7 @@
 # D-M1-01 — Capture reliability signals
 
+**Schedule:** **Last in M1.** Does not change event-sourcing architecture; must not jump ahead of D-M1-00…D-M1-02.
+
 ## Problem
 
 Product value depends on AI tools calling Cognit verbs. That is intentional, not a bug — but users cannot see whether capture is happening. Empty memory looks like “product works” when it may mean “model never wrote.”

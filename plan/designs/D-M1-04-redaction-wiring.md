@@ -1,5 +1,7 @@
 # D-M1-04 — User redaction wiring fix
 
+**Schedule:** Second in M1 (after D-M1-00 goldens). Does not mutate reducer; safe once the gate exists.
+
 ## Problem
 
 `DbLive` intends to inject `cognit.yaml` redaction patterns via:
