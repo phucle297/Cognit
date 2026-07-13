@@ -23,12 +23,20 @@ three working surfaces and one shared core:
   loopback; no auth, no remote surface.
 - `packages/` — headless libraries consumed by the three apps:
   - `packages/db` — SQLite event store, services, schema, migrations
-    (`packages/db/src/schema/tables.ts`).
+    (`packages/db/src/schema/tables.ts`). Payload lifts go through
+    `migratePayload` (`packages/db/src/migrate.ts`); production transforms
+    are currently identity — see [events.md](./events.md).
   - `packages/core` — pure reducer (`packages/core/src/reducer.ts`), config
-    schema, state-machine types.
-  - `packages/agent`, `packages/llm`, `packages/gravity`, `packages/recovery`,
+    schema, state-machine types. Golden replay fixtures under
+    `packages/core/fixtures/golden/` gate reducer changes.
+  - `packages/gravity` — pure 5-axis hypothesis ranking
+    (`rankHypotheses` + axis helpers). The server re-exports this scorer
+    (`apps/server/src/gravity-inputs.ts`); do not fork the formula in routes.
+  - `packages/agent`, `packages/llm`, `packages/recovery`,
     `packages/verification`, `packages/wrap` — feature services layered on top
     of `db` + `core`.
+
+There is no `packages/sdk` (removed) and no `packages/cli` (CLI is `apps/cli`).
 
 There is no top-level `plugins/` directory; the integration points live in two
 places instead:

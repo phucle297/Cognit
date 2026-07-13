@@ -1,6 +1,8 @@
 # CONVENTIONS
 
-> Naming, layout, code style, anti-patterns. For the tools and their versions → `STACK.md`.
+> Naming, layout, code style, anti-patterns. Tooling lives in root
+> `package.json` (Node 22+, pnpm, Turbo, Vitest, oxlint, oxfmt) and
+> `tsconfig.base.json`. Architecture: `docs/technical/architecture.md`.
 
 ---
 
@@ -10,9 +12,9 @@
 | ------------------------ | -------------------------- | ---------------------------- |
 | TypeScript source        | kebab-case                 | `event-store.ts`             |
 | React component          | kebab-case.tsx             | `decision-graph.tsx`         |
-| Test file                | `<name>.test.ts` colocated | `event-store.test.ts`        |
-| Markdown (top-level doc) | UPPER-CASE                 | `ARCHITECTURE.md`            |
-| Markdown (folder doc)    | lower-kebab                | `walkthrough-nextjs-leak.md` |
+| Test file                | `<name>.test.ts`           | `event-store.test.ts`        |
+| Markdown (top-level)     | UPPER-CASE or product name | `README.md`, `CONVENTIONS.md`|
+| Markdown (docs/)         | lower-kebab                | `docs/technical/data-model.md` |
 | SQL migration            | `NNNN_<name>.sql`          | `0001_init.sql`              |
 | Config (JSON)            | kebab-case                 | `oxlint.json`, `oxfmt.json`  |
 | Config (YAML)            | kebab-case                 | `cognit.yaml`                |
@@ -87,7 +89,7 @@
 ### Logging
 
 - `console.log` is banned in `packages/*`. Use the logger from `core`.
-- `console.error` allowed in `cli` for fatal startup failures only.
+- `console.error` allowed in `apps/cli` for fatal startup failures only.
 - `console.warn` allowed in `apps/server` for HTTP-level warnings.
 - Never log `payload_json` of an event. Log the event id, type, and session id only.
 
@@ -98,21 +100,24 @@
 ```txt
 /
 ├─ apps/
-│  ├─ server/          # Hono HTTP API
-│  └─ dashboard/       # Vite + React 19
+│  ├─ cli/             # cognit binary (Commander); tests under tests/{unit,integration,e2e}
+│  ├─ server/          # Hono HTTP API (loopback by default)
+│  └─ dashboard/       # Vite + React SPA
 ├─ packages/
-│  ├─ core/            # types, Effect Schema, reducer, redaction, Effect services
-│  ├─ db/              # Drizzle + appendEvent
-│  ├─ cli/             # cognit binary
-│  └─ verification/    # subprocess engine
+│  ├─ core/            # pure reducer, config, state, redaction
+│  ├─ db/              # SQLite event store, services, migrations
+│  ├─ gravity/         # pure hypothesis ranking (5-axis + AI override)
+│  ├─ agent/           # AI supervisor loop
+│  ├─ llm/             # LLM client
+│  ├─ recovery/        # recovery envelope helpers
+│  ├─ verification/    # subprocess verification engine
+│  └─ wrap/            # worker wrap + atomic write
+├─ hooks/              # reference AI CLI capture hooks
+├─ docs/               # product + technical docs
+├─ plan/               # architecture roadmap (M0–M3)
 ├─ examples/
-│  ├─ cognit.yaml
-│  ├─ inbox/
-│  └─ walkthrough-*.md
-├─ ARCHITECTURE.md
+│  └─ cognit.yaml
 ├─ CONVENTIONS.md
-├─ STACK.md
-├─ plan.xml
 ├─ README.md
 ├─ oxlint.json
 ├─ oxfmt.json
@@ -122,46 +127,59 @@
 └─ package.json
 ```
 
+There is **no** `packages/sdk` and **no** `packages/cli` — the CLI lives in
+`apps/cli`.
+
 ### Per-package layout
 
 ```txt
 <package>/
 ├─ src/
 │  ├─ index.ts          # public surface
-│  ├─ <module>.ts
-│  └─ <module>.test.ts
+│  └─ <module>.ts
+├─ test/                # package unit/integration tests (common)
 ├─ package.json
-├─ tsconfig.json        # extends ../../tsconfig.base.json
-└─ README.md            # only if non-obvious public surface
+└─ tsconfig.json        # extends ../../tsconfig.base.json
 ```
+
+Some packages keep tests under `test/`; `apps/cli` uses a tiered
+`tests/{unit,integration,e2e}` tree (see Testing).
 
 ### `core` layout
 
 ```txt
 packages/core/src/
 ├─ index.ts
-├─ types/               # domain types (Hypothesis, Decision, …)
-├─ schemas/             # Effect schemas, one per event type
-├─ events/              # event type definitions + migrations
-├─ reducer/             # pure replay function
-├─ redaction/           # pattern engine
-├─ errors/              # tagged error types
-├─ services/            # Effect service definitions
-└─ logger.ts
+├─ state.ts             # SessionState and entity shapes
+├─ reducer.ts           # pure replay
+├─ event-types.ts
+├─ config.ts
+├─ redaction.ts
+├─ constraint-dsl.ts
+└─ …
+packages/core/test/     # unit + golden replay fixtures
+packages/core/fixtures/golden/
 ```
 
 ---
 
 ## Testing
 
-- Vitest. ESM. Watch mode by default in dev.
-- Tests colocated: `event-store.ts` ↔ `event-store.test.ts`.
-- One `describe` per public function. One `it` per behavior, not per line.
+- Vitest. ESM. `vitest --run` in CI; `vitest` / package `test:watch` in dev.
+- **Library packages** (`packages/*`): tests under `test/` (or colocated
+  when a package prefers it). One `describe` per public function; one
+  `it` per behavior.
+- **CLI** (`apps/cli`): three Vitest projects — see `apps/cli/vitest.config.ts`:
+  - `tests/unit/**` — pure modules, no child process (`pnpm test:unit`)
+  - `tests/integration/**` — spawn `node dist/index.js` via
+    `tests/helpers/run-cli.ts` (`pnpm test:integration`, builds first)
+  - `tests/e2e/**` — long flows (`pnpm test:e2e` / `test:ci`)
+  - Default `pnpm test` = unit + integration
 - Assertions: `expect` only. No `assert.equal` from node.
-- Coverage gate: 80% lines, 75% branches for `packages/core` and `packages/db`. Soft target elsewhere.
-- Property tests for the reducer (events in, state out) and the redaction pipeline (input strings).
-- Snapshot tests only for non-essential data (e.g. error messages). Never for reducer state.
-- Use `vitest --run` in CI, `vitest` (watch) in dev.
+- Golden replay fixtures under `packages/core/fixtures/golden/` gate
+  reducer/state changes — do not silently regenerate.
+- Snapshot tests only for non-essential data (e.g. error messages).
+  Never for reducer state.
 
 ---
 
@@ -187,7 +205,14 @@ feat(db): make appendEvent the single redaction boundary
 Every write path now routes through appendEvent so redaction runs
 once, in one place, regardless of caller.
 
-Refs: plan.xml#appendEvent-is-the-redaction-boundary
+Refs: plan/08-event-sourcing-audit.md (redaction boundary)
+```
+
+Commit subjects in this repo often use issue keys:
+
+```txt
+feat: Cognit-<id> short description
+fix: Cognit-<id> short description
 ```
 
 ---
@@ -220,12 +245,16 @@ Hard NOs. If you need one, write the case in the PR description and request a re
 - ❌ `let` for variables that don't change. Use `const`.
 - ❌ `try { ... } catch (e) {}` empty catch. Either rethrow tagged or handle.
 - ❌ Coupling `apps/*` to `packages/*` internals. Public surface is `index.ts`.
-- ❌ Adding a dep without checking `STACK.md → What is NOT`.
+- ❌ Adding a dependency without a clear product need (prefer stdlib / existing workspace packages).
 - ❌ Mutating `payload_json` of an event after append. Events are immutable.
 - ❌ Skipping Effect Schema at the trust boundary.
+- ❌ Inventing a production payload version bump solely to exercise `migratePayload`
+  (see `docs/technical/events.md` — test-local transforms are fine).
 - ❌ Wrapping `scanValue` on a raw value without an envelope — produces empty `fieldPath` and silently drops redaction audit rows.
 - ❌ Inline `key={i}` on React lists. Use stable ids.
 - ❌ Tailwind `!important` (`!` prefix) in `apps/dashboard`. Refactor instead.
+- ❌ Re-implementing gravity ranking in `apps/server` — use `@cognit/gravity`
+  (`rankHypotheses` / axis helpers) for score and `rule_score`.
 
 ## Soft NOs
 
@@ -240,6 +269,10 @@ Acceptable, but write a one-line comment with the reason.
 
 ## Related
 
-- `STACK.md` — the tools and their versions
-- `ARCHITECTURE.md` — how the system fits together
-- `plan.xml` — data model and feature spec
+- [docs/technical/architecture.md](docs/technical/architecture.md) — system layout
+- [docs/technical/data-model.md](docs/technical/data-model.md) — tables + reducer
+- [docs/technical/events.md](docs/technical/events.md) — envelopes + payload migration
+- [docs/technical/scope.md](docs/technical/scope.md) — product boundary / threat model
+- [docs/cli.md](docs/cli.md) — CLI reference
+- [plan/](plan/) — M0–M3 roadmap and design docs
+- Root `package.json` / `turbo.json` — tooling versions

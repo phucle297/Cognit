@@ -129,6 +129,29 @@ Stable contract for scripts (see `apps/cli/src/exit.ts`):
 Helpers: `failUsage(msg)` → 2, `failRuntime(msg)` → 1. Commander parse
 failures (missing required args, unknown options) map to **2**.
 
+## Testing (maintainers)
+
+CLI tests live under `apps/cli/tests/` with three Vitest projects
+(`apps/cli/vitest.config.ts`):
+
+| Tier | Path | How it runs |
+|------|------|-------------|
+| unit | `tests/unit/**` | Pure modules; no child process |
+| integration | `tests/integration/**` | Spawns `node dist/index.js` via `tests/helpers/run-cli.ts` |
+| e2e | `tests/e2e/**` | Longer multi-step / server flows |
+
+Package scripts (`apps/cli/package.json`):
+
+```bash
+pnpm --filter @cognit/cli test              # unit + integration (build first)
+pnpm --filter @cognit/cli test:unit
+pnpm --filter @cognit/cli test:integration  # build then run
+pnpm --filter @cognit/cli test:e2e          # build then run
+pnpm --filter @cognit/cli test:ci           # all three after build
+```
+
+Do not spawn `tsx src/index.ts` in new tests — use `runCli()`.
+
 ## Shell completion
 
 ```bash

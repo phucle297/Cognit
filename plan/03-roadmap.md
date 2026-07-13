@@ -17,11 +17,11 @@ Each milestone is **independently releasable**. Stop after any milestone and sti
 
 **Exit criteria**
 
-- [ ] Re-init never deletes non-Cognit content in project agent instructions.
-- [ ] HTTP verify cannot run shell unless explicitly enabled and bind is loopback.
-- [ ] `cognit --root /path observation "…"` and `COGNIT_ROOT=/path cognit continue` work from any cwd.
-- [ ] Server dist loads migrations without ENOENT.
-- [ ] Regression tests for each fix; suite green.
+- [x] Re-init never deletes non-Cognit content in project agent instructions.
+- [x] HTTP verify cannot run shell unless explicitly enabled and bind is loopback.
+- [x] `cognit --root /path observation "…"` and `COGNIT_ROOT=/path cognit continue` work from any cwd.
+- [x] Server dist loads migrations without ENOENT.
+- [x] Regression tests for each fix; suite green.
 
 **Release note angle:** “Correctness and safety for local single-user use.”
 
@@ -53,13 +53,13 @@ D-M1-00 golden replay
 
 **Exit criteria**
 
-- [ ] Golden fixtures under `packages/core/fixtures/golden/` pass on every core test run.
-- [ ] Any PR touching reducer/state fails CI if goldens diverge (without silent regenerate).
-- [ ] User `redaction.patterns` apply on append (integration test).
-- [ ] Snapshots carry schema version; unknown → full replay.
-- [ ] `_show` does not load all events when snapshot exists.
-- [ ] Snapshot+tail entity state equals full reduce (goldens + targeted tests).
-- [ ] `doctor` reports capture health basics.
+- [x] Golden fixtures under `packages/core/fixtures/golden/` pass on every core test run.
+- [x] Any PR touching reducer/state fails CI if goldens diverge (without silent regenerate).
+- [x] User `redaction.patterns` apply on append (integration test).
+- [x] Snapshots carry schema version; unknown → full replay.
+- [x] `_show` does not load all events when snapshot exists.
+- [x] Snapshot+tail entity state equals full reduce (goldens + targeted tests).
+- [x] `doctor` reports capture health basics.
 
 **Release note angle:** “Trust local memory under real workloads — with replay contracts.”
 
@@ -89,12 +89,12 @@ D-M1-00 golden replay
 
 ## Milestone 3 — Long-term (opportunistic)
 
-| ID | Work | When |
-|----|------|------|
-| D-M3-01 | Non-identity payload transforms + golden fixtures | When a real breaking payload change is required |
-| FTS5 | Only if search fails on real corpora | Deferred |
-| Ontology freeze/delete | Product decision | Deferred |
-| Gravity unify / delete sdk | Cleanup | Anytime low priority |
+| ID | Work | When | Status |
+|----|------|------|--------|
+| D-M3-01 | Non-identity payload transforms + golden fixtures | When a real breaking payload change is required | **Process ready** — docs in `docs/technical/events.md`; test-local non-identity via `transformsFor` in `packages/db/test/migrate.test.ts`. Production `TRANSFORMS` still identity. |
+| FTS5 | Only if search fails on real corpora | Deferred | Deferred |
+| Ontology freeze/delete | Product decision | Deferred | Deferred |
+| Gravity unify / delete sdk | Cleanup | Anytime low priority | **Done** — full axes in `@cognit/gravity`; server thin re-export; `packages/sdk` removed |
 
 **Deliberately excluded:** PostgreSQL, multi-tenant auth, Kafka, CQRS rewrite, dashboard redesign.
 
@@ -107,3 +107,4 @@ D-M1-00 golden replay
 | M0 | `0.1.0` — correctness |
 | M1 | `0.2.0` — reliability |
 | M2 | `0.3.0` — DX / package |
+| M3 cleanup | still `0.3.x` until a real payload break or release train |

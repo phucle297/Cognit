@@ -75,8 +75,8 @@ Order is intentional: **architecture gates first**, capture honesty last.
 | Need Postgres abstraction “for ES purity” | **Reject** — SQLite is the product; core already storage-agnostic enough |
 | Need multi-user auth for production | **Reject** — out of scope; document threat model instead |
 | Ontology must be simplified immediately | **Defer (P2)** — hide internal surface is enough for now |
-| Gravity dual-path is P0 | **Defer** — not ship blocker for core memory path |
-| Dead `packages/sdk` | Cleanup later; not a release blocker |
+| Gravity dual-path is P0 | **Resolved (M3)** — single scorer in `@cognit/gravity` |
+| Dead `packages/sdk` | **Resolved (M3)** — package deleted |
 
 ## Architecture stance
 
@@ -86,8 +86,6 @@ Order is intentional: **architecture gates first**, capture honesty last.
 
 ## Recommendation
 
-Approve **Milestone 0** designs immediately. Implement as four small PRs.  
-Approve **Milestone 1** next for trust over months of use.  
-Treat M2 as productization; M3 as opportunistic.
+M0–M2 shipped; M3 cleanup (gravity unify, sdk delete, payload evolution process) landed. Remaining M3 items (FTS, ontology freeze, real non-identity payload break) stay **on demand**.
 
 **Do not rewrite Cognit.** Harden the kernel you already have.

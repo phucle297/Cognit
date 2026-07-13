@@ -1,7 +1,10 @@
 # Cognit production-quality plan (local-first scope)
 
-**Status:** Architecture plan — **awaiting approval before implementation**  
-**Date:** 2026-07-13  
+**Status:** M0–M2 **implemented** on `main`; M3 opportunistic cleanup **landed**
+(gravity unify, `packages/sdk` removed, D-M3-01 process docs + test-local
+non-identity path). Production payload transforms remain identity until a
+real wire break is required.  
+**Date:** 2026-07-13 (status refresh 2026-07-13)  
 **Tracker:** `Cognit-01f`  
 **Scope:** Single-user, local SQLite, CLI-first memory engine. Not SaaS. Not multi-tenant.
 
@@ -11,8 +14,8 @@ This directory is the implementation roadmap derived from architecture review fi
 
 1. Read [01-executive-summary.md](./01-executive-summary.md).
 2. Skim [02-finding-validation.md](./02-finding-validation.md) for accept/reject decisions.
-3. Use [03-roadmap.md](./03-roadmap.md) for release milestones.
-4. Implement only after approval, **one PR per design doc** under [designs/](./designs/).
+3. Use [03-roadmap.md](./03-roadmap.md) for release milestones and current status.
+4. Designs under [designs/](./designs/) describe the shipped or on-demand work.
 5. Respect [07-do-not-change.md](./07-do-not-change.md) — preserve kernel strengths.
 
 ## Document index
@@ -51,12 +54,12 @@ This directory is the implementation roadmap derived from architecture review fi
 
 ## Implementation rules (binding)
 
-- **No code until this plan is approved.**
-- After approval: **one milestone at a time**, small PRs, each design = one PR series.
+- Prefer **one design / one logical change** per PR series.
 - Every PR: tests + docs + backwards compatibility + migration notes if needed.
 - Never combine unrelated changes.
 - Prefer iterative improvements over rewrites.
 - Reject over-engineering: no microservices, Kafka, forced Postgres, generic repositories, DI sprawl.
+- Do **not** invent a production payload version bump only to prove the migration runner ([D-M3-01](./designs/D-M3-01-payload-evolution.md)).
 
 ## Product boundary (non-negotiable)
 

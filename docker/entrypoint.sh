@@ -28,7 +28,12 @@ case "${APP_NAME:-server}" in
       ${COGNIT_ROOT:+--root "$COGNIT_ROOT"}
     ;;
   cli)
-    exec ./packages/cli/node_modules/.bin/tsx packages/cli/src/index.ts \
+    # Prefer built dist when present (production image); fall back to tsx source.
+    if [ -f apps/cli/dist/index.js ]; then
+      exec node apps/cli/dist/index.js \
+        ${COGNIT_ROOT:+--root "$COGNIT_ROOT"} "$@"
+    fi
+    exec ./apps/cli/node_modules/.bin/tsx apps/cli/src/index.ts \
       ${COGNIT_ROOT:+--root "$COGNIT_ROOT"} "$@"
     ;;
   dev)

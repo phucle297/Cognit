@@ -52,17 +52,17 @@ Legend:
 | Finding | Status | Severity | Evidence | Recommendation |
 |---------|--------|----------|----------|----------------|
 | **Ontology simplification** | **Partial / can wait** | P2 | Large internal surface; public help already trimmed. | Prefer docs + visibility freeze over mass delete. |
-| **Payload migration evolution unproven** | **Partial** | P2 | Identity transforms only; plumbing exists. | Non-identity when needed. [D-M3-01](./designs/D-M3-01-payload-evolution.md) |
+| **Payload migration evolution unproven** | **Partial → process ready** | P2 | Production transforms still identity; runner proven with test-local non-identity + process docs. | Wait for real wire break. [D-M3-01](./designs/D-M3-01-payload-evolution.md), `docs/technical/events.md` |
 | **FTS needed now** | **Invalid as urgent work** | P2 | fuse.js + ranking fine for solo corpora. | Defer until real pain. |
 | **Storage portability (Postgres)** | **Invalid as work item** | — | Product = local SQLite; core pure enough. | **Do not implement.** |
 | **No multi-user / no auth** | **Scope limit** | — | Explicit product decision. | Document threat model; harden loopback only. |
 | **Dependency on CLAUDE.md** | **Scope limit + partial defect** | — | Compliance intentional; overwrite is the defect. | Fix overwrite only. |
-| **Gravity dual implementation** | **Valid but defer** | P2 | Package zeros axes; server reimplements. | Unify later. |
-| **Dead packages/sdk** | **Valid cleanup** | P2 | Unused stub. | Delete in cleanup PR. |
+| **Gravity dual implementation** | **Done** | P2 | Full axes live in `@cognit/gravity`; server re-exports. | — |
+| **Dead packages/sdk** | **Done** | P2 | Package removed. | — |
 | **Dashboard dual trees / ConfigView** | **Partial** | P2 | Placeholders exist. | After CLI kernel. |
 | **Server dashboard static path** | **Partial** | P2 | Monorepo-relative path. | Fix with packaging. |
-| **Root Dockerfile stale paths** | **Valid** | P2 | `packages/cli` references. | Fix in M2 packaging. |
-| **CONVENTIONS.md stale** | **Valid docs** | P2 | Layout outdated. | Docs milestone. |
+| **Root Dockerfile stale paths** | **Done** | P2 | `docker/entrypoint.sh` `cli` branch points at `apps/cli`. | — |
+| **CONVENTIONS.md stale** | **Done** | P2 | Layout + testing + related links refreshed. | — |
 
 ---
 
