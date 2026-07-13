@@ -35,6 +35,9 @@ import {
   scoreHypothesis,
   freshnessForHypothesis,
   meanActorTrust,
+  evidenceStrengthFor,
+  reproducibilityFor,
+  verificationConfidenceFor,
 } from "@cognit/gravity";
 import {
   rankActiveHypothesesFromState,
@@ -115,23 +118,25 @@ export const registerSessionsGravityRoute = (
     //
     // `rule_score` is computed for both branches. When
     // `source === "rule"` it equals `score`. When `source === "ai"`
-    // the package skipped the formula, so we re-run it here using
-    // the same inputs (actors + firedAt) the package would have
-    // used. `delta = ai - rule` so the dashboard can colour the
-    // movement.
+    // the package skipped the formula, so we re-run it here with
+    // the same full 5-axis inputs `rankHypotheses` would have used
+    // (evidence / reproducibility / confidence from SessionState,
+    // plus actors + firedAt). `delta = ai - rule` so the dashboard
+    // can colour the movement.
     const halfLife = DEFAULT_GRAVITY_CFG.gravity.freshness_half_life_days;
     const wire = ranked.map((r) => {
       const h = v.show.state.hypotheses.get(r.id);
       const ai = h?.ai_rank_score ?? null;
       const ruleScore = ((): number => {
         if (r.source === "rule") return r.score;
+        if (h === undefined) return 0;
         const actors = v.actorsByHyp.get(r.id) ?? [];
         const fired = v.firedAt.get(r.id) ?? 0;
         return scoreHypothesis(
           {
-            evidence_strength: 0,
-            reproducibility: 0,
-            verification_confidence: 0,
+            evidence_strength: evidenceStrengthFor(v.show.state, h),
+            reproducibility: reproducibilityFor(v.show.state, h),
+            verification_confidence: verificationConfidenceFor(v.show.state, h),
             actor_trust: meanActorTrust(actors),
             freshness_decay: freshnessForHypothesis(fired, nowSec, halfLife),
           },

@@ -8,6 +8,7 @@
  *      rule_score: 0.xxx
  *   3. One ranked hypothesis → source: "ai", ai_score present, delta
  *      computed
+ *   3b. AI-ranked rule_score rises when a finding is added (full axes)
  *   4. Mixed ranked + unranked → AI scores win ties against rule-only
  *      on the dashboard ordering (the wire shape doesn't carry
  *      `rank_in_source`, but the sort is still by score DESC)
@@ -140,6 +141,38 @@ describe("GET /api/sessions/:id/ai-reasoning (phase C4)", () => {
     expect(row.delta!).toBeCloseTo(0.85 - row.rule_score!, 6);
     expect(row.reasoning).toBe("evidence strong, no recent failures");
     expect(row.ai_rank_event_id).not.toBeNull();
+  });
+
+  it("3b. AI-ranked rule_score includes state-level evidence axis", async () => {
+    // Cognit-796: when source === "ai", rule_score must use the full
+    // 5-axis formula (not trust+freshness only). A finding lifts
+    // evidence_strength by n/(n+3)=0.25 × weight 0.3 → +0.075.
+    const hypId = await post(ctx, "hypothesis_created", {
+      title: "H-evidence",
+      text: "needs findings",
+    });
+    await post(ctx, "hypothesis_ranked", {
+      hypothesis_id: hypId,
+      score: 0.5,
+      reasoning: "mid",
+      evaluator: "ai-supervisor",
+      override_rule_based: true,
+      context_event_ids: [],
+    });
+    const f = fetchApp(ctx.app);
+    const r1 = await f(`/api/sessions/${ctx.sessionId}/ai-reasoning`);
+    expect(r1.status).toBe(200);
+    const before = ((await r1.json()) as AiReasoningResp).data.ranked[0]!
+      .rule_score!;
+
+    await post(ctx, "finding_created", { text: "reproduced flake in CI" });
+    const r2 = await f(`/api/sessions/${ctx.sessionId}/ai-reasoning`);
+    expect(r2.status).toBe(200);
+    const afterRow = ((await r2.json()) as AiReasoningResp).data.ranked[0]!;
+    expect(afterRow.source).toBe("ai");
+    expect(afterRow.rule_score).not.toBeNull();
+    expect(afterRow.rule_score!).toBeGreaterThan(before);
+    expect(afterRow.rule_score! - before).toBeGreaterThanOrEqual(0.07);
   });
 
   it("4. mixed ranked + unranked → order by score DESC, both surfaces", async () => {

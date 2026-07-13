@@ -42,6 +42,9 @@ import {
   scoreHypothesis,
   freshnessForHypothesis,
   meanActorTrust,
+  evidenceStrengthFor,
+  reproducibilityFor,
+  verificationConfidenceFor,
 } from "@cognit/gravity";
 import {
   rankActiveHypothesesFromState,
@@ -304,16 +307,18 @@ export const registerSessionsAiReasoningRoute = (
         // Compute the rule-based score in BOTH branches. When
         // `source === "rule"` the package already returned the same
         // number — we just copy it. When `source === "ai"` the
-        // package skipped the formula, so we run it here.
+        // package skipped the formula, so we re-run the full 5-axis
+        // inputs `rankHypotheses` would have used.
         const ruleScore = ((): number => {
           if (r.source === "rule") return r.score;
+          if (h === undefined) return 0;
           const actors = actorsByHyp.get(r.id) ?? [];
           const fired = firedAt.get(r.id) ?? 0;
           return scoreHypothesis(
             {
-              evidence_strength: 0,
-              reproducibility: 0,
-              verification_confidence: 0,
+              evidence_strength: evidenceStrengthFor(show.state, h),
+              reproducibility: reproducibilityFor(show.state, h),
+              verification_confidence: verificationConfidenceFor(show.state, h),
               actor_trust: meanActorTrust(actors),
               freshness_decay: freshnessForHypothesis(fired, nowSec, halfLife),
             },
