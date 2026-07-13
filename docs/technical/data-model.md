@@ -59,8 +59,8 @@ declared as `Set<string>` literals at the top of `packages/core/src/reducer.ts`:
   folded state.
 
 The wire envelope published into `.cognit/inbox/` is documented in
-`docs/hooks/README.md` (current shape: `version: "1.2.0"` — see
-[Envelope v1.2.0](events.md#envelope-v120-current) for the full field
+[hooks/README.md](../hooks/README.md) (current shape: `version: "1.2.0"` — see
+[Envelope v1.2.0](./events.md#envelope-v120-current) for the full field
 table); the runtime schema registry lives in
 `packages/db/src/event-schema.ts`.
 

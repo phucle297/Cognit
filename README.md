@@ -4,7 +4,11 @@
 
 **What did your AI actually think 3 months ago?**
 
-Local-first reasoning memory for AI coding tools.
+Your AI writes code. Cognit remembers why — the observations,
+decisions, and evidence behind every change — so the next session
+tomorrow, next week, or on a different machine can pick up without
+you re-explaining. Local-first. No server required. No cloud, no
+account, no telemetry.
 
 ---
 
@@ -17,7 +21,7 @@ Local-first reasoning memory for AI coding tools.
 | Claude Code   | the final chat        | chat end           | by session          | until the window closes | never       |
 | Cursor        | the final chat        | chat end           | by session          | until the window closes | never       |
 | Chat logs     | the conversation      | chat end           | by full text        | only if you saved them | never        |
-| **Cognit**    | **why it changed**    | **every step**     | **by meaning**      | **forever, local**| **none of the above** |
+| **Cognit**    | **why it changed**    | **every step**     | **by keyword**      | **forever, local**| **none of the above** |
 
 Cognit does not replace any of those tools. It adds the layer none
 of them have: the reasoning between observation and decision.
@@ -26,60 +30,194 @@ of them have: the reasoning between observation and decision.
 
 ## What you get
 
-- **Searchable.** Every observation, guess, and decision is
-  indexed. Find the reasoning three months from now.
-- **Resumable.** Pick up any investigation from the last
-  conclusion. The next session starts where the last one stopped.
+- **Searchable.** Every observation, decision, and piece of evidence
+  is recorded. Find the reasoning three months from now.
+- **Resumable.** Pick up any investigation from the last conclusion.
+  The next session starts where the last one stopped.
 - **Switchable.** Change AI tools without losing context. Claude
-  today, Codex tomorrow — the reasoning graph is the same.
-- **Local-only.** A single SQLite file on your machine. No cloud,
-  no account, no telemetry.
+  today, Codex tomorrow — the reasoning memory is the same.
+- **Local-first.** All memory lives in a `.cognit/` directory in your
+  project. No cloud, no account, no telemetry.
 
 ---
 
 ## Install
+
+Requirements: **Node.js 22+**, **pnpm 9**, **git**.
 
 ```bash
 git clone https://github.com/phucle297/Cognit
 cd Cognit
 pnpm install
 pnpm build
-pnpm link --global
+cd apps/cli && pnpm link --global
 
 cd <your-project>
 cognit init
 ```
 
-`cognit init` detects which AI tools you have installed (Claude
-Code, Codex, Gemini CLI, OpenCode) and wires Cognit hooks into each
-one automatically. No manual `mkdir`, no `cp`, no JSON editing.
+`cognit init` drops a `.cognit/` directory and a `CLAUDE.md` at your
+project root. That `CLAUDE.md` is what teaches your AI tool when to
+use Cognit — you don't need to read it. If you have Claude Code,
+Codex, Gemini CLI, or OpenCode installed, `init` also wires capture
+hooks into each one automatically.
+
+You run `init` once per project. After that, you can forget Cognit
+exists.
 
 ---
 
-## Use your AI tool normally
+## How it works
+
+Cognit's memory has five shapes — **observations, decisions,
+verifications, conclusions**, read back with **continue / search**.
+
+When your AI tool works in a project where Cognit is initialised, the
+`CLAUDE.md` that `init` wrote tells it to call a few small commands as
+it goes:
+
+- noticed something worth remembering → `cognit observation "..."`
+- about to make a non-trivial choice → `cognit decision propose "..."`
+- ran a test / lint / build / typecheck → `cognit verification "..."`
+- closing a decision with evidence → `cognit conclusion propose "..."`
+
+Each command writes straight to a local SQLite database
+(`.cognit/cognit.db`). Nothing leaves your machine. To pick up where a
+session stopped, the AI (or you) runs:
 
 ```bash
-claude
+cognit continue
 ```
 
-Hooks run on every tool call. Cognit preserves the investigation
-in the background. The dashboard at `http://localhost:5173` shows
-what your AI has been thinking.
+That is the whole product. You don't type these commands — the AI
+does, because the `CLAUDE.md` tells it to.
 
-```bash
-cognit dashboard
-```
+> **Hooks (optional).** `cognit init` also installs *passive* hooks
+> that fire on every AI tool call and drop a JSON record into
+> `.cognit/inbox/`. Those records are only moved into the database when
+> you run `cognit inbox --watch` (or one-shot `cognit inbox --process`).
+> The hook path is optional — the command path above is what captures
+> reasoning day to day, and it needs no background process.
+
+---
+
+## The shape of a day with Cognit
+
+**Morning.** Open Claude Code in your project. Start a task.
+
+**During the day.** You work normally. Read files. Edit code. Run
+tests. Claude proposes a fix, picks between two libraries, runs the
+test suite, finds one failing. You don't run any Cognit commands —
+Claude does. It records the reasoning as it goes: *I noticed X*,
+*I decided Y*, *the test for Z passed*, *the conclusion is W*.
+
+**End of day.** Close the laptop. Everything Claude recorded is saved
+to `.cognit/` in your project. Nothing is lost.
+
+**Tomorrow.** Open Claude Code again. Ask it to continue where it
+stopped. Before it answers, it runs `cognit continue`, reads the
+output — last observation, what was decided, what evidence exists,
+what's still open — and picks up the thread without you saying a word.
+
+### The five concepts
+
+Everything you ever record is one of these.
+
+- **Observation.** A fact noticed during work. One line, no lifecycle.
+  *"auth uses refresh tokens with 1h TTL."*
+- **Decision.** A non-trivial choice. Has a small lifecycle: *proposed*
+  → *accepted* / *rejected*, and later decisions can *supersede*
+  earlier ones. *"fall back to the previous valid key for 60 seconds."*
+- **Verification.** Evidence that something was true at a moment.
+  Always links to a command that ran (`pnpm test`, `pnpm build`, a
+  script). Records passed / failed / errored.
+- **Conclusion.** A claim, backed by verifications. Starts *pending*,
+  becomes *verified* when a passing verification is linked to it.
+- **Continue / Search.** Two ways to read memory back. Continue shows
+  the current session, ranked. Search looks across all past sessions
+  for a topic.
 
 ---
 
 ## Find reasoning later
 
+Two weeks later, you remember you once picked between two libraries
+for the auth layer, but not which one. Don't scroll chat history. Don't
+grep through git log. Run:
+
 ```bash
-cognit recovery search "why did we drop the JWT refresh"
+cognit search "auth library"
 ```
 
-Returns the session, the chain of guesses and checks that led to
-the decision, and a one-click way to resume that investigation.
+You get a list of sessions that mentioned the topic, ranked by how
+strongly each one matches, with a one-line reason per match, plus a
+suggested next step:
+
+```text
+Continue with: 01HXXXX...
+  cognit continue 01HXXXX...
+```
+
+Run that to reopen the session and read its full memory — the chain of
+observations, decisions, and evidence that led to the choice. Search is
+fuzzy keyword over the goals, observations, hypotheses, and decisions,
+so use the words you would say to a teammate.
+
+Want a visual view instead?
+
+```bash
+cognit dashboard
+```
+
+Opens a local dashboard at `http://localhost:5173` that folds the event
+log into a reasoning graph — observations, hypotheses, decisions,
+conclusions, and the evidence linking them.
+
+---
+
+## When something goes wrong
+
+- **`cognit init` failed.** The error names the cause. Common fix:
+  `rm -rf .cognit/cognit.db .cognit/cognit.db-* && cognit init`.
+- **`cognit continue` shows "No memory yet."** The session has nothing
+  recorded yet. Do some work, then re-run.
+- **`cognit search "x"` returns nothing.** No past memory overlaps the
+  query. The output suggests next steps.
+- **Want a full health report?** `cognit doctor`. Each FAIL line
+  includes a one-line fix.
+
+---
+
+## Capture something yourself
+
+Most of the time the AI drives. But sometimes you know something it
+doesn't — a constraint from a meeting, a decision from last quarter.
+Record it directly:
+
+```bash
+cognit observation "we sunset the v1 API on 2026-09-01; do not add new endpoints there"
+```
+
+One line. Tomorrow's session will see it.
+
+## Move memory to another machine
+
+```bash
+cognit export --output project.tar.gz     # source machine
+cognit import --input project.tar.gz      # destination
+```
+
+The bundle contains the project config, database, and (optionally) the
+artifacts directory.
+
+## Start clean
+
+```bash
+cognit reset --yes
+cognit init
+```
+
+Keeps the project config, loses the recorded memories.
 
 ---
 
@@ -95,29 +233,14 @@ Cognit is infrastructure for preserving engineering reasoning.
 
 ---
 
-## How it works (one paragraph)
-
-AI tools call hooks on every tool invocation. Each hook drops a
-small JSON record into `.cognit/inbox/`. A background watcher
-validates and persists each event into SQLite. The dashboard
-folds the event log into a reasoning graph: observations,
-hypotheses, decisions, conclusions. That graph is what makes the
-next session, the next worker, or you-six-months-from-now pick up
-where the last one left off.
-
----
-
 ## Documentation
 
-- [docs/index.md](docs/index.md) — why Cognit exists, 90-second answer
-- [docs/getting-started.md](docs/getting-started.md) — five-minute walkthrough
-- [docs/why.md](docs/why.md) — "Why did AI make this change?"
-- [docs/recover.md](docs/recover.md) — "How do I undo or revisit?"
-- [docs/search.md](docs/search.md) — "How do I find past reasoning?"
-- [docs/cli.md](docs/cli.md) — every command
-- [docs/dashboard.md](docs/dashboard.md) — every tab
+The README is the user guide. Deeper references live under `docs/`:
 
-The README tells you what Cognit is. The docs tell you how.
+- [docs/cli.md](docs/cli.md) — every command and flag
+- [docs/dashboard.md](docs/dashboard.md) — every dashboard route
+- [docs/hooks/README.md](docs/hooks/README.md) — hook capture setup per AI tool
+- [docs/technical/](docs/technical/) — architecture, data model, storage, config internals
 
 ---
 
@@ -127,6 +250,11 @@ The README tells you what Cognit is. The docs tell you how.
 rm -rf .cognit
 pnpm rm -g cognit
 ```
+
+Cognit stores everything inside `.cognit/` in your project. Removing
+that folder wipes all local reasoning memory. Removing the global
+package takes the CLI off your `PATH`. Nothing lives outside those two
+places.
 
 ---
 

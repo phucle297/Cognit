@@ -2,7 +2,7 @@
 
 Cognit is a local-first cognition layer for AI-assisted engineering. This page
 gives a one-screen view of how the moving parts fit together; each subsystem is
-documented in its own file under `docs/`.
+documented in its own file under `docs/technical/`.
 
 ## Top-level layout
 
@@ -37,7 +37,7 @@ places instead:
   command and translates its output into inbox envelopes.
 - `hooks/` (repo root) — reference hook scripts that publish inbox JSON
   envelopes for external CLIs (Claude Code, Codex, OpenCode, Gemini CLI).
-  These are explained in `docs/hooks.md` and `docs/hooks/README.md`.
+  These are explained in `docs/hooks/README.md`.
 
 ## Data flow
 
@@ -70,9 +70,9 @@ dashboard, server, and CLI all read back.
 
 ## Subsystem docs
 
-- `docs/data-model.md` — tables, events, reducer.
-- `docs/configuration.md` — `cognit.yaml` schema.
-- `docs/storage.md` — SQLite file + `.cognit/` directory.
-- `docs/cli.md` — CLI subcommand reference.
-- `docs/dashboard.md` — dashboard route reference.
-- `docs/hooks.md` — how external CLIs publish to Cognit.
+- [data-model.md](./data-model.md) — tables, events, reducer.
+- [configuration.md](./configuration.md) — `cognit.yaml` schema.
+- [storage.md](./storage.md) — SQLite file + `.cognit/` directory.
+- [cli.md](../cli.md) — CLI subcommand reference.
+- [dashboard.md](../dashboard.md) — dashboard route reference.
+- [hooks/README.md](../hooks/README.md) — how external CLIs publish to Cognit.

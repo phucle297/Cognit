@@ -81,7 +81,7 @@ the Claude Code / Codex PostToolUse path except for `actor_name`
 }
 ```
 
-Canonical envelope (v1.2.0 FLAT — see [`docs/events.md`](../events.md)):
+Canonical envelope (v1.2.0 FLAT — see [`docs/technical/events.md`](../technical/events.md)):
 
 ```json
 {

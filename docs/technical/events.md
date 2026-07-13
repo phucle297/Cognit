@@ -113,7 +113,7 @@ FLAT shape documented above.
 | `actor_name` not in `actors` table       | `actor_not_registered`          | watcher, before persistence            |
 | `actor_type` not literal `"worker"`      | `invalid_actor_type`            | watcher, before persistence            |
 
-See `docs/hooks/README.md` for the canonical category list.
+See [hooks/README.md](../hooks/README.md) for the canonical category list.
 
 ## Versioning policy
 

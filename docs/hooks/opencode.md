@@ -69,7 +69,7 @@ hypothesis_created emission across providers.
 }
 ```
 
-Canonical envelope (v1.2.0 FLAT — see [`docs/events.md`](../events.md)):
+Canonical envelope (v1.2.0 FLAT — see [`docs/technical/events.md`](../technical/events.md)):
 
 ```json
 {

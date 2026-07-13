@@ -95,7 +95,7 @@ section.
 }
 ```
 
-Canonical envelope (v1.2.0 FLAT — see [`docs/events.md`](../events.md)
+Canonical envelope (v1.2.0 FLAT — see [`docs/technical/events.md`](../technical/events.md)
 for the full schema):
 
 ```json
