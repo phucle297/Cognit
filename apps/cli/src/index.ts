@@ -39,6 +39,8 @@ import { registerContinue } from "./commands/continue.js";
 import { registerSearch } from "./commands/search.js";
 import { setOutputMode } from "./output.js";
 import { applyInternalVisibility, setShowInternal } from "./visibility.js";
+import { exitCodeFromError } from "./exit.js";
+import { registerCompletion } from "./commands/completion.js";
 
 const program = new Command();
 
@@ -46,6 +48,10 @@ program
   .name("cognit")
   .description("Cognit — remembers why your code looks like this. Local-first.")
   .version("0.0.0");
+
+// Throw CommanderError instead of process.exit so we can map usage
+// failures to exit code 2 (D-M2-01 contract).
+program.exitOverride();
 
 // Global --json flag (3b). When set, every command's stdout switches
 // to the stable JSON envelope `{ version: 1, kind, data }`. Stored
@@ -124,6 +130,7 @@ registerObservationAlias(program);
 registerVerificationAlias(program);
 registerContinue(program);
 registerSearch(program);
+registerCompletion(program);
 
 // Initial visibility pass — public help shows only init / session ls
 // / dashboard until the user passes --internal.
@@ -149,6 +156,14 @@ for (const sub of program.commands) {
 }
 
 program.parseAsync(process.argv).catch((err: unknown) => {
-  process.stderr.write(`cognit: ${(err as Error).message}\n`);
-  process.exit(1);
+  const code = exitCodeFromError(err);
+  // Commander already printed usage/help for parse failures. Commands that
+  // call failUsage/failRuntime also already wrote to stderr.
+  const e = err as { code?: string; message?: string };
+  const isCommander = typeof e.code === "string" && e.code.startsWith("commander.");
+  const alreadyReported = typeof process.exitCode === "number";
+  if (!isCommander && !alreadyReported) {
+    process.stderr.write(`cognit: ${e.message ?? String(err)}\n`);
+  }
+  process.exit(code);
 });

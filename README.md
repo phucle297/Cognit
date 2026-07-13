@@ -10,6 +10,21 @@ tomorrow, next week, or on a different machine can pick up without
 you re-explaining. Local-first. No server required. No cloud, no
 account, no telemetry.
 
+## Single-user, local-first
+
+Cognit is built for **one developer on one machine**:
+
+| You get | You do **not** get |
+|---------|---------------------|
+| Memory in `.cognit/` (SQLite) on disk | Team / multi-tenant sync |
+| Optional loopback dashboard | Cloud account or SaaS |
+| `export` / `import` tar to move projects | Live multi-machine replication |
+| Hooks into your local AI CLIs | Shared org memory plane |
+
+**Multi-machine** = export on A, copy the archive, import on B. There
+is no background sync. Threat model and non-goals:
+[docs/technical/scope.md](docs/technical/scope.md).
+
 ---
 
 ## Why not [Git | Jira | Claude Code | Cursor | chat logs]?
@@ -43,15 +58,39 @@ of them have: the reasoning between observation and decision.
 
 ## Install
 
-Requirements: **Node.js 22+**, **pnpm 9**, **git**.
+Requirements: **Node.js 22+**, **pnpm 9**, **git**. Docker is optional
+(only if you want the containerized server).
+
+### Recommended (from source)
 
 ```bash
 git clone https://github.com/phucle297/Cognit
 cd Cognit
-pnpm install
-pnpm build
-cd apps/cli && pnpm link --global
+./scripts/up.sh --no-docker   # install + build + link CLI to PATH
+```
 
+`scripts/up.sh` runs `pnpm install`, builds the CLI, and links `cognit`
+onto your global pnpm bin. Omit `--no-docker` to also start the local
+server via Docker Compose.
+
+### Manual equivalent
+
+```bash
+pnpm install
+pnpm --filter @cognit/cli build
+cd apps/cli && pnpm link --global
+```
+
+### npm package (when published)
+
+```bash
+npm install -g @cognit/cli
+# requires Node 22+; better-sqlite3 uses prebuilds (build tools only if prebuild missing)
+```
+
+### First project
+
+```bash
 cd <your-project>
 cognit init
 ```
@@ -64,6 +103,24 @@ hooks into each one automatically.
 
 You run `init` once per project. After that, you can forget Cognit
 exists.
+
+### Shell completion
+
+```bash
+cognit completion fish   # print script to stdout
+cognit completion bash
+cognit completion zsh
+```
+
+```fish
+# fish
+cognit completion fish > ~/.config/fish/completions/cognit.fish
+```
+
+```bash
+# bash — eval once, or write into bash-completion dir
+eval "$(cognit completion bash)"
+```
 
 ---
 
@@ -119,23 +176,19 @@ stopped. Before it answers, it runs `cognit continue`, reads the
 output — last observation, what was decided, what evidence exists,
 what's still open — and picks up the thread without you saying a word.
 
-### The five concepts
+### The five concepts (public verbs)
 
-Everything you ever record is one of these.
+Everything you ever record is one of these. Full CLI reference:
+[docs/cli.md](docs/cli.md). Power ontology and advanced lifecycle
+commands live behind `cognit --internal`.
 
-- **Observation.** A fact noticed during work. One line, no lifecycle.
-  *"auth uses refresh tokens with 1h TTL."*
-- **Decision.** A non-trivial choice. Has a small lifecycle: *proposed*
-  → *accepted* / *rejected*, and later decisions can *supersede*
-  earlier ones. *"fall back to the previous valid key for 60 seconds."*
-- **Verification.** Evidence that something was true at a moment.
-  Always links to a command that ran (`pnpm test`, `pnpm build`, a
-  script). Records passed / failed / errored.
-- **Conclusion.** A claim, backed by verifications. Starts *pending*,
-  becomes *verified* when a passing verification is linked to it.
-- **Continue / Search.** Two ways to read memory back. Continue shows
-  the current session, ranked. Search looks across all past sessions
-  for a topic.
+| Concept | Public command | Role |
+|---------|----------------|------|
+| Observation | `cognit observation "..."` | Fact noticed during work (one line) |
+| Decision | `cognit decision propose "..."` | Non-trivial choice (propose → accept/reject/supersede) |
+| Verification | `cognit verification "<cmd>" --type test\|lint\|build\|typecheck` | Evidence from a command run |
+| Conclusion | `cognit conclusion propose "..."` | Claim backed by verifications |
+| Continue / Search | `cognit continue` / `cognit search "..."` | Read memory back (session or topic) |
 
 ---
 
@@ -237,7 +290,8 @@ Cognit is infrastructure for preserving engineering reasoning.
 
 The README is the user guide. Deeper references live under `docs/`:
 
-- [docs/cli.md](docs/cli.md) — every command and flag
+- [docs/cli.md](docs/cli.md) — every command, flag, exit codes, completion
+- [docs/technical/scope.md](docs/technical/scope.md) — product scope & threat model
 - [docs/dashboard.md](docs/dashboard.md) — every dashboard route
 - [docs/hooks/README.md](docs/hooks/README.md) — hook capture setup per AI tool
 - [docs/technical/](docs/technical/) — architecture, data model, storage, config internals

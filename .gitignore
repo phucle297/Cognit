@@ -28,3 +28,7 @@ coverage/
 .bv/
 .cognit/
 .claude/worktrees
+
+# CLI pack artifacts (D-M2-04)
+apps/cli/*.tgz
+apps/cli/.pack-staging/

@@ -1,11 +1,31 @@
 {
   "name": "@cognit/cli",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.3.0",
+  "description": "Cognit CLI — local-first memory for AI-assisted engineering",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "cognit": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phucle297/Cognit.git",
+    "directory": "apps/cli"
+  },
+  "keywords": [
+    "cognit",
+    "cli",
+    "local-first",
+    "ai",
+    "memory",
+    "sqlite"
+  ],
   "scripts": {
     "build": "tsup && pnpm run copy-migrations",
     "dev": "tsx watch src/index.ts",
@@ -18,7 +38,9 @@
     "test:e2e": "pnpm run build && vitest --run --project e2e",
     "test:ci": "pnpm run build && vitest --run",
     "test:watch": "vitest --project unit --project integration",
-    "clean": "rm -rf dist .turbo"
+    "pack:publish": "node scripts/pack-publish.mjs",
+    "pack:smoke": "node scripts/pack-publish.mjs --smoke",
+    "clean": "rm -rf dist .turbo .pack-staging *.tgz"
   },
   "dependencies": {
     "@cognit/agent": "workspace:*",
@@ -27,6 +49,7 @@
     "@cognit/llm": "workspace:*",
     "@cognit/verification": "workspace:*",
     "@cognit/wrap": "workspace:*",
+    "better-sqlite3": "^12.11.1",
     "chokidar": "^5.0.0",
     "commander": "^15.0.0",
     "effect": "3.21.3",
@@ -36,7 +59,6 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.9.3",
-    "better-sqlite3": "^12.11.1",
     "tsup": "^8.5.1",
     "tsx": "^4.22.4",
     "vitest": "^4.1.9"

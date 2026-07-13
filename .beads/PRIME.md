@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: M1 — Reliability (golden replay, redaction, snapshots, capture signals)
+search: M2 — DX & distribution
 queue: 
-next: Cognit-sfl
+next: Cognit-22d

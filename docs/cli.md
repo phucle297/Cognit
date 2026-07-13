@@ -112,7 +112,48 @@ project prints "already exists; nothing to do" and exits 0.
 - `--root <path>` — project root for this invocation (default: `$COGNIT_ROOT`
   or `process.cwd()`). Registered in `apps/cli/src/index.ts` on the
   `program` symbol.
+- `--internal` — reveal internal commands in help (power users / AI).
 - `--version` — printed from the Commander program header.
+
+## Exit codes
+
+Stable contract for scripts (see `apps/cli/src/exit.ts`):
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Runtime / internal failure (DB open, I/O, unexpected) |
+| `2` | Usage / validation / not a Cognit project / bad args |
+| `3+` | Reserved |
+
+Helpers: `failUsage(msg)` → 2, `failRuntime(msg)` → 1. Commander parse
+failures (missing required args, unknown options) map to **2**.
+
+## Shell completion
+
+```bash
+cognit completion fish   # print fish script
+cognit completion bash
+cognit completion zsh
+```
+
+Install examples (append to your shell config):
+
+```fish
+# fish
+cognit completion fish > ~/.config/fish/completions/cognit.fish
+```
+
+```bash
+# bash
+cognit completion bash > ~/.local/share/bash-completion/completions/cognit
+# or: eval "$(cognit completion bash)"
+```
+
+```zsh
+# zsh
+cognit completion zsh > "${fpath[1]}/_cognit"
+```
 
 ## Advanced lifecycle commands
 

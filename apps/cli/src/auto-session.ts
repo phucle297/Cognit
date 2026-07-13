@@ -28,6 +28,7 @@ import { readConfig } from "./yaml-io.js";
 import { readCurrentSession, writeCurrentSession } from "./current-session.js";
 import { warnStalePointer } from "./session-resolver.js";
 import { withAppLayer } from "./layer-build.js";
+import { failUsage } from "./exit.js";
 
 export interface AutoSessionResult {
   readonly sessionId: string;
@@ -176,10 +177,7 @@ export async function ensureSession(input: EnsureInput): Promise<AutoSessionResu
 export function requireProjectRoot(): string {
   const root = findProjectRoot();
   if (!root) {
-    process.stderr.write(
-      "cognit: no .cognit/cognit.yaml found. Run `cognit init` first.\n",
-    );
-    process.exitCode = 2;
+    failUsage("no .cognit/cognit.yaml found. Run `cognit init` first.");
     throw new Error("not in a cognit project");
   }
   return root;

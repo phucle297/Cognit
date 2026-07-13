@@ -78,10 +78,10 @@ D-M1-00 golden replay
 
 **Exit criteria**
 
-- [ ] Documented exit codes; tests for 0/1/2 classes.
-- [ ] README states single-user local scope clearly.
-- [ ] `cognit completion fish|bash|zsh` works.
-- [ ] Install path without full monorepo clone (or equivalent binary).
+- [x] Documented exit codes; tests for 0/1/2 classes.
+- [x] README states single-user local scope clearly.
+- [x] `cognit completion fish|bash|zsh` works.
+- [x] Install path without full monorepo clone (or equivalent binary).
 
 **Release note angle:** “Installable power-user tool.”
 
