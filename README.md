@@ -66,12 +66,21 @@ Requirements: **Node.js 22+**, **pnpm 9**, **git**. Docker is optional
 ```bash
 git clone https://github.com/phucle297/Cognit
 cd Cognit
-./scripts/up.sh --no-docker   # install + build + link CLI to PATH
+pnpm run setup -- --no-docker   # or: ./scripts/up.sh --no-docker
 ```
 
-`scripts/up.sh` runs `pnpm install`, builds the CLI, and links `cognit`
-onto your global pnpm bin. Omit `--no-docker` to also start the local
-server via Docker Compose.
+`pnpm run setup` is an alias for `scripts/up.sh`. It runs
+`pnpm install`, builds the CLI, and links `cognit` onto your global
+pnpm bin. Pass flags after `--` (e.g. `-- --no-docker`).
+
+| Goal | Command |
+|------|---------|
+| CLI only (no Docker) | `pnpm run setup -- --no-docker` |
+| CLI + local server (Docker Compose) | `pnpm run setup` |
+| Same via shell script | `./scripts/up.sh` / `./scripts/up.sh --no-docker` |
+
+Useful `up.sh` / `setup` flags: `--no-docker`, `--build`,
+`--force-recreate` (the latter two pass through to Docker Compose).
 
 ### Manual equivalent
 
@@ -122,6 +131,27 @@ cognit completion fish > ~/.config/fish/completions/cognit.fish
 eval "$(cognit completion bash)"
 ```
 
+### Teardown (dev / from source)
+
+Mirror of setup — stops Docker, unlinks the global CLI, optionally
+wipes local state:
+
+```bash
+pnpm run remove                 # or: ./scripts/down.sh
+pnpm run remove -- --purge      # also delete this repo's .cognit/
+pnpm run remove -- --clean      # also pnpm clean (node_modules + .turbo)
+pnpm run remove -- --purge --clean --yes   # full nuke, no prompts
+```
+
+| Flag | Effect |
+|------|--------|
+| (none) | Docker down + remove global `cognit` link |
+| `--purge` | Also `rm -rf .cognit/` in the Cognit repo |
+| `--clean` | Also wipe workspace `node_modules` / `.turbo` |
+| `--yes` / `-y` | Skip confirmation prompts |
+
+Does **not** touch `.beads/` (separate issue tracker).
+
 ---
 
 ## How it works
@@ -155,6 +185,12 @@ does, because the `CLAUDE.md` tells it to.
 > you run `cognit inbox --watch` (or one-shot `cognit inbox --process`).
 > The hook path is optional — the command path above is what captures
 > reasoning day to day, and it needs no background process.
+>
+> Orphan `.tmp` files left by a crashed atomic write are ignored by the
+> watcher. Clean them with `cognit inbox --clean-tmp` (default: older
+> than 30 days; config `cleanup.inbox_tmp_max_age_days`). AI-safe:
+> `cognit --json inbox --clean-tmp`. See
+> [docs/hooks/README.md](docs/hooks/README.md).
 
 ---
 
@@ -236,6 +272,10 @@ conclusions, and the evidence linking them.
   recorded yet. Do some work, then re-run.
 - **`cognit search "x"` returns nothing.** No past memory overlaps the
   query. The output suggests next steps.
+- **Inbox full of `.tmp` files / hooks fail with EEXIST.** Crashed
+  producers can leave orphan temps. Run
+  `cognit inbox --clean-tmp` (or `--dry-run` first). Defaults to files
+  older than 30 days; use `--max-age-days 0` to clear all orphans.
 - **Want a full health report?** `cognit doctor`. Each FAIL line
   includes a one-line fix.
 
@@ -300,15 +340,31 @@ The README is the user guide. Deeper references live under `docs/`:
 
 ## Uninstall
 
+**From a source checkout** (preferred if you used `pnpm run setup`):
+
 ```bash
-rm -rf .cognit
-pnpm rm -g cognit
+pnpm run remove -- --yes          # stop Docker + unlink global CLI
+# optional: wipe this repo's .cognit/ and node_modules
+pnpm run remove -- --purge --clean --yes
 ```
 
-Cognit stores everything inside `.cognit/` in your project. Removing
-that folder wipes all local reasoning memory. Removing the global
-package takes the CLI off your `PATH`. Nothing lives outside those two
-places.
+**Per-project memory** (any machine where you ran `cognit init`):
+
+```bash
+rm -rf .cognit                    # in that project root
+```
+
+**CLI only** (if you installed without the scripts):
+
+```bash
+pnpm rm -g @cognit/cli            # or: pnpm rm -g cognit
+```
+
+Cognit stores project memory inside `.cognit/` at each project root.
+Removing that folder wipes local reasoning for that project. Teardown
+via `pnpm run remove` / `scripts/down.sh` also drops the global CLI
+link and optional Docker volumes. Nothing else is required for a
+clean uninstall.
 
 ---
 
