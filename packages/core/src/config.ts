@@ -44,6 +44,12 @@ type UnreferencedAction = Schema.Schema.Type<typeof UnreferencedAction>;
 
 const CleanupConfig = Schema.Struct({
   artifact_max_age_days: Schema.optionalWith(PositiveInt, { default: () => 30 }),
+  /**
+   * Age threshold for orphan `.tmp` files in `.cognit/inbox/`.
+   * Used by `cognit inbox --clean-tmp`. Default 30 days. `0` means
+   * delete every leftover `.tmp` (any mtime ≤ now).
+   */
+  inbox_tmp_max_age_days: Schema.optionalWith(NonNegativeInt, { default: () => 30 }),
   unreferenced_action: Schema.optionalWith(UnreferencedAction, {
     default: () => "archive" as const,
   }),
@@ -266,6 +272,7 @@ export const CognitConfigSchema = Schema.Struct({
     default: () =>
       ({
         artifact_max_age_days: 30,
+        inbox_tmp_max_age_days: 30,
         unreferenced_action: "archive" as const,
         max_db_size_mb: 1024,
       }) as const,

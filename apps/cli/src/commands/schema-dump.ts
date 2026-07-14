@@ -53,6 +53,7 @@ export interface JsonEnvelopeV1<T = unknown> {
 //   "edge.list"         → data: EdgeListRow[]
 //   "append"            → data: EventRow
 //   "inbox.process"     → data: { processed: string[]; errors: string[] }
+//   "inbox.clean_tmp"   → data: { dryRun, maxAgeDays, scanned, removed, kept, files }
 `;
 
 export function registerSchemaDump(program: Command): void {

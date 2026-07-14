@@ -464,6 +464,109 @@ export const inboxIgnored = (p: string): boolean => {
 };
 
 /**
+ * Options for age-based cleanup of orphan inbox `.tmp` files.
+ *
+ * Producers write `<session>-<ulid>.json.tmp` then rename to `.json`
+ * (see `@cognit/wrap` atomicWriteJson). A crash mid-write can leave a
+ * `.tmp` behind; the watcher never processes those files, and a later
+ * producer may fail with EEXIST because open uses `O_EXCL`.
+ *
+ * This helper is the intentional janitor. It only touches **top-level**
+ * entries in `inboxDir` whose names end with `.tmp` — never
+ * `_error/`, `processed/`, or complete `.json` envelopes.
+ */
+export interface CleanInboxTmpOptions {
+  readonly inboxDir: string;
+  /** Delete `.tmp` files whose mtime is at least this many days old. `0` = all. */
+  readonly maxAgeDays: number;
+  /** When true, list candidates but do not unlink. Default false. */
+  readonly dryRun?: boolean;
+  /** Injectable clock for tests (ms since epoch). Default `Date.now()`. */
+  readonly nowMs?: number;
+}
+
+export interface CleanInboxTmpResult {
+  readonly scanned: number;
+  readonly removed: number;
+  readonly kept: number;
+  /** Absolute paths of files removed (or that would be removed in dry-run). */
+  readonly files: ReadonlyArray<string>;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Remove orphan `.tmp` files from the inbox root older than
+ * `maxAgeDays`. Safe for AI / scripts: never touches `.json`
+ * envelopes, never recurses into `_error` or `processed`.
+ *
+ * Returns counts + the list of affected paths. Failures on individual
+ * unlinks are ignored (best-effort) so one locked file does not abort
+ * the rest of the scan.
+ */
+export const cleanInboxTmp = (
+  opts: CleanInboxTmpOptions,
+): Effect.Effect<CleanInboxTmpResult, never> =>
+  Effect.gen(function* () {
+    const nowMs = opts.nowMs ?? Date.now();
+    const maxAgeMs = Math.max(0, opts.maxAgeDays) * DAY_MS;
+    const dryRun = opts.dryRun === true;
+
+    const names = yield* Effect.tryPromise({
+      try: () => fs.readdir(opts.inboxDir),
+      catch: (e) => e,
+    }).pipe(Effect.orElseSucceed(() => [] as string[]));
+
+    let scanned = 0;
+    let removed = 0;
+    let kept = 0;
+    const files: string[] = [];
+
+    for (const name of names) {
+      if (!name.endsWith(".tmp")) continue;
+      const full = path.join(opts.inboxDir, name);
+      scanned += 1;
+
+      const stResult = yield* Effect.tryPromise({
+        try: () => fs.stat(full),
+        catch: (e) => e,
+      }).pipe(Effect.either);
+
+      if (Either.isLeft(stResult) || !stResult.right.isFile()) {
+        kept += 1;
+        continue;
+      }
+      const st = stResult.right;
+
+      const ageMs = nowMs - st.mtimeMs;
+      if (ageMs < maxAgeMs) {
+        kept += 1;
+        continue;
+      }
+
+      if (dryRun) {
+        removed += 1;
+        files.push(full);
+        continue;
+      }
+
+      const unlinked = yield* Effect.tryPromise({
+        try: () => fs.unlink(full).then(() => true as const),
+        catch: (e) => e,
+      }).pipe(Effect.orElseSucceed(() => false as const));
+
+      if (unlinked) {
+        removed += 1;
+        files.push(full);
+      } else {
+        kept += 1;
+      }
+    }
+
+    return { scanned, removed, kept, files };
+  });
+
+/**
  * One-shot drain of every `.json` file currently in `inboxDir`. Each
  * file is processed exactly once through `processFile` (which moves
  * successful files to `processedDir` and failed files to `errorDir`).

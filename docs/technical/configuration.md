@@ -66,7 +66,7 @@ auth section** — local-only tool, server binds to loopback by default.
 |--------------|---------------------------------------------------|----------------------------------------------------------------------------------------------------------|
 | `project`    | `:18`                                              | Project identity (name on disk; the id is the project's `.cognit/` path).                                |
 | `redaction`  | `:23-38`                                           | Built-in + user regex patterns applied to event payloads (`{ name, regex, replacement }`).                |
-| `cleanup`    | `:40-49`                                           | GC tunables consumed by `cognit gc`: `artifact_max_age_days`, `unreferenced_action`, `max_db_size_mb`.    |
+| `cleanup`    | `:40-55`                                           | GC tunables: `artifact_max_age_days` (`cognit gc`), `inbox_tmp_max_age_days` (`cognit inbox --clean-tmp`, default 30), `unreferenced_action`, `max_db_size_mb`. |
 | `session`    | `:51-54`                                           | Snapshot cadence (`snapshot_every_n_events`) and resume policy (`fork_on_resume`).                       |
 | `actors`     | `:56-77`                                           | Per-type trust defaults + an explicit list of known emitters (`{ name, trust_score }`).                  |
 | `inbox`      | `:79-83`                                           | Watcher behaviour. `debounce_ms` is the minimum mtime-age before a file is considered complete.          |

@@ -98,6 +98,23 @@ to (a `printf > tmp && python fsync tmp` split loses the guarantee
 if bash-side writes have not flushed to the kernel page cache
 before Python reopens the file).
 
+### Orphan `.tmp` cleanup
+
+The watcher **ignores** every path ending in `.tmp`. On a producer
+crash mid-write, leftovers can accumulate and block a later write of
+the same name (`O_EXCL`). Clean them with:
+
+```bash
+cognit inbox --clean-tmp                 # delete .tmp older than cleanup.inbox_tmp_max_age_days (default 30)
+cognit inbox --clean-tmp --dry-run       # list only
+cognit inbox --clean-tmp --max-age-days 0  # delete every orphan .tmp
+cognit --json inbox --clean-tmp          # stable JSON for AI / scripts
+```
+
+Only top-level `.cognit/inbox/*.tmp` files are considered — never
+complete `.json` envelopes, `_error/`, or `processed/`. Config key:
+`cleanup.inbox_tmp_max_age_days` in `cognit.yaml`.
+
 ### Inbox resolution
 
 The destination directory is resolved in this order:

@@ -4,6 +4,7 @@ import {
   ActorDefaults,
   ActorDefaultsBuiltIn,
   actorDefaultsLayer,
+  cleanInboxTmp,
   drainInbox,
   RedactionConfigDefault,
   runInboxWatcher,
@@ -18,6 +19,9 @@ import { getOutputMode, emit } from "../output.js";
 interface InboxOptions {
   watch?: boolean;
   process?: boolean;
+  cleanTmp?: boolean;
+  dryRun?: boolean;
+  maxAgeDays?: string;
 }
 
 const requireProjectRoot = (): string => {
@@ -95,24 +99,88 @@ const runInboxCommand = <A, E, R>(
 /**
  * `cognit inbox --watch` — start a chokidar watcher (long-running).
  * `cognit inbox --process` — drain the current inbox once.
+ * `cognit inbox --clean-tmp` — delete orphan `.tmp` files older than
+ *   `cleanup.inbox_tmp_max_age_days` (default 30). Safe for AI callers
+ *   (`--json`, no confirm prompt). Optional `--dry-run` / `--max-age-days`.
  *
- * Both paths read `cognit.yaml` once at command entry so the
+ * Watch/process paths read `cognit.yaml` once at command entry so the
  * snapshot policy travels with every append. Reading is async, so
  * this action is `async` end-to-end.
  */
 export function registerInbox(program: Command): void {
   program
     .command("inbox")
-    .description("watch or process the local inbox (.cognit/inbox/) — see docs/hooks/README.md for hook setup")
+    .description(
+      "watch, process, or clean the local inbox (.cognit/inbox/) — see docs/hooks/README.md for hook setup",
+    )
     .option("--watch", "start a long-running chokidar watcher")
     .option("--process", "drain the inbox queue once and exit")
+    .option(
+      "--clean-tmp",
+      "remove orphan .tmp files older than cleanup.inbox_tmp_max_age_days (default 30); AI-safe, no confirm",
+    )
+    .option("--dry-run", "with --clean-tmp: list candidates without deleting")
+    .option(
+      "--max-age-days <n>",
+      "with --clean-tmp: override cleanup.inbox_tmp_max_age_days (0 = all .tmp)",
+    )
     .action(async (opts: InboxOptions) => {
       const root = requireProjectRoot();
-      if (!opts.watch && !opts.process) {
-        process.stderr.write("cognit: inbox requires --watch or --process\n");
+      if (!opts.watch && !opts.process && !opts.cleanTmp) {
+        process.stderr.write(
+          "cognit: inbox requires --watch, --process, or --clean-tmp\n",
+        );
         process.exitCode = 2;
         return;
       }
+
+      // --clean-tmp does not need the DB layer: pure filesystem janitor.
+      if (opts.cleanTmp) {
+        const yaml = await readConfig(projectPaths(root).config);
+        const maxAgeDays =
+          opts.maxAgeDays !== undefined
+            ? Number.parseInt(opts.maxAgeDays, 10)
+            : yaml.cleanup.inbox_tmp_max_age_days;
+        if (!Number.isFinite(maxAgeDays) || maxAgeDays < 0) {
+          process.stderr.write(
+            "cognit: --max-age-days must be a non-negative integer\n",
+          );
+          process.exitCode = 2;
+          return;
+        }
+        const dryRun = !!opts.dryRun;
+        const result = await Effect.runPromise(
+          cleanInboxTmp({
+            inboxDir: projectPaths(root).inbox,
+            maxAgeDays,
+            dryRun,
+          }),
+        );
+        if (getOutputMode() === "json") {
+          emit("json", "inbox.clean_tmp", {
+            dryRun,
+            maxAgeDays,
+            scanned: result.scanned,
+            removed: result.removed,
+            kept: result.kept,
+            files: result.files,
+          });
+          return;
+        }
+        process.stdout.write(
+          `${dryRun ? "would_remove" : "removed"}: ${result.removed}\n`,
+        );
+        process.stdout.write(`kept:    ${result.kept}\n`);
+        process.stdout.write(`scanned: ${result.scanned}\n`);
+        process.stdout.write(`max_age_days: ${maxAgeDays}\n`);
+        if (result.files.length > 0 && dryRun) {
+          for (const f of result.files) {
+            process.stdout.write(`  ${f}\n`);
+          }
+        }
+        return;
+      }
+
       const policy = await loadSessionPolicy(root);
       const actorDefaults = await loadActorDefaults(root);
       const config = await buildInboxConfigFromYaml(root);

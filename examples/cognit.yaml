@@ -10,6 +10,7 @@ redaction:
 
 cleanup:
   artifact_max_age_days: 30
+  inbox_tmp_max_age_days: 30
   unreferenced_action: archive
   max_db_size_mb: 1024
 

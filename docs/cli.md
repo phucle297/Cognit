@@ -39,7 +39,7 @@ count. Each lives in its own file under `apps/cli/src/commands/`.
 | 16 | `edge`       | `apps/cli/src/commands/edge.ts`                 | Add or list edges between entities in a session (`edge_created` events).                 |
 | 17 | `constraint` | `apps/cli/src/commands/constraint.ts`           | Manage user-defined constraint rules.                                                    |
 | 18 | `redaction`  | `apps/cli/src/commands/redaction.ts`            | Dry-run redaction against the built-in + user pattern set.                               |
-| 19 | `inbox`      | `apps/cli/src/commands/inbox.ts`                | Watch or process the local inbox (`.cognit/inbox/`). See `docs/hooks/README.md`.         |
+| 19 | `inbox`      | `apps/cli/src/commands/inbox.ts`                | Watch, process, or clean the local inbox (`.cognit/inbox/`). Flags: `--watch`, `--process`, `--clean-tmp` (+ `--dry-run`, `--max-age-days`). See `docs/hooks/README.md`. |
 | 20 | `events`     | `apps/cli/src/commands/events.ts`               | List events for a session (optionally follow new events).                                |
 | 21 | `wrap`       | `apps/cli/src/commands/wrap.ts`                 | Spawn a worker command and translate its output into inbox envelopes.                    |
 

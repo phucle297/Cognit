@@ -25,6 +25,7 @@ import { SessionServiceLive } from "../src/session-service";
 import { SnapshotServiceLive } from "../src/snapshot-service";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../src/constraint-policy";
 import {
+  cleanInboxTmp,
   inboxIgnored,
   makeInboxWatcher,
   runInboxWatcher,
@@ -643,6 +644,81 @@ describe("inbox processFile", () => {
     // Files inside a `processed/` or `_error/` segment → ignored.
     expect(inboxIgnored(path.join(root, "inbox", "processed", "x.json"))).toBe(true);
     expect(inboxIgnored(path.join(root, "inbox", "_error", "x.json"))).toBe(true);
+  });
+});
+
+describe("cleanInboxTmp — age-based orphan .tmp janitor", () => {
+  let inboxDir: string;
+  const nowMs = Date.UTC(2026, 6, 14); // fixed clock
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  beforeEach(async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "cognit-clean-tmp-"));
+    inboxDir = path.join(root, "inbox");
+    await fs.mkdir(inboxDir, { recursive: true });
+  });
+
+  const touch = async (name: string, ageDays: number): Promise<string> => {
+    const full = path.join(inboxDir, name);
+    await fs.writeFile(full, "partial");
+    const mtime = new Date(nowMs - ageDays * dayMs);
+    await fs.utimes(full, mtime, mtime);
+    return full;
+  };
+
+  it("removes .tmp older than maxAgeDays and keeps younger ones", async () => {
+    const oldPath = await touch("old.json.tmp", 45);
+    const youngPath = await touch("young.json.tmp", 5);
+    const jsonPath = path.join(inboxDir, "keep.json");
+    await fs.writeFile(jsonPath, "{}");
+
+    const result = await Effect.runPromise(
+      cleanInboxTmp({ inboxDir, maxAgeDays: 30, nowMs }),
+    );
+
+    expect(result.scanned).toBe(2);
+    expect(result.removed).toBe(1);
+    expect(result.kept).toBe(1);
+    expect(result.files).toEqual([oldPath]);
+    await expect(fs.access(oldPath)).rejects.toThrow();
+    await expect(fs.access(youngPath)).resolves.toBeUndefined();
+    await expect(fs.access(jsonPath)).resolves.toBeUndefined();
+  });
+
+  it("dry-run lists candidates without deleting", async () => {
+    const oldPath = await touch("stale.json.tmp", 40);
+    const result = await Effect.runPromise(
+      cleanInboxTmp({ inboxDir, maxAgeDays: 30, dryRun: true, nowMs }),
+    );
+    expect(result.removed).toBe(1);
+    expect(result.files).toEqual([oldPath]);
+    await expect(fs.access(oldPath)).resolves.toBeUndefined();
+  });
+
+  it("maxAgeDays 0 deletes every .tmp", async () => {
+    await touch("a.json.tmp", 0.001);
+    await touch("b.json.tmp", 10);
+    const result = await Effect.runPromise(
+      cleanInboxTmp({ inboxDir, maxAgeDays: 0, nowMs }),
+    );
+    expect(result.removed).toBe(2);
+    expect((await fs.readdir(inboxDir)).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("does not recurse into _error or process non-.tmp files", async () => {
+    const errDir = path.join(inboxDir, "_error");
+    await fs.mkdir(errDir, { recursive: true });
+    const nested = path.join(errDir, "nested.json.tmp");
+    await fs.writeFile(nested, "x");
+    const mtime = new Date(nowMs - 60 * dayMs);
+    await fs.utimes(nested, mtime, mtime);
+    await touch("root.json.tmp", 60);
+
+    const result = await Effect.runPromise(
+      cleanInboxTmp({ inboxDir, maxAgeDays: 30, nowMs }),
+    );
+    expect(result.removed).toBe(1);
+    await expect(fs.access(nested)).resolves.toBeUndefined();
   });
 });
 

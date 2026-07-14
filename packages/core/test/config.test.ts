@@ -41,6 +41,25 @@ describe("cognit.yaml schema", () => {
     expect(parsed.redaction.enabled).toBe(true);
     expect(parsed.inbox.watch).toBe(true);
     expect(parsed.inbox.debounce_ms).toBe(200);
+    expect(parsed.cleanup.inbox_tmp_max_age_days).toBe(30);
+    expect(parsed.cleanup.artifact_max_age_days).toBe(30);
+  });
+
+  it("accepts cleanup.inbox_tmp_max_age_days including 0", () => {
+    const parsed = parseCognitConfig({
+      project: { name: "x" },
+      cleanup: { inbox_tmp_max_age_days: 0 },
+    });
+    expect(parsed.cleanup.inbox_tmp_max_age_days).toBe(0);
+  });
+
+  it("rejects negative cleanup.inbox_tmp_max_age_days", () => {
+    expect(() =>
+      parseCognitConfig({
+        project: { name: "x" },
+        cleanup: { inbox_tmp_max_age_days: -1 },
+      }),
+    ).toThrow();
   });
 
   it("rejects empty project names", () => {
