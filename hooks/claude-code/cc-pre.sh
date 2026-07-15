@@ -67,6 +67,7 @@ input="$(cat)"
 
 # Session id: COGNIT_SESSION_ID → sticky pointer → mint + stick (see hook-lib.sh).
 session="$(cognits_session_id)"
+actor_name="$(cognits_actor_name "$session" "claude" "$input")"
 
 tool="$(jq -r '.tool_name // "unknown"' <<<"$input")"
 file_path="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // ""' <<<"$input")"
@@ -99,7 +100,7 @@ payload="$(jq -n \
   --arg version   "1.2.0" \
   --arg session   "$session" \
   --arg type      "hypothesis_created" \
-  --arg actorName "claude-code" \
+  --arg     actorName "$actor_name" \
   --arg title     "$title" \
   --arg text      "$text" \
   --arg id        "$event_id" \

@@ -13,7 +13,6 @@ import { Activity, ChevronRight, HelpCircle, Search, X } from "lucide-react";
 
 import { useApi } from "@/lib/use-api";
 import { useEventSource } from "@/lib/use-event-source";
-import { apiFetch } from "@/lib/api-client";
 import { Badge } from "@/shared/ui/badge";
 import { Breadcrumb } from "@/shared/ui/breadcrumb";
 import { Button } from "@/shared/ui/button";
@@ -28,6 +27,7 @@ import { StatusPill } from "@/shared/ui/status-pill";
 import type { StatusKey } from "@/shared/config/status";
 import { PauseSseButton } from "@/components/PauseSseButton";
 import type { EventRowShape } from "@/components/EventRow";
+import { normalizeEvent, normalizeEvents } from "@/lib/normalize-event";
 import { formatIso, formatPayloadSummary, formatUlid } from "@/lib/format";
 import {
   RejectionSheet,
@@ -68,14 +68,17 @@ export const TimelinePage = (): JSX.Element => {
 
   const [initialEvents, setInitialEvents] = useState<ReadonlyArray<EventRowShape>>([]);
   useEffect(() => {
-    if (initial.data?.events) setInitialEvents([...initial.data.events].reverse());
+    if (initial.data?.events) {
+      // API returns raw DB rows; map to UI shape (kind/ts/payload/actor).
+      setInitialEvents([...normalizeEvents(initial.data.events)].reverse());
+    }
   }, [initial.data]);
 
   const liveForSession = useMemo<ReadonlyArray<EventRowShape>>(() => {
     if (!sessionId) return [];
     return live.events
-      .map((e) => e.data)
-      .filter((d): d is EventRowShape => Boolean(d && typeof d === "object" && "id" in d))
+      .map((e) => normalizeEvent(e.data))
+      .filter((d): d is EventRowShape => d !== null)
       .filter((d) => d.session_id === sessionId);
   }, [live.events, sessionId]);
 
@@ -168,17 +171,16 @@ export const TimelinePage = (): JSX.Element => {
       setFullEvent(null);
       return;
     }
-    let cancelled = false;
-    apiFetch<{ event: unknown }>(`/api/events/${encodeURIComponent(selectedEvent.id)}`)
-      .then((r) => {
-        if (!cancelled) setFullEvent(r.event);
-      })
-      .catch(() => {
-        if (!cancelled) setFullEvent({ error: "Failed to load event detail" });
-      });
-    return () => {
-      cancelled = true;
-    };
+    // Prefer the already-normalized row payload (list endpoint has full
+    // payload_json). Optional GET /api/events/:id is not implemented yet.
+    setFullEvent({
+      id: selectedEvent.id,
+      kind: selectedEvent.kind,
+      session_id: selectedEvent.session_id,
+      actor: selectedEvent.actor,
+      ts: selectedEvent.ts,
+      payload: selectedEvent.payload,
+    });
   }, [selectedEvent]);
 
   if (!sessionId) {

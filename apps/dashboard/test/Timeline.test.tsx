@@ -204,4 +204,55 @@ describe("TimelinePage (6.8.2.P4)", () => {
     expect(await screen.findByText(/no matching events/i)).toBeInTheDocument();
     expect(screen.getByTestId("timeline-clear-filters")).toBeInTheDocument();
   });
+  it("maps wire DB rows (type/payload_json/created_at) into the table", async () => {
+    const wireEvents = [
+      {
+        id: "01EV0000000000000000000001",
+        type: "observation_recorded",
+        session_id: "01TEST",
+        actor_id: "01ACT",
+        created_at: "2026-06-17T10:00:00.000Z",
+        payload_json: JSON.stringify({ text: "tool Bash returned", tool: "Bash" }),
+      },
+      {
+        id: "01EV0000000000000000000002",
+        type: "session_created",
+        session_id: "01TEST",
+        actor_id: "01ACT",
+        created_at: "2026-06-17T09:00:00.000Z",
+        payload_json: JSON.stringify({ goal: "inbox session", parent_session_id: null }),
+      },
+    ];
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/events")) {
+        return Promise.resolve(
+          new Response(envelope({ events: wireEvents }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      if (String(url).endsWith("/sessions/01TEST")) {
+        return Promise.resolve(
+          new Response(
+            envelope({ session: { id: "01TEST", goal: "demo goal", status: "active" } }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    }) as unknown as typeof fetch;
+
+    renderTimeline();
+
+    expect(await screen.findByTestId("timeline-page")).toBeInTheDocument();
+    await waitFor(() => {
+      const kinds = screen.getAllByTestId("timeline-event-kind").map((el) => el.textContent);
+      expect(kinds).toEqual(expect.arrayContaining(["observation_recorded", "session_created"]));
+      expect(kinds.length).toBe(2);
+    });
+    // summary from payload (formatPayloadSummary → "text: tool Bash returned")
+    expect(screen.getByText(/text: tool Bash returned/i)).toBeInTheDocument();
+  });
+
 });

@@ -18,10 +18,13 @@ export const listRecentAcrossProjectE = (
 ): Effect.Effect<ReadonlyArray<EventRow>, never, DbConnection> =>
   Effect.gen(function* () {
     const conn = yield* DbConnection;
-    const rows = conn.handle.all<EventRow>(
-      `SELECT * FROM events
-       WHERE project_id = ?
-       ORDER BY created_at DESC, id DESC
+    type Row = EventRow & { readonly actor?: string | null };
+    const rows = conn.handle.all<Row>(
+      `SELECT e.*, a.name AS actor
+       FROM events e
+       LEFT JOIN actors a ON a.id = e.actor_id
+       WHERE e.project_id = ?
+       ORDER BY e.created_at DESC, e.id DESC
        LIMIT ?`,
       [projectId, limit],
     );
@@ -36,10 +39,14 @@ export const listRecentForSessionE = (
 ): Effect.Effect<ReadonlyArray<EventRow>, never, DbConnection> =>
   Effect.gen(function* () {
     const conn = yield* DbConnection;
-    const rows = conn.handle.all<EventRow>(
-      `SELECT * FROM events
-       WHERE session_id = ?
-       ORDER BY created_at DESC, id DESC
+    // Join actors so the dashboard can show model+hash (or name), not raw ULID.
+    type Row = EventRow & { readonly actor?: string | null };
+    const rows = conn.handle.all<Row>(
+      `SELECT e.*, a.name AS actor
+       FROM events e
+       LEFT JOIN actors a ON a.id = e.actor_id
+       WHERE e.session_id = ?
+       ORDER BY e.created_at DESC, e.id DESC
        LIMIT ?`,
       [sessionId, limit],
     );

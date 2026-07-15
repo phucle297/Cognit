@@ -34,7 +34,7 @@ INBOX="${SMOKE}/.cognit/inbox"
 mkdir -p "$INBOX"
 trap 'rm -rf "$SMOKE"' EXIT
 
-SESSION="01H7SESS10NCODEXPRE00000001"
+SESSION="01H7SESS10NC0DEXPRE0000001"
 printf '%s' "$SESSION" > "${SMOKE}/.cognit/current-session"
 
 # Stage a known-files allowlist under a temp HOME so the script's
@@ -57,7 +57,7 @@ JSON
 # Run the hook with the resolved absolute path. After it exits, list
 # the envelope it wrote. `set -o pipefail` ensures the head pipeline
 # surfaces a real error if the inbox is empty.
-cd "$SMOKE" && env HOME="$TEST_HOME" COGNIT_INBOX="$INBOX" bash "$HOOK" <<<"$input"
+cd "$SMOKE" && env HOME="$TEST_HOME" env -u COGNIT_MODEL -u ANTHROPIC_MODEL -u CLAUDE_MODEL -u GEMINI_MODEL -u OPENAI_MODEL -u LITELLM_MODEL -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_OPUS_MODEL -u ANTHROPIC_DEFAULT_HAIKU_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL COGNIT_INBOX="$INBOX" bash "$HOOK" <<<"$input"
 envelope="$(ls "$INBOX"/*.json 2>/dev/null | head -n 1)"
 
 if [[ -z "$envelope" || ! -f "$envelope" ]]; then
@@ -99,10 +99,11 @@ if [[ "$version" != "1.2.0" ]]; then
   exit 1
 fi
 
-# 5. actor_name = "codex"
+# 5. actor_name = <model>+<hash> (default family codex when no MODEL env)
 actor_name="$(jq -r '.actor_name' "$envelope")"
-if [[ "$actor_name" != "codex" ]]; then
-  echo "FAIL: expected actor_name=codex, got actor_name=$actor_name" >&2
+expected_actor="codex+${SESSION: -6}"
+if [[ "$actor_name" != "$expected_actor" ]]; then
+  echo "FAIL: expected actor_name=$expected_actor, got actor_name=$actor_name" >&2
   exit 1
 fi
 

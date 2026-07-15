@@ -45,7 +45,7 @@ JSON
 )
 
 # Run from the smoke root so the project-relative ./cognit paths resolve.
-output_file="$(cd "$SMOKE" && env COGNIT_INBOX="$INBOX" bash "$HOOK" <<<"$input")"
+output_file="$(cd "$SMOKE" && env -u COGNIT_MODEL -u ANTHROPIC_MODEL -u CLAUDE_MODEL -u GEMINI_MODEL -u OPENAI_MODEL -u LITELLM_MODEL -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_OPUS_MODEL -u ANTHROPIC_DEFAULT_HAIKU_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL COGNIT_INBOX="$INBOX" bash "$HOOK" <<<"$input")"
 
 # The script emits to stdout nothing (we pipe it anyway to keep the
 # shell happy). Find the envelope file written to $INBOX.
@@ -68,10 +68,11 @@ if [[ "$version" != "1.2.0" ]]; then
   exit 1
 fi
 
-# 2. actor_name = "claude-code"
+# 2. actor_name = <model>+<session-hash6> (default model family "claude")
 actor_name="$(jq -r '.actor_name' "$envelope")"
-if [[ "$actor_name" != "claude-code" ]]; then
-  echo "FAIL: expected actor_name=claude-code, got actor_name=$actor_name" >&2
+expected_actor="claude+${SESSION: -6}"
+if [[ "$actor_name" != "$expected_actor" ]]; then
+  echo "FAIL: expected actor_name=$expected_actor, got actor_name=$actor_name" >&2
   exit 1
 fi
 

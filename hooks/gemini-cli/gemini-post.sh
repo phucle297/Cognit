@@ -70,6 +70,7 @@ input="$(cat)"
 
 # Session id: COGNIT_SESSION_ID → sticky pointer → mint + stick (see hook-lib.sh).
 session="$(cognits_session_id)"
+actor_name="$(cognits_actor_name "$session" "gemini" "$input")"
 
 tool="$(jq -r '.tool_name // "unknown"' <<<"$input")"
 tool_input="$(jq -c '.tool_input // {}' <<<"$input")"
@@ -89,7 +90,7 @@ payload="$(jq -n \
   --arg     version   "1.2.0" \
   --arg     session   "$session" \
   --arg     type      "observation_recorded" \
-  --arg     actorName "gemini-cli" \
+  --arg     actorName "$actor_name" \
   --arg     tool      "$tool" \
   --argjson toolInput "$tool_input" \
   --argjson toolResp  "$tool_response" \

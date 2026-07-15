@@ -42,6 +42,23 @@ const encodeRandom = (len = 16): string => {
 
 const mintUlid = (): string => encodeTime(Date.now()) + encodeRandom();
 
+const resolveActorName = (sessionId: string): string => {
+  const hash = sessionId.length >= 6 ? sessionId.slice(-6) : "000000";
+  const raw =
+    process.env.COGNIT_MODEL?.trim() ||
+    process.env.ANTHROPIC_MODEL?.trim() ||
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL?.trim() ||
+    process.env.OPENAI_MODEL?.trim() ||
+    process.env.LITELLM_MODEL?.trim() ||
+    "opencode";
+  const short = raw
+    .toLowerCase()
+    .replace(/[^a-z0-9._+-]/g, "")
+    .slice(0, 40) || "opencode";
+  return `${short}+${hash}`;
+};
+
+
 const projectRoot = (): string => process.cwd();
 const cognitDir = (): string => join(projectRoot(), ".cognit");
 const stickyPath = (): string => join(cognitDir(), "current-session");
@@ -122,10 +139,11 @@ const send = (params: {
 export const CognitInbox: Plugin = async () => ({
   "tool.execute.after": async (input, output) => {
     try {
+      const sessionId = resolveSessionId();
       send({
         type: "observation_recorded",
-        sessionId: resolveSessionId(),
-        actorName: "opencode",
+        sessionId,
+        actorName: resolveActorName(sessionId),
         payload: {
           text: `tool ${input.tool} returned`,
           tool: input.tool,

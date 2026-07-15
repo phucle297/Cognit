@@ -45,7 +45,7 @@ input=$(cat <<JSON
 JSON
 )
 
-output_file="$(cd "$SMOKE" && env COGNIT_INBOX="$INBOX" bash "$HOOK" <<<"$input")"
+output_file="$(cd "$SMOKE" && env -u COGNIT_MODEL -u ANTHROPIC_MODEL -u CLAUDE_MODEL -u GEMINI_MODEL -u OPENAI_MODEL -u LITELLM_MODEL -u ANTHROPIC_DEFAULT_SONNET_MODEL -u ANTHROPIC_DEFAULT_OPUS_MODEL -u ANTHROPIC_DEFAULT_HAIKU_MODEL -u ANTHROPIC_SMALL_FAST_MODEL -u CLAUDE_CODE_SUBAGENT_MODEL COGNIT_INBOX="$INBOX" bash "$HOOK" <<<"$input")"
 
 envelope="$(ls "$INBOX"/*.json 2>/dev/null | head -n 1)"
 if [[ -z "$envelope" || ! -f "$envelope" ]]; then
@@ -68,8 +68,9 @@ fi
 
 # 2. actor_name = "gemini-cli"
 actor_name="$(jq -r '.actor_name' "$envelope")"
-if [[ "$actor_name" != "gemini-cli" ]]; then
-  echo "FAIL: expected actor_name=gemini-cli, got actor_name=$actor_name" >&2
+expected_actor="gemini+${SESSION: -6}"
+if [[ "$actor_name" != "$expected_actor" ]]; then
+  echo "FAIL: expected actor_name=$expected_actor, got actor_name=$actor_name" >&2
   exit 1
 fi
 
