@@ -131,6 +131,9 @@ export function registerGc(program: Command): void {
           if (process.exitCode === undefined) process.exitCode = 1;
           return;
         }
+        // §3.1: sweep stale inbox/_error files (envelopes + reason
+        // sidecars) older than maxAgeDays. Dry-run reports only.
+        const errorSweep = await sweepInboxError(paths.inboxError, maxAgeDays, dryRun);
         if (getOutputMode() === "json") {
           emit("json", "gc", {
             dryRun,
@@ -141,10 +144,17 @@ export function registerGc(program: Command): void {
             archived: result.archived,
             deleted: result.deleted,
             kept: result.kept,
+            inboxErrorSwept: errorSweep.removed,
+            inboxErrorStale: errorSweep.stale,
           });
           return;
         }
         printReport(result, dryRun, config.cleanup.unreferenced_action, maxAgeDays);
+        if (errorSweep.stale > 0) {
+          process.stdout.write(
+            `inbox/_error: ${errorSweep.removed} stale file(s) ${dryRun ? "would be " : ""}removed (older than ${maxAgeDays}d)\n`,
+          );
+        }
       },
     );
 }
@@ -167,6 +177,43 @@ const readLine = (): Promise<string> =>
     process.stdin.on("data", onData);
     process.stdin.once("end", onEnd);
   });
+
+/**
+ * Sweep stale files from `inbox/_error/` (envelopes + `.reason.txt`
+ * sidecars) whose mtime is older than `maxAgeDays`. Dry-run counts
+ * without unlinking. Returns `{ stale, removed }`.
+ */
+const sweepInboxError = async (
+  errorDir: string,
+  maxAgeDays: number,
+  dryRun: boolean,
+): Promise<{ stale: number; removed: number }> => {
+  const fsp = await import("node:fs/promises");
+  const nodePath = await import("node:path");
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  let entries: string[];
+  try {
+    entries = await fsp.readdir(errorDir);
+  } catch {
+    return { stale: 0, removed: 0 };
+  }
+  let stale = 0;
+  let removed = 0;
+  for (const name of entries) {
+    const p = nodePath.join(errorDir, name);
+    try {
+      const st = await fsp.stat(p);
+      if (st.mtimeMs >= cutoff) continue;
+      stale += 1;
+      if (dryRun) continue;
+      await fsp.unlink(p);
+      removed += 1;
+    } catch {
+      // stat/unlink race — skip silently.
+    }
+  }
+  return { stale, removed };
+};
 
 class GcHardStopError extends Error {
   readonly _tag = "GcHardStopError";

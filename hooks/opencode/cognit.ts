@@ -38,6 +38,7 @@ import {
   writeFileSync,
   mkdirSync,
 } from "node:fs";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { ulid } from "ulid";
 import type { Plugin } from "@opencode-ai/plugin";
@@ -91,6 +92,22 @@ const send = (params: {
     closeSync(fd);
   }
   renameSync(tmp, dest);
+
+  // D-M4-00 §4.1: when COGNIT_REALTIME=1 (from cognit env --shell when
+  // inbox.realtime is true), fire-and-forget a one-shot drain. Never
+  // await; never let a missing/failing cognit block the host.
+  if (process.env.COGNIT_REALTIME === "1") {
+    try {
+      const child = spawn("cognit", ["inbox", "--process"], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+    } catch {
+      // ignore — optional path
+    }
+  }
+
   return dest;
 };
 
@@ -111,7 +128,7 @@ export const CognitInbox: Plugin = async () => ({
         // OpenCode does not expose a stable session id today; the
         // placeholder ULID lets the watcher parse the envelope while
         // the first session-registration envelope re-maps the actor.
-        sessionId: process.env.COGNIT_SESSION_ID ?? "01HXXXXXXXXXXXXXXXXXXXXXXXX",
+        sessionId: process.env.COGNIT_SESSION_ID ?? "01HXXXXXXXXXXXXXXXXXXXXXXX",
         actorName: "opencode",
         payload: {
           text: `tool ${input.tool} returned`,

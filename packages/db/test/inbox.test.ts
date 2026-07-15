@@ -34,7 +34,12 @@ import {
 
 const makeTestLayer = (dbPath: string) => {
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
-  const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
+  const leafs = Layer.mergeAll(
+    RedactorLiveWithDefault,
+    MigrationRegistryLive,
+    UuidTest,
+    LoggerNoop,
+  );
   // Build a complete live layer the same way `DbLive` does in
   // production, but with our test connection. The watcher needs
   // `SessionService` on its R channel; `SessionService` pulls in
@@ -58,19 +63,13 @@ const makeTestLayer = (dbPath: string) => {
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, SessionPolicyDefault), leafs),
     Layer.merge(
-      Layer.merge(
-        Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
-        dbConn,
-      ),
+      Layer.merge(Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy), dbConn),
       EventBusNoop,
     ),
   );
   return Layer.merge(
     Layer.merge(
-      Layer.merge(
-        Layer.merge(eventStore, sessionService),
-        snapshotService,
-      ),
+      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
       constraintPolicy,
     ),
     Layer.merge(dbConn, LoggerNoop),
@@ -111,7 +110,7 @@ const withTempDirs = async (): Promise<{
 };
 
 const setupSession = (conn: Context.Tag.Service<typeof DbConnection>): string => {
-  const projectId = "0123456789ABCDEFGHJKMNPQRX";
+  const projectId = PROJECT_ID;
   // Valid ULID (Crockford base32): uppercase letters, 26 chars, no I/L/O/U.
   const sessionId = "0123456789ABCDEFGHJKMNPQRS";
   const h = conn.handle;
@@ -136,6 +135,8 @@ const EVENT_ULID = "0123456789ABCDEFGHJKMNPQRT";
 const INBOX_FILENAME = `${SESSION_ULID}-${EVENT_ULID}.json`;
 const UNKNOWN_SESSION_ULID = "0123456789ABCDEFGHJKMNPQRV";
 const SECOND_EVENT_ULID = "0123456789ABCDEFGHJKMNPQRW";
+/** Project id seeded by `setupSession`; required on every inbox config. */
+const PROJECT_ID = "0123456789ABCDEFGHJKMNPQRX";
 
 /** Write a JSON envelope to a path under `dir`. */
 const writeEnvelope = async (
@@ -160,6 +161,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
       type: "observation_recorded",
@@ -197,6 +199,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const file = path.join(dirs.inbox, `${SESSION_ULID}-${EVENT_ULID}.json`);
     await fs.writeFile(file, "{ this is not valid json", "utf8");
@@ -224,6 +227,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
       // Missing version, session_id, actor_name, actor_type, payload.
@@ -252,6 +256,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
       type: "observation_recorded",
@@ -284,6 +289,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     // Valid envelope shape, but filename doesn't match `<session>-<event>.json`.
     const badName = `${SESSION_ULID}-just-some-file.json`;
@@ -318,6 +324,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     // hypothesis_created requires `text` and `confidence`.
     const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
@@ -351,6 +358,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
       type: "observation_recorded",
@@ -390,42 +398,53 @@ describe("inbox processFile", () => {
     expect(row?.c).toBe(0);
   });
 
-  it("moves a file with unknown session_id to error dir, category=unknown_session_id", async () => {
+  it("auto-creates a bootstrap session for an unknown session_id (§2 lazy-create) and processes the file", async () => {
     const config: InboxWatcherConfig = {
       inboxDir: dirs.inbox,
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     // Envelope + filename OK, but session_id doesn't exist in DB.
-    const file = await writeEnvelope(
-      dirs.inbox,
-      `${UNKNOWN_SESSION_ULID}-${EVENT_ULID}.json`,
-      {
-        type: "observation_recorded",
-        version: "1.1.0",
-        session_id: UNKNOWN_SESSION_ULID,
-        actor_name: "inboxer",
-        actor_type: "worker",
-        payload: { text: "lost session" },
-      },
-    );
+    const file = await writeEnvelope(dirs.inbox, `${UNKNOWN_SESSION_ULID}-${EVENT_ULID}.json`, {
+      type: "observation_recorded",
+      version: "1.1.0",
+      session_id: UNKNOWN_SESSION_ULID,
+      actor_name: "inboxer",
+      actor_type: "worker",
+      payload: { text: "lost session" },
+    });
 
     const program = Effect.gen(function* () {
       const conn = yield* DbConnection;
       setupSession(conn);
       const { processFile } = yield* makeInboxWatcher(config);
       yield* processFile(file);
+      // §2: unknown session_id is lazy-created. The observation lands
+      // under a freshly-minted session — never under UNKNOWN_SESSION_ULID.
+      const obs = conn.handle.get<{ session_id: string }>(
+        "SELECT session_id FROM events WHERE type = 'observation_recorded'",
+      );
+      expect(obs?.session_id).not.toBe(UNKNOWN_SESSION_ULID);
+      const minted = obs
+        ? conn.handle.get<{ id: string; status: string; project_id: string }>(
+            "SELECT id, status, project_id FROM sessions WHERE id = ?",
+            [obs.session_id],
+          )
+        : undefined;
+      expect(minted?.status).toBe("active");
+      expect(minted?.project_id).toBe(PROJECT_ID);
     });
 
     await Effect.runPromise(
       program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<void, never, never>,
     );
+    // The file is processed, not errored.
     const errored = await fs.readdir(dirs.error);
-    const name = `${UNKNOWN_SESSION_ULID}-${EVENT_ULID}.json`;
-    expect(errored).toContain(name);
-    const reason = await fs.readFile(path.join(dirs.error, `${name}.reason.txt`), "utf8");
-    expect(reason.split("\n")[0]).toMatch(/^unknown_session_id:/);
+    expect(errored).toEqual([]);
+    const processed = await fs.readdir(dirs.processed);
+    expect(processed.filter((n) => n.endsWith(".json"))).toHaveLength(1);
   });
 
   it("emits actor_registered event on first auto-registration with trust from defaults", async () => {
@@ -434,6 +453,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
       type: "observation_recorded",
@@ -495,6 +515,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     // Pre-seed the actor row with trust_score=0 (e.g. admin banned it).
     const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
@@ -513,7 +534,14 @@ describe("inbox processFile", () => {
       conn.handle.run(
         `INSERT INTO actors (id, type, name, trust_score, first_seen_at, last_seen_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        ["0123456789ABCDEFGHJKMNPQRY", "worker", "banned-worker", 0, new Date().toISOString(), new Date().toISOString()],
+        [
+          "0123456789ABCDEFGHJKMNPQRY",
+          "worker",
+          "banned-worker",
+          0,
+          new Date().toISOString(),
+          new Date().toISOString(),
+        ],
       );
       const { processFile } = yield* makeInboxWatcher(config);
       yield* processFile(file);
@@ -534,33 +562,25 @@ describe("inbox processFile", () => {
     expect(actor?.trust_score).toBe(0.6);
 
     // A pre-existing trust > 0 is NOT overwritten (the WHERE guard).
-    conn.handle.run(
-      "UPDATE actors SET trust_score = ? WHERE name = ?",
-      [0.42, "banned-worker"],
-    );
+    conn.handle.run("UPDATE actors SET trust_score = ? WHERE name = ?", [0.42, "banned-worker"]);
     // Re-process another file from the same actor.
-    const file2 = await writeEnvelope(
-      dirs.inbox,
-      `${SESSION_ULID}-${SECOND_EVENT_ULID}.json`,
-      {
-        type: "observation_recorded",
-        version: "1.1.0",
-        session_id: SESSION_ULID,
-        actor_name: "banned-worker",
-        actor_type: "worker",
-        payload: { text: "second sighting" },
-      },
-    );
+    const file2 = await writeEnvelope(dirs.inbox, `${SESSION_ULID}-${SECOND_EVENT_ULID}.json`, {
+      type: "observation_recorded",
+      version: "1.1.0",
+      session_id: SESSION_ULID,
+      actor_name: "banned-worker",
+      actor_type: "worker",
+      payload: { text: "second sighting" },
+    });
     const program2 = Effect.gen(function* () {
       const conn2 = yield* DbConnection;
       const { processFile } = yield* makeInboxWatcher(config);
       yield* processFile(file2);
       // Re-fetch the row at the end of the same tx context.
       return yield* Effect.sync(() =>
-        conn2.handle.get<{ trust_score: number }>(
-          "SELECT trust_score FROM actors WHERE name = ?",
-          ["banned-worker"],
-        ),
+        conn2.handle.get<{ trust_score: number }>("SELECT trust_score FROM actors WHERE name = ?", [
+          "banned-worker",
+        ]),
       );
     });
     const rowAfter = await Effect.runPromise(
@@ -579,6 +599,7 @@ describe("inbox processFile", () => {
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const sessionId = SESSION_ULID;
     await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
@@ -750,15 +771,13 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
    * line of the sidecar reason.txt (e.g. `invalid_json: ...`,
    * `schema_validation_failure: ...`, `unknown_session_id: ...`).
    */
-  const processAndReadReason = async (
-    file: string,
-    dbPath: string,
-  ): Promise<string> => {
+  const processAndReadReason = async (file: string, dbPath: string): Promise<string> => {
     const config: InboxWatcherConfig = {
       inboxDir: dirs.inbox,
       processedDir: dirs.processed,
       errorDir: dirs.error,
       debounceMs: 50,
+      projectId: PROJECT_ID,
     };
     const program = Effect.gen(function* () {
       const conn = yield* DbConnection;
@@ -843,6 +862,7 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
         processedDir: dirs.processed,
         errorDir: dirs.error,
         debounceMs: 50,
+        projectId: PROJECT_ID,
       };
       const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
         type: "observation_recorded",
@@ -860,7 +880,11 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
         yield* processFile(file);
       });
       await Effect.runPromise(
-        program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<void, never, never>,
+        program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<
+          void,
+          never,
+          never
+        >,
       );
       // A valid envelope should NOT be in _error/ and SHOULD be in
       // processed/. ProcessFile is idempotent on the event id.
@@ -880,9 +904,16 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
      * (the schema fires before payload validation reaches the same
      * constraint).
      */
-    const outOfRange = (confidence: number | string): {
-      type: string; version: string; session_id: string; actor_name: string;
-      actor_type: string; id: string; confidence: number | string;
+    const outOfRange = (
+      confidence: number | string,
+    ): {
+      type: string;
+      version: string;
+      session_id: string;
+      actor_name: string;
+      actor_type: string;
+      id: string;
+      confidence: number | string;
       payload: { text: string };
     } => ({
       type: "observation_recorded",
@@ -1013,6 +1044,7 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
         processedDir: dirs.processed,
         errorDir: dirs.error,
         debounceMs: 50,
+        projectId: PROJECT_ID,
       };
       const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
         type: "observation_recorded",
@@ -1032,7 +1064,11 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
       });
 
       await Effect.runPromise(
-        program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<void, never, never>,
+        program.pipe(Effect.provide(makeTestLayer(dirs.dbPath))) as Effect.Effect<
+          void,
+          never,
+          never
+        >,
       );
 
       const processed = await fs.readdir(dirs.processed);

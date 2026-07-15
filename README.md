@@ -181,10 +181,13 @@ does, because the `CLAUDE.md` tells it to.
 
 > **Hooks (optional).** `cognit init` also installs *passive* hooks
 > that fire on every AI tool call and drop a JSON record into
-> `.cognit/inbox/`. Those records are only moved into the database when
-> you run `cognit inbox --watch` (or one-shot `cognit inbox --process`).
-> The hook path is optional — the command path above is what captures
-> reasoning day to day, and it needs no background process.
+> `.cognit/inbox/`. Those records are drained into the database
+> automatically the next time you run any read command (`cognit
+> continue`, `cognit search`, `cognit events`) — no background process
+> required. `cognit inbox --watch` (real-time) and `cognit inbox
+> --process` (one-shot flush) remain as advanced/optional knobs; the
+> hook path itself is also optional — the command path above is what
+> captures reasoning day to day.
 >
 > Orphan `.tmp` files left by a crashed atomic write are ignored by the
 > watcher. Clean them with `cognit inbox --clean-tmp` (default: older

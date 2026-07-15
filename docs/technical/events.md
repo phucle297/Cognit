@@ -18,7 +18,7 @@ are top-level, never nested under `actor:`.
 {
   "version": "1.2.0",
   "type": "observation_recorded",
-  "session_id": "01HXXXXXXXXXXXXXXXXXXXXXXXX",
+  "session_id": "01HXXXXXXXXXXXXXXXXXXXXXXX",
   "actor_name": "claude-code",
   "actor_type": "worker",
   "id": "01JXXXXXXXXXXXXXXXXXXXXXXXX",

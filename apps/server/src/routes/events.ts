@@ -23,6 +23,7 @@
 import { Effect } from "effect";
 import { Hono } from "hono";
 import {
+  CURRENT_VERSION,
   DbConnection,
   DbError,
   SessionService,
@@ -33,10 +34,7 @@ import {
 import { envelope } from "../envelope.js";
 import { apiErrorResponse } from "../api-error.js";
 import { sseHandler } from "../sse.js";
-import {
-  listRecentForSessionE,
-  listRecentAcrossProjectE,
-} from "../event-queries.js";
+import { listRecentForSessionE, listRecentAcrossProjectE } from "../event-queries.js";
 import type { ServerRuntime } from "./sessions.js";
 
 const VALID_ACTOR_TYPES = new Set<ActorType>(["human", "worker", "system"]);
@@ -65,20 +63,27 @@ const isString = (x: unknown): x is string => typeof x === "string" && x.length 
 const isObject = (x: unknown): x is Record<string, unknown> =>
   typeof x === "object" && x !== null && !Array.isArray(x);
 
-const parseBody = (raw: unknown): { ok: true; value: PostEventBody } | { ok: false; error: string } => {
+const parseBody = (
+  raw: unknown,
+): { ok: true; value: PostEventBody } | { ok: false; error: string } => {
   if (!isObject(raw)) return { ok: false, error: "body must be a JSON object" };
-  if (!isString(raw.session_id)) return { ok: false, error: "session_id must be a non-empty string" };
+  if (!isString(raw.session_id))
+    return { ok: false, error: "session_id must be a non-empty string" };
   if (!isString(raw.type)) return { ok: false, error: "type must be a non-empty string" };
   if (!isString(raw.actor)) return { ok: false, error: "actor must be a non-empty string" };
-  let source: { readonly tool: string; readonly command: string; readonly filePath?: string } | undefined;
+  let source:
+    | { readonly tool: string; readonly command: string; readonly filePath?: string }
+    | undefined;
   if (raw.source !== undefined) {
     if (!isObject(raw.source)) return { ok: false, error: "source must be an object" };
     if (!isString(raw.source.tool)) return { ok: false, error: "source.tool must be a string" };
-    if (!isString(raw.source.command)) return { ok: false, error: "source.command must be a string" };
+    if (!isString(raw.source.command))
+      return { ok: false, error: "source.command must be a string" };
     const filePath = isString(raw.source.filePath) ? raw.source.filePath : undefined;
-    source = filePath !== undefined
-      ? { tool: raw.source.tool, command: raw.source.command, filePath }
-      : { tool: raw.source.tool, command: raw.source.command };
+    source =
+      filePath !== undefined
+        ? { tool: raw.source.tool, command: raw.source.command, filePath }
+        : { tool: raw.source.tool, command: raw.source.command };
   }
   const id = isString(raw.id) ? raw.id : undefined;
   const base = {
@@ -163,9 +168,7 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
     const sinceQ = c.req.query("since");
     const cursorQ = c.req.query("cursor");
     const limitRaw = c.req.query("limit");
-    const limit = limitRaw === undefined
-      ? 100
-      : Math.max(1, Math.min(500, Number(limitRaw)));
+    const limit = limitRaw === undefined ? 100 : Math.max(1, Math.min(500, Number(limitRaw)));
 
     if (sinceQ !== undefined && !ULID_RE.test(sinceQ)) {
       return apiErrorResponse(c, "bad_request", "`since` must be a 26-char ULID");
@@ -174,11 +177,7 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
       return apiErrorResponse(c, "bad_request", "`cursor` must be a 26-char ULID");
     }
     if (sinceQ !== undefined && cursorQ !== undefined) {
-      return apiErrorResponse(
-        c,
-        "bad_request",
-        "`since` and `cursor` are mutually exclusive",
-      );
+      return apiErrorResponse(c, "bad_request", "`since` and `cursor` are mutually exclusive");
     }
 
     const afterId = sinceQ ?? cursorQ ?? null;
@@ -238,11 +237,7 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
     try {
       body = await c.req.json();
     } catch (e) {
-      return apiErrorResponse(
-        c,
-        "bad_request",
-        `body is not JSON: ${(e as Error).message}`,
-      );
+      return apiErrorResponse(c, "bad_request", `body is not JSON: ${(e as Error).message}`);
     }
     const parsed = parseBody(body);
     if (!parsed.ok) {
@@ -259,18 +254,25 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
 
     const program = Effect.gen(function* () {
       const session = yield* SessionService;
-      const r = yield* session.appendEvent({
-        sessionId: parsed.value.session_id,
-        type: parsed.value.type,
-        payload: parsed.value.payload,
-        actor,
-        ...(parsed.value.id !== undefined ? { id: parsed.value.id } : {}),
-        ...(parsed.value.source !== undefined ? { source: parsed.value.source } : {}),
+      // §1.5: funnel through the unified `ingest` entry so the server
+      // shares decode + validation with the inbox path. lazyCreate is
+      // false — the server requires a real session_id; it does not
+      // bootstrap one (unlike the inbox). Bus publish + snapshot happen
+      // inside `appendEvent`; do not publish here.
+      return yield* session.ingest({
+        envelope: {
+          type: parsed.value.type,
+          version: CURRENT_VERSION,
+          session_id: parsed.value.session_id,
+          actor_name: actor.name,
+          actor_type: actor.type,
+          payload: parsed.value.payload,
+          ...(parsed.value.id !== undefined ? { id: parsed.value.id } : {}),
+          ...(parsed.value.source !== undefined ? { source: parsed.value.source } : {}),
+        },
+        projectId,
+        lazyCreate: false,
       });
-      // Bus publish happens inside SessionService.appendEvent
-      // (phase 5.1 chokepoint). Do NOT publish here — duplicates
-      // would double-deliver to SSE subscribers.
-      return r;
     });
 
     type Err = UnknownEventType | DbError | Error;
@@ -280,8 +282,16 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
     if (exit._tag === "Failure") {
       const cause = (exit as { cause: unknown }).cause;
       const err = JSON.stringify(cause);
-      if (err.includes("UnknownEventType")) {
+      if (err.includes("UnknownEventType") || err.includes("UnknownEventVersion")) {
         return apiErrorResponse(c, "unknown_event_type", `event type not in catalog`);
+      }
+      if (
+        err.includes("ValidationFailure") ||
+        err.includes("PayloadDecodeFailure") ||
+        err.includes("EnvelopeDecodeFailure") ||
+        err.includes("UnknownPayloadType")
+      ) {
+        return apiErrorResponse(c, "validation_failed", "envelope or payload failed validation");
       }
       if (err.includes("SessionClosed") || err.includes("UnknownSession")) {
         return apiErrorResponse(c, "session_unavailable", "session is not accepting events");

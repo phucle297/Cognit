@@ -93,7 +93,9 @@ export function registerInit(program: Command): void {
         // M1: refresh CLAUDE.md even on idempotent re-init so the
         // instructions stay in lockstep with the installed CLI.
         await fs.writeFile(path.join(projectRoot, "CLAUDE.md"), CLAUDE_MD, "utf8");
-        process.stdout.write(`\nNext: open Claude Code. Reasoning will appear in \`cognit continue\`.\n`);
+        process.stdout.write(
+          `\nNext: open Claude Code and work normally. Run \`cognit continue\` to drain the\ninbox and see reasoning — a session is auto-created on first use, so no\n\`cognit session create\` or \`cognit inbox --watch\` is required.\n`,
+        );
         return;
       }
 
@@ -162,7 +164,7 @@ export function registerInit(program: Command): void {
       printHookSummary(hookResults);
 
       process.stdout.write(
-        `\nNext: open Claude Code. Reasoning will appear in \`cognit continue\`.\n`,
+        `\nNext: open Claude Code and work normally. Run \`cognit continue\` to drain the\ninbox and see reasoning — a session is auto-created on first use, so no\n\`cognit session create\` or \`cognit inbox --watch\` is required.\n`,
       );
     });
 }

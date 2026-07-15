@@ -15,7 +15,7 @@
  * directly) so the done_when for phase 2 is satisfied.
  */
 
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Either, Layer } from "effect";
 import { DbConnection, EventStore, Logger } from "./context";
 import {
   DbError,
@@ -46,6 +46,13 @@ import { rehydrateSessionState, SnapshotService } from "./snapshot-service";
 import { SessionPolicy } from "./session-policy";
 import { EventBus } from "./bus";
 import type { AppendEventInput } from "./event-store";
+import {
+  decodeEnvelope,
+  envelopeToAppendInput,
+  type DecodedEnvelope,
+  type IngestError,
+} from "./envelope";
+import { readCurrentSession, writeCurrentSession } from "@cognit/core/current-session";
 
 export type SessionError =
   | DbError
@@ -94,6 +101,30 @@ export interface SessionAppendEventInput {
 export interface SessionAppendEventResult {
   readonly event: EventRow;
   readonly snapshotTaken: boolean;
+}
+
+/**
+ * Input for the unified envelope entry point `ingest` (§1.5). Every
+ * envelope-shaped source (inbox JSON, server `POST /events`, future
+ * MCP/SDK) funnels through `ingest`; no source resolves a session or
+ * validates an envelope itself.
+ *
+ * - `envelope`: the raw parsed JSON (canonical envelope shape).
+ * - `projectId`: required to mint a bootstrap session.
+ * - `projectRoot`: when supplied, the sticky `.cognit/current-session`
+ *   pointer is read (reuse) and written (on mint) so a burst of
+ *   placeholder-session envelopes collapses onto one session. Omit on
+ *   the server path (it does not own the CLI pointer).
+ * - `lazyCreate`: default `true` (inbox bootstrap). The server passes
+ *   `false` to preserve its "real session required" contract.
+ * - `goalHint`: optional goal text for a minted bootstrap session.
+ */
+export interface IngestInput {
+  readonly envelope: unknown;
+  readonly projectId: string;
+  readonly projectRoot?: string;
+  readonly lazyCreate?: boolean;
+  readonly goalHint?: string;
 }
 
 export interface SessionListQuery {
@@ -189,6 +220,13 @@ export interface SessionServiceShape {
   readonly appendEvent: (
     input: SessionAppendEventInput,
   ) => Effect.Effect<SessionAppendEventResult, SessionError>;
+  /**
+   * Unified envelope entry point (§1.5). Decodes the canonical
+   * envelope, resolves/creates the session (§2), and appends through
+   * `appendEvent`. Inbox JSON and server `POST /events` both call this;
+   * no source resolves a session itself.
+   */
+  readonly ingest: (input: IngestInput) => Effect.Effect<SessionAppendEventResult, IngestError>;
 }
 
 export class SessionService extends Context.Tag("@cognit/db/SessionService")<
@@ -312,9 +350,7 @@ export const SessionServiceLive: Layer.Layer<
     // `show` (the public read API) and `appendEvent` (phase 3c
     // constraint check, which needs the current SessionState to
     // evaluate rules).
-    const _show = (
-      sessionId: string,
-    ): Effect.Effect<SessionShowResult, SessionError> =>
+    const _show = (sessionId: string): Effect.Effect<SessionShowResult, SessionError> =>
       Effect.gen(function* () {
         const row = yield* trySync(
           () => fetchSession(conn, sessionId),
@@ -502,9 +538,7 @@ export const SessionServiceLive: Layer.Layer<
                   // EventRow.correlation_id is nullable; the
                   // chokepoint's input field is non-nullable, so
                   // forward only when present.
-                  ...(event.correlation_id !== null
-                    ? { correlationId: event.correlation_id }
-                    : {}),
+                  ...(event.correlation_id !== null ? { correlationId: event.correlation_id } : {}),
                 })
                 .pipe(
                   Effect.tapError((e) =>
@@ -596,7 +630,7 @@ export const SessionServiceLive: Layer.Layer<
         return { event, snapshotTaken: result.right !== null };
       });
 
-    return {
+    const self: Omit<SessionServiceShape, "ingest"> = {
       create: (input) =>
         Effect.gen(function* () {
           const sessionId = yield* uuid.make();
@@ -1055,11 +1089,89 @@ export const SessionServiceLive: Layer.Layer<
             ...(input.linkedHypothesisId !== undefined
               ? { linkedHypothesisId: input.linkedHypothesisId }
               : {}),
-            ...(matchedNonBlock !== undefined
-              ? { constraintMatchedRuleIds: matchedNonBlock }
-              : {}),
+            ...(matchedNonBlock !== undefined ? { constraintMatchedRuleIds: matchedNonBlock } : {}),
           });
         }),
     };
+
+    /**
+     * Resolve the session for an ingested envelope (§2). Order:
+     *   1. envelope `session_id`, if it maps to an open session
+     *   2. sticky pointer (`.cognit/current-session`), when projectRoot
+     *      is supplied, if it maps to an open session
+     *   3. lazy-create a bootstrap session + write the pointer, so a
+     *      burst of placeholder-session envelopes all collapse onto one
+     *      session (the producer placeholder is a fixed constant).
+     *
+     * When `lazyCreate` is false (server `POST /events`), step 3 is
+     * skipped and an unknown session fails with `UnknownSession` —
+     * preserving the server's "real session required" contract.
+     */
+    const _resolveIngestSession = (
+      decoded: DecodedEnvelope,
+      opts: {
+        readonly projectId: string;
+        readonly projectRoot?: string;
+        readonly lazyCreate: boolean;
+        readonly goalHint?: string;
+      },
+    ): Effect.Effect<string, IngestError> =>
+      Effect.gen(function* () {
+        const isOpen = (s: string | undefined): boolean => s === "active" || s === "paused";
+        const byId = yield* trySync(
+          () => fetchSession(conn, decoded.sessionId),
+          (e) => new DbError({ message: "ingest: fetch by envelope id", cause: e }),
+        );
+        if (byId && isOpen(byId.status)) return byId.id;
+
+        if (opts.projectRoot !== undefined) {
+          const pointer = readCurrentSession(opts.projectRoot);
+          if (pointer) {
+            const ptr = yield* trySync(
+              () => fetchSession(conn, pointer.sessionId),
+              (e) => new DbError({ message: "ingest: fetch sticky pointer", cause: e }),
+            );
+            if (ptr && isOpen(ptr.status)) return ptr.id;
+          }
+        }
+
+        if (!opts.lazyCreate) {
+          return yield* Effect.fail(new UnknownSession({ sessionId: decoded.sessionId }));
+        }
+
+        const hint = opts.goalHint?.trim();
+        const goal = hint && hint.length > 0 ? hint.slice(0, 200) : `cognit-inbox @ ${nowIso()}`;
+        const { session } = yield* self.create({
+          projectId: opts.projectId,
+          goal,
+          parentSessionId: null,
+          actor: { name: decoded.actorName, type: decoded.actorType },
+        });
+        if (opts.projectRoot !== undefined) writeCurrentSession(opts.projectRoot, session.id);
+        return session.id;
+      });
+
+    /**
+     * Unified envelope entry point (§1.5). Decode → resolve/create
+     * session → append (with constraint check via `appendEvent`). Inbox
+     * JSON and server `POST /events` both go through here.
+     */
+    const _ingest = (input: IngestInput): Effect.Effect<SessionAppendEventResult, IngestError> =>
+      Effect.gen(function* () {
+        const decodedE = decodeEnvelope(input.envelope);
+        if (Either.isLeft(decodedE)) {
+          return yield* Effect.fail(decodedE.left);
+        }
+        const decoded = decodedE.right;
+        const sessionId = yield* _resolveIngestSession(decoded, {
+          projectId: input.projectId,
+          ...(input.projectRoot !== undefined ? { projectRoot: input.projectRoot } : {}),
+          lazyCreate: input.lazyCreate ?? true,
+          ...(input.goalHint !== undefined ? { goalHint: input.goalHint } : {}),
+        });
+        return yield* self.appendEvent(envelopeToAppendInput(decoded, sessionId));
+      });
+
+    return { ...self, ingest: _ingest };
   }),
 );

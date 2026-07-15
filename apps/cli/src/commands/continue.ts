@@ -30,11 +30,7 @@
  */
 import { Command } from "commander";
 import { Effect, Exit, Cause } from "effect";
-import {
-  ProjectService,
-  SessionService,
-  type SessionRow,
-} from "@cognit/db";
+import { ProjectService, SessionService, type SessionRow } from "@cognit/db";
 import {
   DEFAULT_CONTINUE_CAPS,
   deduplicateMemories,
@@ -47,6 +43,7 @@ import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
 import { requireProjectRoot } from "../auto-session.js";
+import { drainInboxOnce } from "../inbox-drain.js";
 import { readCurrentSession, writeCurrentSession } from "../current-session.js";
 
 interface ContinueOptions {
@@ -55,8 +52,7 @@ interface ContinueOptions {
   all?: boolean;
 }
 
-const truncate = (s: string, n: number): string =>
-  s.length > n ? s.slice(0, n - 1) + "…" : s;
+const truncate = (s: string, n: number): string => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 /** Trust marker vocabulary — the only labels text output may emit. */
 type TrustMarker = "verified" | "accepted" | "rejected" | "pending" | "open";
@@ -103,10 +99,20 @@ interface ContinueSummary {
    */
   readonly verifiedConclusions?: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
   readonly acceptedDecisions?: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
-  readonly rejectedDecisions?: ReadonlyArray<{ id: string; text: string; reason: string | null; marker: TrustMarker }>;
+  readonly rejectedDecisions?: ReadonlyArray<{
+    id: string;
+    text: string;
+    reason: string | null;
+    marker: TrustMarker;
+  }>;
   readonly proposedDecisions?: ReadonlyArray<{ id: string; text: string; marker: TrustMarker }>;
   readonly openHypotheses?: ReadonlyArray<{ id: string; title: string; marker: TrustMarker }>;
-  readonly openVerifications?: ReadonlyArray<{ id: string; command: string; state: string; marker: TrustMarker }>;
+  readonly openVerifications?: ReadonlyArray<{
+    id: string;
+    command: string;
+    state: string;
+    marker: TrustMarker;
+  }>;
 }
 
 const viewOf = (m: RankedMemory): RankedMemoryView => ({
@@ -172,12 +178,13 @@ const summarize = (
     }
   }
 
-  const doing = state.observations.length > 0
-    ? {
-        text: state.observations[state.observations.length - 1]!.text,
-        created_at: state.observations[state.observations.length - 1]!.created_at,
-      }
-    : null;
+  const doing =
+    state.observations.length > 0
+      ? {
+          text: state.observations[state.observations.length - 1]!.text,
+          created_at: state.observations[state.observations.length - 1]!.created_at,
+        }
+      : null;
 
   const lastActivityAt =
     state.observations.length > 0
@@ -373,12 +380,13 @@ export function registerContinue(program: Command): void {
       "summarise the active session so the next AI can pick up where the last one stopped",
     )
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
-    .option(
-      "--all",
-      "show the full history, not just the last 24h (default: last 24h only)",
-    )
+    .option("--all", "show the full history, not just the last 24h (default: last 24h only)")
     .action(async (opts: ContinueOptions) => {
       const root = opts.root ?? requireProjectRoot();
+
+      // §1: drain the inbox first so the answer reflects just-written
+      // files. Best-effort; never blocks the read on a drain failure.
+      await drainInboxOnce(root);
 
       // Resolve project + most-recent session via direct SQLite.
       const exit = await Effect.runPromiseExit(
@@ -414,9 +422,7 @@ export function registerContinue(program: Command): void {
             }
             if (!target) {
               const list = yield* sessions.list({ projectId: project.id });
-              const sorted = [...list].sort((a, b) =>
-                b.created_at.localeCompare(a.created_at),
-              );
+              const sorted = [...list].sort((a, b) => b.created_at.localeCompare(a.created_at));
               target = sorted[0] ?? null;
             }
             if (!target) return null;

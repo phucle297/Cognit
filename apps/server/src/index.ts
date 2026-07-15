@@ -46,6 +46,8 @@ import {
   ActorDefaults,
   ActorDefaultsBuiltIn,
   actorDefaultsLayer,
+  runInboxWatcher,
+  type InboxWatcherConfig,
 } from "@cognit/db";
 import { EventBus, EventBusLive } from "./bus.js";
 import { registerHealthz } from "./routes/healthz.js";
@@ -68,9 +70,13 @@ program
   .option("--host <ip>", "bind host", "127.0.0.1")
   .option("--port <n>", "bind port", (v: string) => Number(v), 6971)
   .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
+  .option(
+    "--watch-inbox",
+    "run an in-process inbox watcher (covers the dashboard/SSE realtime case; §4.3)",
+  )
   .parse(process.argv);
 
-const opts = program.opts<{ host: string; port: number; root?: string }>();
+const opts = program.opts<{ host: string; port: number; root?: string; watchInbox?: boolean }>();
 const root = opts.root ?? findProjectRoot();
 if (!root) {
   process.stderr.write(
@@ -203,6 +209,25 @@ server = serve({ fetch: app.fetch, hostname: opts.host, port: opts.port }, (info
   );
 });
 
+// §4.3: optional in-process inbox watcher. Covers the dashboard/SSE
+// realtime case without a separate `cognit inbox --watch` process. The
+// server does not parse cognit.yaml (no YAML dep), so this is an
+// explicit opt-in flag rather than the `inbox.watch:true` knob — a
+// documented parity gap (like the redaction one).
+let watcherStop: (() => Promise<void>) | undefined;
+if (opts.watchInbox) {
+  const watchConfig: InboxWatcherConfig = {
+    inboxDir: path.join(root, ".cognit", "inbox"),
+    processedDir: path.join(root, ".cognit", "processed"),
+    errorDir: path.join(root, ".cognit", "inbox", "_error"),
+    debounceMs: 200,
+    projectId,
+    projectRoot: root,
+  };
+  watcherStop = (await runtime.runPromise(runInboxWatcher(watchConfig))).stop;
+  process.stdout.write("cognit-server: in-process inbox watcher started\n");
+}
+
 // SIGTERM / SIGINT: shut the bus down so every in-flight SSE drain
 // fiber rejects its `Queue.take` and exits cleanly. The HTTP server
 // then closes on `server.close()`. Without this, a graceful restart
@@ -215,7 +240,8 @@ const shutdownBus = Effect.gen(function* () {
 
 const handleShutdown = (signal: string) => {
   process.stderr.write(`cognit-server: received ${signal}, shutting down\n`);
-  void runtime.runPromise(shutdownBus).then(() => {
+  void runtime.runPromise(shutdownBus).then(async () => {
+    await watcherStop?.().catch(() => undefined);
     server?.close(() => process.exit(0));
     // Hard exit if server.close hangs (e.g. blocked keepalive).
     setTimeout(() => process.exit(1), 5_000).unref();
