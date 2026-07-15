@@ -39,33 +39,27 @@ small (see the file header at `router.tsx:1`).
 
 ## Default URL
 
-The dashboard has three distinct addresses depending on which surface
-runs where. The mnemonic is "API = 6971; Vite dev = 5173; docker
-publish = 6970".
+Simple port model (local-first):
 
-| Surface                  | Binds to                | URL you open                                  |
-|--------------------------|-------------------------|-----------------------------------------------|
-| Hono API server          | `127.0.0.1:6971`        | (internal — dashboard fetches from here)     |
-| Vite dev dashboard       | `127.0.0.1:5173`        | `http://localhost:5173`                       |
-| Docker-published dashboard | host `:6970` (publish) | `http://localhost:6970`                       |
+| Surface | Host URL | Notes |
+|---------|----------|--------|
+| Hono API | `http://127.0.0.1:6971` | `docker compose up -d` publishes it; or `cognit server` |
+| Dashboard UI | `http://127.0.0.1:6970` | `cognit dashboard` (vite) or `--docker` (nginx SPA) |
 
-**Local dev (`cognit dashboard`).** `cognit dashboard` spawns two
-processes:
+**Normal flow**
 
-- the Hono API in `apps/server`, bound to `127.0.0.1:6971`
-  (`apps/server/src/config.ts:29` — the canonical API endpoint);
-- the Vite dev server in `apps/dashboard`, bound to `127.0.0.1:5173`
-  (`apps/dashboard/vite.config.ts`). The Vite dev server proxies API
-  requests to `127.0.0.1:6971`, so you open
-  `http://localhost:5173` in the browser and do not need to think
-  about the Hono port.
+```bash
+# In the Cognit repo (once)
+docker compose up -d          # API on 127.0.0.1:6971
 
-**Docker profile (`cognit dashboard --docker`).** Runs the dashboard
-+ Hono inside a container. The container's Hono still binds
-`127.0.0.1:6971` internally; the docker port mapping publishes it on
-host `:6970` (see `apps/cli/src/commands/dashboard.ts:104`). You open
-`http://localhost:6970` — that is the **docker-published** address,
-not a loopback bind inside the container.
+# Anywhere (global CLI link)
+cognit dashboard              # UI on 127.0.0.1:6970 → proxies /api to :6971
+```
 
-If you see `http://localhost:6971` referenced in older docs, treat it
-as the Hono API endpoint, not the dashboard URL.
+Vite proxies `/api/*` to `http://127.0.0.1:6971`. The browser only
+talks to `:6970`; you never need to open `:6971` in a browser tab.
+
+**Docker SPA (`cognit dashboard --docker`).** Optional nginx image on
+the same host port `:6970`, proxying `/api/*` to the `server` service
+on the compose network (or to host-published `:6971` when using the
+host vite path above).

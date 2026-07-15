@@ -14,10 +14,10 @@ import path from "node:path";
  *   src/entities/ domain entities (events, sessions, …)
  *   src/shared/   reusable infra: ui kit, lib helpers, config
  *
- * Same-origin dev: `pnpm dev` runs on :5173, but the proxy
- * below forwards every path to the Hono API on :6971. SSE clients
- * (EventSource) need the API on the same origin so the browser
- * does not block the stream as a cross-origin request.
+ * Same-origin dev: `pnpm dev` / `cognit dashboard` on :6970; the
+ * proxy below forwards /api/* to the Hono API on :6971 (docker or
+ * `cognit server`). SSE needs same-origin so the browser does not
+ * block the stream as cross-origin.
  */
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -28,8 +28,8 @@ export default defineConfig({
   },
   server: {
     host: "127.0.0.1",
-    port: 5173,
-    strictPort: false,
+    port: 6970,
+    strictPort: true,
     // Proxy only API paths to the Hono server. Everything else
     // (index.html, /src/*, /@vite/*, /node_modules/*) is served by
     // vite itself. The server mounts all routes under /api/*.

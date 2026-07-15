@@ -115,20 +115,25 @@ const appLayer = Layer.provideMerge(
 
 const runtime = ManagedRuntime.make(appLayer);
 
-// Read projectId from the DB. There is exactly one project per
-// `.cognit/cognit.db` (v1 single-project). The DB must exist
-// (run `cognit init` first).
+// Resolve projectId. v1 is single-project-per-db. Empty volumes
+// (fresh `docker compose up -d` after `down -v`) have a migrated
+// schema but no project row — auto-ensure one so the API boots
+// without a demo seed or manual `cognit init` inside the container.
+// Name: $COGNIT_PROJECT_NAME, else "local". Idempotent via ProjectService.ensure.
+const DEFAULT_PROJECT_NAME = process.env["COGNIT_PROJECT_NAME"]?.trim() || "local";
 const projectIdEffect = Effect.gen(function* () {
   const service = yield* ProjectService;
   const projects = yield* service.list();
-  if (projects.length === 0) {
-    return yield* Effect.fail(
-      new Error(
-        `cognit-server: no project found in ${dbPath}. Run \`cognit init\` first.`,
-      ),
-    );
+  if (projects.length > 0) {
+    return projects[0]!.id;
   }
-  return projects[0]!.id;
+  const row = yield* service.ensure({ name: DEFAULT_PROJECT_NAME });
+  yield* Effect.sync(() =>
+    process.stderr.write(
+      `cognit-server: created default project name=${DEFAULT_PROJECT_NAME} id=${row.id}\n`,
+    ),
+  );
+  return row.id;
 });
 const projectId = await runtime.runPromise(projectIdEffect);
 

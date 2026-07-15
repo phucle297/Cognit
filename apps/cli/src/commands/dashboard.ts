@@ -1,44 +1,61 @@
 /**
  * apps/cli/src/commands/dashboard.ts
  *
- * `cognit dashboard [--docker] [--port <n>] [--build] [--no-open]`
+ * `cognit dashboard [--root <path>] [--port <n>] [--api-port <n>] [--no-open] [--docker]`
  *
- * Local-only tool — no auth. The dashboard is a Vite SPA that talks
- * to the local Hono server over loopback. It runs on demand:
+ * Local-only tool — no auth. Data model for the UI:
+ *   One Cognit root (the directory with `.cognit/`) per process.
+ *   There is no multi-project picker. Run from (or `--root`) the
+ *   directory you care about after `cognit init`.
  *
- *   - default (host):  spawn `pnpm --filter @cognit/dashboard dev`
- *                      (vite dev server on http://127.0.0.1:5173)
- *   - --docker:        `docker compose --profile dashboard run --rm`
- *                      (nginx + Vite dist on http://127.0.0.1:6970)
+ * Default (host) flow:
+ *   1. Resolve root: --root → $COGNIT_ROOT → nearest .cognit/cognit.yaml
+ *   2. Spawn API server for that root on 127.0.0.1:6971
+ *   3. Spawn Vite dashboard on 127.0.0.1:6970 (proxies /api → :6971)
  *
- * The `--docker` path expects to be invoked from a directory inside
- * the Cognit checkout (it walks up looking for docker-compose.yml).
- * Inside a running container it is auto-detected via `/.dockerenv`.
- *
- * Use `cognit server` in another terminal (or `--docker` together
- * with `docker compose up -d server`) so the API has something to
- * proxy to.
+ * `--docker` is optional legacy path (compose volume, not cwd DB).
  */
 import { Command } from "commander";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { spawn as spawnAsync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { findProjectRoot } from "../paths.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// apps/cli/src/commands/dashboard.ts -> ../../../../  (repo root)
-const REPO_ROOT = path.resolve(HERE, "..", "..", "..", "..");
+/**
+ * Resolve monorepo root whether this file is:
+ *   - source: apps/cli/src/commands/dashboard.ts  (4× ..)
+ *   - bundle: apps/cli/dist/index.js               (3× ..)
+ */
+const resolveRepoRoot = (): string => {
+  const candidates = [
+    path.resolve(HERE, "..", "..", ".."), // dist/
+    path.resolve(HERE, "..", "..", "..", ".."), // src/commands/
+  ];
+  for (const c of candidates) {
+    if (
+      existsSync(path.join(c, "pnpm-workspace.yaml")) ||
+      existsSync(path.join(c, "apps", "server", "src", "index.ts"))
+    ) {
+      return c;
+    }
+  }
+  return candidates[0]!;
+};
+const REPO_ROOT = resolveRepoRoot();
+const SERVER_ENTRY = path.resolve(REPO_ROOT, "apps", "server", "src", "index.ts");
 
 interface DashboardOptions {
   docker?: boolean;
   port?: string;
+  apiPort?: string;
   build?: boolean;
   open?: boolean;
+  root?: string;
 }
 
-/** Walk up from `start` looking for a file that marks the repo root. */
-const findRepoRoot = (start: string): string | undefined => {
+const findComposeRoot = (start: string): string | undefined => {
   let dir = path.resolve(start);
   for (let i = 0; i < 8; i++) {
     if (existsSync(path.join(dir, "docker-compose.yml"))) return dir;
@@ -49,45 +66,47 @@ const findRepoRoot = (start: string): string | undefined => {
   return undefined;
 };
 
-/** Heuristic: are we already running inside a container? */
 const runningInsideDocker = (): boolean =>
-  existsSync("/.dockerenv") ||
-  // Docker sets DOCKER_CONTAINER_ID in some setups. The /.dockerenv
-  // file is the canonical signal — keep this as a cheap fallback.
-  Boolean(process.env["DOCKER_CONTAINER_ID"]);
+  existsSync("/.dockerenv") || Boolean(process.env["DOCKER_CONTAINER_ID"]);
 
-/**
- * Open a URL in the user's default browser. Best-effort: if no
- * platform opener is on PATH we just print the URL.
- */
 const openBrowser = (url: string): void => {
-  const cmd = process.platform === "darwin"
-    ? { bin: "open", args: [url] }
-    : process.platform === "win32"
-      ? { bin: "cmd", args: ["/c", "start", "", url] }
-      : { bin: "xdg-open", args: [url] };
+  const cmd =
+    process.platform === "darwin"
+      ? { bin: "open", args: [url] }
+      : process.platform === "win32"
+        ? { bin: "cmd", args: ["/c", "start", "", url] }
+        : { bin: "xdg-open", args: [url] };
   try {
-    const child = spawnAsync(cmd.bin, cmd.args, { stdio: "ignore", detached: true });
+    const child = spawn(cmd.bin, cmd.args, { stdio: "ignore", detached: true });
+    child.on("error", () => {
+      process.stderr.write(
+        `cognit: could not open browser (no \`${cmd.bin}\` on PATH). Open ${url} manually.\n`,
+      );
+    });
     child.unref();
   } catch {
-    /* swallow — non-fatal */
+    process.stderr.write(`cognit: could not open browser. Open ${url} manually.\n`);
   }
 };
 
-/**
- * Forward signals from the parent CLI to the spawned child so Ctrl-C
- * tears down the dashboard (and, for `docker compose run --rm`, the
- * container) cleanly.
- */
-const forwardSignals = (child: ReturnType<typeof spawn>): void => {
+/** Kill all children on SIGINT/SIGTERM; exit when the primary (UI) exits. */
+const wireProcessGroup = (children: ChildProcess[], primary: ChildProcess): void => {
+  const killAll = (sig: NodeJS.Signals): void => {
+    for (const c of children) {
+      if (!c.killed) c.kill(sig);
+    }
+  };
   const onSignal = (sig: NodeJS.Signals): void => {
-    if (!child.killed) child.kill(sig);
+    killAll(sig);
   };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
-  child.on("exit", (code, sig) => {
+  primary.on("exit", (code, sig) => {
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
+    for (const c of children) {
+      if (c !== primary && !c.killed) c.kill("SIGTERM");
+    }
     if (sig) {
       process.kill(process.pid, sig);
     } else {
@@ -99,52 +118,108 @@ const forwardSignals = (child: ReturnType<typeof spawn>): void => {
 export function registerDashboard(program: Command): void {
   program
     .command("dashboard")
-    .description("start the dashboard on demand (vite dev locally, docker compose with --docker)")
-    .option("--docker", "run via docker compose --profile dashboard (nginx + Vite dist on :6970)")
-    .option("--port <n>", "override dashboard port (default: 5173 local, 6970 docker)")
-    .option("--build", "with --docker: force-rebuild the dashboard image before starting")
+    .description(
+      "start the dashboard for this Cognit root (cwd / --root); API + UI, no project picker",
+    )
+    .option("--docker", "legacy: docker compose dashboard (volume DB, not cwd)")
+    .option("--root <path>", "Cognit root (default: $COGNIT_ROOT or nearest .cognit/)")
+    .option("--port <n>", "dashboard UI port (default: 6970)")
+    .option("--api-port <n>", "API port (default: 6971)")
+    .option("--build", "with --docker: force-rebuild dashboard image")
     .option("--no-open", "do not open the browser automatically")
     .action(async (opts: DashboardOptions) => {
-      const useDocker = opts.docker === true
-        || process.env["COGNIT_DOCKER"] === "1"
-        || runningInsideDocker();
+      const useDocker =
+        opts.docker === true ||
+        process.env["COGNIT_DOCKER"] === "1" ||
+        runningInsideDocker();
+      const uiPort = opts.port ?? "6970";
+      const apiPort = opts.apiPort ?? "6971";
+      const url = `http://127.0.0.1:${uiPort}/`;
 
       if (useDocker) {
-        const repoRoot = findRepoRoot(process.cwd()) ?? REPO_ROOT;
+        const repoRoot = findComposeRoot(process.cwd()) ?? REPO_ROOT;
         const composeFile = path.join(repoRoot, "docker-compose.yml");
         if (!existsSync(composeFile)) {
           process.stderr.write(
-            `cognit: docker-compose.yml not found (looked up from ${process.cwd()} to ${repoRoot}). ` +
-            `Run \`cognit dashboard --docker\` from inside the Cognit checkout, or set --port / --no-open.\n`,
+            `cognit: docker-compose.yml not found. Prefer host mode: run \`cognit dashboard\` from a project after \`cognit init\`.\n`,
           );
           process.exitCode = 2;
           return;
         }
-        const port = opts.port ?? "6970";
-        const args = ["compose", "-f", composeFile, "--profile", "dashboard", "run", "--rm", "-p", `127.0.0.1:${port}:${port}`, "--service-ports", "dashboard"];
+        const args = [
+          "compose",
+          "-f",
+          composeFile,
+          "--profile",
+          "dashboard",
+          "run",
+          "--rm",
+          "-p",
+          `127.0.0.1:${uiPort}:${uiPort}`,
+          "--service-ports",
+          "dashboard",
+        ];
         if (opts.build) args.push("--build");
-        process.stderr.write(`cognit: starting dashboard via docker compose (port ${port})\n`);
+        process.stderr.write(
+          `cognit: starting dashboard via docker compose on ${url} (API is compose volume, not cwd)\n`,
+        );
         const child = spawn("docker", args, { cwd: repoRoot, stdio: "inherit" });
-        forwardSignals(child);
-      } else {
-        // Local vite dev server. Resolve pnpm + workspace via REPO_ROOT so
-        // the command works no matter where `cognit` was linked from.
-        const pnpm = path.join(REPO_ROOT, "node_modules", ".bin", "pnpm");
-        const fallback = "pnpm"; // PATH fallback if the local .bin is missing
-        const bin = existsSync(pnpm) ? pnpm : fallback;
-        const port = opts.port ?? "5173";
-        const args = ["--filter", "@cognit/dashboard", "dev", "--", "--port", port];
-        process.stderr.write(`cognit: starting dashboard (vite dev) on http://127.0.0.1:${port}\n`);
-        const child = spawn(bin, args, { cwd: REPO_ROOT, stdio: "inherit" });
-        forwardSignals(child);
+        wireProcessGroup([child], child);
+        if (opts.open !== false) setTimeout(() => openBrowser(url), 1500);
+        return;
       }
 
+      // --- Host mode: one root = this directory's .cognit ---
+      const root =
+        opts.root ??
+        process.env["COGNIT_ROOT"] ??
+        findProjectRoot(process.cwd()) ??
+        null;
+      if (!root) {
+        process.stderr.write(
+          "cognit: no Cognit root found. cd into a project and run `cognit init`, then `cognit dashboard`.\n",
+        );
+        process.exitCode = 2;
+        return;
+      }
+
+      const tsxCandidates = [
+        path.join(REPO_ROOT, "apps", "server", "node_modules", ".bin", "tsx"),
+        path.join(REPO_ROOT, "node_modules", ".bin", "tsx"),
+      ];
+      const tsx = tsxCandidates.find((p) => existsSync(p));
+      if (!tsx || !existsSync(SERVER_ENTRY)) {
+        process.stderr.write(
+          `cognit: cannot find server entry/tsx under ${REPO_ROOT}. Rebuild the monorepo (pnpm install).\n`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      process.stderr.write(
+        `cognit: root=${root}\n` +
+          `cognit: starting API on http://127.0.0.1:${apiPort} (this root's .cognit)\n` +
+          `cognit: starting UI  on ${url}\n`,
+      );
+
+      const server = spawn(
+        tsx,
+        [SERVER_ENTRY, "--host", "127.0.0.1", "--port", String(apiPort), "--root", root],
+        { stdio: "inherit", cwd: REPO_ROOT },
+      );
+
+      const pnpmLocal = path.join(REPO_ROOT, "node_modules", ".bin", "pnpm");
+      const pnpm = existsSync(pnpmLocal) ? pnpmLocal : "pnpm";
+      const ui = spawn(
+        pnpm,
+        ["--filter", "@cognit/dashboard", "dev", "--", "--port", uiPort, "--strictPort"],
+        { stdio: "inherit", cwd: REPO_ROOT },
+      );
+
+      wireProcessGroup([server, ui], ui);
+
       if (opts.open !== false) {
-        const url = `http://127.0.0.1:${opts.port ?? (useDocker ? "6970" : "5173")}/`;
-        // Tiny delay so the server has time to bind before the browser
-        // races to connect. 1500ms is enough for vite dev; the user
-        // will see the URL in stderr regardless.
-        setTimeout(() => openBrowser(url), 1500);
+        setTimeout(() => openBrowser(url), 2000);
       }
     });
 }

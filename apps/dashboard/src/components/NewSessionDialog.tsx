@@ -1,10 +1,8 @@
 /**
- * apps/dashboard/src/components/NewProjectDialog.tsx — Radix dialog
- * to create a new project. Submits `{ name, goal? }` to /projects
- * via apiFetch, surfaces ApiError, and invokes `onCreated` on
- * success so the parent can refetch + close.
+ * apps/dashboard/src/components/NewSessionDialog.tsx
  *
- * FSD layer: components (composable leaf above shared/ui).
+ * Create a session via POST /api/sessions { goal, actor }.
+ * Bound to the Cognit root the API was started with (cwd / --root).
  */
 import { useState, type FormEvent, type JSX } from "react";
 import { Button } from "@/shared/ui/button";
@@ -19,44 +17,52 @@ import {
 import { Input } from "@/shared/ui/input";
 import { apiFetch, ApiError } from "@/shared/api/api-client";
 
-export type NewProjectDialogProps = {
+export type NewSessionDialogProps = {
   readonly open: boolean;
   readonly onOpenChange: (open: boolean) => void;
-  readonly onCreated: () => void;
+  readonly onCreated: (sessionId: string) => void;
 };
 
-export const NewProjectDialog = ({
+type CreatedSession = {
+  readonly session: { readonly id: string };
+};
+
+export const NewSessionDialog = ({
   open,
   onOpenChange,
   onCreated,
-}: NewProjectDialogProps): JSX.Element => {
-  const [name, setName] = useState<string>("");
+}: NewSessionDialogProps): JSX.Element => {
+  const [goal, setGoal] = useState<string>("");
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const reset = (): void => {
-    setName("");
+    setGoal("");
     setError(null);
   };
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>): Promise<void> => {
     e.preventDefault();
     if (submitting) return;
-    const trimmedName = name.trim();
-    if (trimmedName.length === 0) {
-      setError("name is required");
+    const trimmed = goal.trim();
+    if (trimmed.length === 0) {
+      setError("goal is required");
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      await apiFetch<unknown>("/api/projects", {
+      const data = await apiFetch<CreatedSession>("/api/sessions", {
         method: "POST",
-        body: { name: trimmedName },
+        body: {
+          goal: trimmed,
+          actor: { name: "dashboard", type: "human" },
+        },
       });
+      const id = data.session.id;
       reset();
-      onCreated();
       onOpenChange(false);
+      onCreated(id);
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.api.message);
@@ -78,28 +84,34 @@ export const NewProjectDialog = ({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New project</DialogTitle>
+          <DialogTitle>New session</DialogTitle>
           <DialogDescription>
-            Create a project to group sessions and events. Name must be 1–120 characters.
+            Start a reasoning session in this Cognit root. Sessions store observations,
+            decisions, and evidence.
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-3" onSubmit={onSubmit}>
-          <label className="text-sm font-medium" htmlFor="new-project-name">
-            Name
+          <label className="text-sm font-medium" htmlFor="new-session-goal">
+            Goal
           </label>
           <Input
-            id="new-project-name"
-            name="name"
+            id="new-session-goal"
+            name="goal"
             autoFocus
             required
             minLength={1}
-            maxLength={120}
-            placeholder="my-project"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            maxLength={500}
+            placeholder="What are you trying to figure out?"
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
             disabled={submitting}
+            data-testid="new-session-goal-input"
           />
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          {error ? (
+            <p className="text-sm text-destructive" data-testid="new-session-error">
+              {error}
+            </p>
+          ) : null}
           <DialogFooter className="mt-2">
             <Button
               type="button"
@@ -109,8 +121,12 @@ export const NewProjectDialog = ({
             >
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || name.trim().length === 0}>
-              {submitting ? "Creating…" : "Create project"}
+            <Button
+              type="submit"
+              disabled={submitting || goal.trim().length === 0}
+              data-testid="new-session-submit"
+            >
+              {submitting ? "Creating…" : "Create session"}
             </Button>
           </DialogFooter>
         </form>

@@ -258,12 +258,14 @@ so use the words you would say to a teammate.
 Want a visual view instead?
 
 ```bash
+# from a directory that has `.cognit/` (after `cognit init`)
 cognit dashboard
 ```
 
-Opens a local dashboard at `http://localhost:5173` that folds the event
-log into a reasoning graph — observations, hypotheses, decisions,
-conclusions, and the evidence linking them.
+Opens a local dashboard at `http://127.0.0.1:6970` for **this directory’s**
+memory (starts the API on `:6971` against the current root’s `.cognit/`).
+There is no project switcher — change directory (or pass `--root`) to
+view another root.
 
 ---
 

@@ -1,12 +1,8 @@
 /**
- * apps/dashboard/src/components/ConfigView.tsx — read-only config preview.
+ * apps/dashboard/src/components/ConfigView.tsx — config surface.
  *
- * FSD layer: components. v0.1 baseline: the runtime config
- * endpoint is not yet exposed (lands in v0.2), so we render a
- * hard-coded SAFE-PREVIEW object instead of fetching the live
- * `cognit.yaml`. Cognit is local-only — no auth, no token — so
- * the preview shows only what the operator actually owns:
- * bind host, redaction patterns, actor defaults.
+ * No fake cognit.yaml preview. Live config endpoint is not shipped
+ * yet; show an honest empty state instead of inventing values.
  */
 import type { JSX } from "react";
 import {
@@ -17,54 +13,18 @@ import {
   CardTitle,
 } from "@/shared/ui/card";
 
-// TODO v0.2: fetch /admin/config and replace the placeholder below.
-const SAFE_PREVIEW = {
-  bind: "127.0.0.1:6971",
-  actors: {
-    defaults: ["planner", "verifier", "decider"],
-  },
-  redaction: {
-    patterns: {
-      count: 6,
-    },
-  },
-} as const;
-
 export const ConfigView = (): JSX.Element => (
-  <Card>
+  <Card data-testid="config-view">
     <CardHeader>
-      <div className="flex items-center justify-between">
-        <CardTitle>Config (cognit.yaml)</CardTitle>
-        <span className="text-xs text-muted-foreground">v0.1 preview</span>
-      </div>
+      <CardTitle>Config (cognit.yaml)</CardTitle>
       <CardDescription>
-        Read-only preview of the runtime config. Live fetch of /admin/config lands in v0.2.
+        Live config is not exposed over the HTTP API yet. Edit{" "}
+        <code className="text-xs">.cognit/cognit.yaml</code> on disk, or use{" "}
+        <code className="text-xs">cognit config</code> in the CLI.
       </CardDescription>
     </CardHeader>
-    <CardContent className="space-y-4">
-      <section className="space-y-1">
-        <h3 className="text-sm font-semibold">server</h3>
-        <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
-          <dt className="text-muted-foreground">bind</dt>
-          <dd className="font-mono" data-testid="bind-host">
-            {SAFE_PREVIEW.bind}
-          </dd>
-        </dl>
-      </section>
-      <section className="space-y-1">
-        <h3 className="text-sm font-semibold">actors.defaults</h3>
-        <ul className="list-disc pl-6 text-sm">
-          {SAFE_PREVIEW.actors.defaults.map((role) => (
-            <li key={role} className="font-mono">{role}</li>
-          ))}
-        </ul>
-      </section>
-      <section className="space-y-1">
-        <h3 className="text-sm font-semibold">redaction.patterns.count</h3>
-        <p className="font-mono text-sm" data-testid="redaction-count">
-          {SAFE_PREVIEW.redaction.patterns.count}
-        </p>
-      </section>
+    <CardContent>
+      <p className="text-sm text-muted-foreground">No remote config payload.</p>
     </CardContent>
   </Card>
 );

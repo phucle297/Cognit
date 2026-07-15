@@ -15,22 +15,20 @@
 # in Docker. Plain `docker compose up -d` still works once the CLI is
 # already linked on the host.
 #
-# Port policy:
-#   - :6970 host-facing only (dashboard via nginx), started on demand
-#   - :6971 internal docker network only; not exposed to host
-#   - Non-docker users (pnpm dev:server + pnpm dev:dashboard) unaffected
+# Port policy (simple local-first):
+#   - :6971 API  — published to host loopback (docker compose up -d)
+#   - :6970 UI   — `cognit dashboard` (vite) or `--docker` nginx SPA
+#   - Dashboard always talks to http://127.0.0.1:6971 for /api/*
 #
 # The dashboard service lives behind the `dashboard` profile so a plain
-# `docker compose up` does not bind :6970. Start it explicitly via the
-# CLI (`cognit dashboard --docker`) or the profile (`--profile dashboard`).
+# `docker compose up` starts the API only. Start the SPA via
+# `cognit dashboard` (anywhere) or `docker compose --profile dashboard up`.
 #
 # Data persists in the `cognit-data` named volume at /data inside the
 # server container (the server's COGNIT_ROOT). To wipe and re-seed:
 #   docker compose down -v && docker compose up -d
 #
-# Local-only tool — no auth, no API token, no cookie. The server
-# binds 0.0.0.0 inside the docker network but the port is never
-# published to the host.
+# Local-only tool — no auth. API is bound to 127.0.0.1 on the host.
 
 services:
   server:
@@ -39,16 +37,16 @@ services:
       dockerfile: docker/Dockerfile.server
     image: cognit:server
     container_name: cognit-server
-    expose:
-      - "6971"                       # internal docker network only
+    ports:
+      - "127.0.0.1:6971:6971"         # host-facing API (vite + CLI expect this)
     environment:
       COGNIT_ROOT: /data
       PORT: "6971"
     volumes:
       - cognit-data:/data
-    # seed-demo.mjs runs first; on re-runs the demo session already
-    # exists so it exits 0 in <50ms.
-    command: ["sh", "-c", "node apps/server/seed-demo.mjs && exec node apps/server/dist/index.js --host 0.0.0.0 --port 6971 --root /data"]
+    # Server auto-creates a default project row on empty volume
+    # (no mock demo sessions). Override name with COGNIT_PROJECT_NAME.
+    command: ["node", "apps/server/dist/index.js", "--host", "0.0.0.0", "--port", "6971", "--root", "/data"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:6971/api/healthz"]
       interval: 5s

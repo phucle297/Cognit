@@ -95,8 +95,8 @@ if [ "$NO_DOCKER" -eq 1 ]; then
   cognit:   $PNPM_BIN/cognit
   server:   skipped (--no-docker). Run \`docker compose up -d\` when ready,
             or \`cognit server\` to run it on the host (loopback :6971).
-  dashboard: cognit dashboard                # vite dev on :5173
-             cognit dashboard --docker       # nginx on :6970
+  dashboard: cognit dashboard                # vite on :6970 → API :6971
+             cognit dashboard --docker       # nginx SPA on :6970
 
 If 'cognit' is not on PATH:
   export PATH="$PNPM_BIN:\$PATH"
@@ -120,15 +120,15 @@ EOF
   exit 0
 fi
 
-printf '→ docker compose up -d (server on :6971 internal)\n'
+printf '→ docker compose up -d (server published on 127.0.0.1:6971)\n'
 docker compose up -d "${DOCKER_ARGS[@]}"
 
 cat <<EOF
 
 ✓ ready
-  cognit:   $PNPM_BIN/cognit
-  server:   docker compose ps   (cognit-server)
-  dashboard: opt-in — docker compose --profile dashboard up -d
+  cognit:    $PNPM_BIN/cognit
+  API:       http://127.0.0.1:6971   (docker compose publishes it)
+  dashboard: cognit dashboard        (http://127.0.0.1:6970 → API :6971)
 
 If 'cognit' is not on PATH:
   export PATH="$PNPM_BIN:\$PATH"
