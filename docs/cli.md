@@ -18,7 +18,7 @@ count. Each lives in its own file under `apps/cli/src/commands/`.
 |---|---------------|-------------------------------------------|----------------------------------------------------------------------------------------------------------|
 | 1 | `init`        | `apps/cli/src/commands/init.ts`           | Initialise a local Cognit project (creates `.cognit/` tree, writes `cognit.yaml`, adds `.gitignore`).    |
 | 2 | `config`      | `apps/cli/src/commands/config.ts`         | Show or edit the local `cognit.yaml` (flags: `--show`, `--edit`).                                        |
-| 3 | `env`         | `apps/cli/src/commands/env.ts`            | Print hook-relevant env vars (`$COGNIT_INBOX`, `$COGNIT_SESSION_ID`) for the current project.            |
+| 3 | `env`         | `apps/cli/src/commands/env.ts`            | Print hook-relevant env vars (`$COGNIT_INBOX`, `$COGNIT_SESSION_ID`, `$COGNIT_REALTIME` when `inbox.realtime` is on) for the current project. |
 | 4 | `session`     | `apps/cli/src/commands/session.ts`        | Manage sessions: create / list / show / resume / close / fork.                                           |
 
 ## Event authoring
@@ -39,7 +39,7 @@ count. Each lives in its own file under `apps/cli/src/commands/`.
 | 16 | `edge`       | `apps/cli/src/commands/edge.ts`                 | Add or list edges between entities in a session (`edge_created` events).                 |
 | 17 | `constraint` | `apps/cli/src/commands/constraint.ts`           | Manage user-defined constraint rules.                                                    |
 | 18 | `redaction`  | `apps/cli/src/commands/redaction.ts`            | Dry-run redaction against the built-in + user pattern set.                               |
-| 19 | `inbox`      | `apps/cli/src/commands/inbox.ts`                | Watch or process the local inbox (`.cognit/inbox/`). See `docs/hooks/README.md`.         |
+| 19 | `inbox`      | `apps/cli/src/commands/inbox.ts`                | Drain the local inbox (`.cognit/inbox/`): `--process`, `--watch`, `--reprocess`, `--status`, `--install-watch` (systemd/launchd unit). Read commands drain lazily via `inbox.auto_drain` (default on) — no inbox invocation required for basic use. See `docs/hooks/README.md`. |
 | 20 | `events`     | `apps/cli/src/commands/events.ts`               | List events for a session (optionally follow new events).                                |
 | 21 | `wrap`       | `apps/cli/src/commands/wrap.ts`                 | Spawn a worker command and translate its output into inbox envelopes.                    |
 

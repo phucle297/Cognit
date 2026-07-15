@@ -4,6 +4,7 @@ import { EventStore, type EventRow } from "@cognit/db";
 import { findProjectRoot } from "../paths.js";
 import { resolveSessionId, warnStalePointer } from "../session-resolver.js";
 import { withAppLayer } from "../layer-build.js";
+import { drainInboxOnce } from "../inbox-drain.js";
 import { emit, getOutputMode, type OutputMode } from "../output.js";
 
 interface EventsOptions {
@@ -40,10 +41,7 @@ const renderTextTable = (events: ReadonlyArray<EventRow>): string => {
   return lines.join("\n") + (events.length > 0 ? "\n" : "");
 };
 
-const runEventsCommand = <A, E, R>(
-  root: string,
-  eff: Effect.Effect<A, E, R>,
-): Promise<A> => {
+const runEventsCommand = <A, E, R>(root: string, eff: Effect.Effect<A, E, R>): Promise<A> => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const provided = withAppLayer(root, eff) as any as Effect.Effect<A, E, never>;
   return Effect.runPromise(provided).catch((e: unknown) => {
@@ -78,6 +76,10 @@ export function registerEvents(program: Command): void {
     .option("--json", "emit a stable JSON envelope on stdout")
     .action(async (opts: EventsOptions) => {
       const root = requireProjectRoot();
+      // §1: drain the inbox first — this also auto-binds a session via
+      // the sticky pointer, so `resolveSessionId` finds one without a
+      // prior `cognit session create`. Best-effort; never fatal.
+      await drainInboxOnce(root);
       const resolved = resolveSessionId(root, opts.session);
       if (!resolved) {
         process.stderr.write(

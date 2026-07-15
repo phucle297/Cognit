@@ -129,10 +129,10 @@ describe("cognit inbox --watch", () => {
     });
   });
 
-  it("fails cleanly when neither --watch nor --process is given", async () => {
+  it("fails cleanly when no inbox mode flag is given", async () => {
     expect(runCli(tmp, ["init", "--project", "demo"]).status).toBe(0);
     const proc = runCli(tmp, ["inbox"]);
     expect(proc.status).not.toBe(0);
-    expect(proc.stderr).toContain("requires --watch or --process");
+    expect(proc.stderr).toContain("requires one of --watch, --process");
   });
 });

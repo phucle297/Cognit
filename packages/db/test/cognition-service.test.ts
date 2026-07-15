@@ -13,14 +13,15 @@ import { CognitionService, CognitionServiceLive, SessionService } from "../src";
  * to validate the shell, not the chokepoint.
  */
 describe("CognitionService", () => {
-  type AppendEventInput = Parameters<
-    Context.Tag.Service<typeof SessionService>["appendEvent"]
-  >[0];
-  type SessionAppendEventResult = ReturnType<
-    Context.Tag.Service<typeof SessionService>["appendEvent"]
-  > extends Effect.Effect<infer R, infer _E, infer _R>
-    ? R
-    : never;
+  type AppendEventInput = Parameters<Context.Tag.Service<typeof SessionService>["appendEvent"]>[0];
+  type SessionAppendEventResult =
+    ReturnType<Context.Tag.Service<typeof SessionService>["appendEvent"]> extends Effect.Effect<
+      infer R,
+      infer _E,
+      infer _R
+    >
+      ? R
+      : never;
 
   const SESSION_ID = "01SESS00000000000000000000";
   const EVENT_ID = "01EVT0000000000000000000000";
@@ -54,6 +55,7 @@ describe("CognitionService", () => {
       pause: () => Effect.die("not used in this test") as never,
       close: () => Effect.die("not used in this test") as never,
       resume: () => Effect.die("not used in this test") as never,
+      ingest: () => Effect.die("not used in this test") as never,
       show: (sessionId) =>
         Effect.succeed({
           session: {

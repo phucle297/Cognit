@@ -1,5 +1,6 @@
 export * from "./actor-types.js";
 export * from "./config.js";
+export * from "./current-session.js";
 export * from "./constraint-dsl.js";
 export * from "./event-types.js";
 export * from "./paths.js";

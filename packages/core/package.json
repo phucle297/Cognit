@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
+    "./current-session": "./src/current-session.ts",
     "./paths": "./src/paths.ts",
     "./redaction": "./src/redaction.ts",
     "./reducer": "./src/reducer.ts",

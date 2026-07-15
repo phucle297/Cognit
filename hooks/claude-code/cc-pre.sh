@@ -60,7 +60,7 @@ if [[ -z "$session" && -f ./.cognit/current-session ]]; then
   session="$(tr -d '[:space:]' < ./.cognit/current-session)"
 fi
 if [[ -z "$session" ]]; then
-  session="01HXXXXXXXXXXXXXXXXXXXXXXXX"
+  session="01HXXXXXXXXXXXXXXXXXXXXXXX"
 fi
 
 tool="$(jq -r '.tool_name // "unknown"' <<<"$input")"
@@ -128,3 +128,13 @@ finally:
     os.close(fd)
 os.rename(tmp, path)
 PY
+
+# D-M4-00 §4.1: near-realtime without a daemon. When
+# `inbox.realtime: true`, `cognit env --shell` exports
+# COGNIT_REALTIME=1; fire-and-forget a one-shot drain so SQLite sees
+# the event without waiting for the next read command. Never block
+# the host CLI; never fail the hook if cognit is missing.
+if [[ "${COGNIT_REALTIME:-0}" == "1" ]] && command -v cognit >/dev/null 2>&1; then
+  (cognit inbox --process >/dev/null 2>&1 &) || true
+fi
+

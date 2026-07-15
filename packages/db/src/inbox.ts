@@ -1,146 +1,58 @@
-import { Context, Effect, Either, Runtime, Schema } from "effect";
+import { Context, Effect, Either, Runtime } from "effect";
 import chokidar from "chokidar";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { Logger } from "./context";
-import { InboxError } from "./errors";
+import { DbError, InboxError } from "./errors";
 import { moveToError } from "./inbox-sidecar";
-import { CURRENT_VERSION, PAYLOAD_SCHEMAS_BY_VERSION } from "./event-schema";
-import { ActorType } from "./actor";
-import { SessionService, type SessionAppendEventInput } from "./session-service";
-import {
-  ConstraintViolation,
-  DbError,
-  SessionClosed,
-  UnknownEventType,
-  UnknownEventVersion,
-  UnknownSession,
-  ValidationFailure,
-} from "./errors";
+import { SessionService, type SessionAppendEventResult } from "./session-service";
+import { INBOX_FILENAME_RE, mapIngestError, type IngestError } from "./envelope";
 
 type LoggerService = Context.Tag.Service<typeof Logger>;
 type SessionServiceT = Context.Tag.Service<typeof SessionService>;
 
-/**
- * Decode a free-form `actor_type` string from the JSON payload. Rejects
- * anything that isn't one of the three literal types the DB CHECK
- * constraint allows, with a clean error rather than a SQLite check
- * violation surfacing through the append path.
- */
-const decodeActorType = (s: string): Either.Either<ActorType, unknown> =>
-  Schema.decodeUnknownEither(ActorType)(s);
+/** Max in-process retries for transient DB contention (§3.3). */
+const MAX_INGEST_RETRIES = 3;
+/** Base backoff (ms) for the exponential retry; doubled per attempt. */
+const BASE_BACKOFF_MS = 5;
 
 /**
- * ULID regex (Crockford base32, 26 chars). Used both for the envelope
- * `session_id` field and for the filename pattern
- * `<session-id>-<ulid>.json`. Per plan.xml:670 and plan.xml:692.
- *
- * Unanchored: `Schema.pattern` and `RegExp.test` both anchor the
- * pattern to the whole string, so explicit `^…$` would be a no-op
- * (and would break composition when splicing the pattern into the
- * filename regex).
+ * A transient DB error (SQLITE_BUSY/LOCKED) is worth a bounded in-process
+ * retry. Permanent failures (corruption, disk) and validation/schema
+ * errors are NOT transient — retrying cannot fix them.
  */
-const ULID_RE = /[0-9A-HJKMNP-TV-Z]{26}/;
-
-/**
- * Inbox file naming convention: `<session-id>-<event-ulid>.json`.
- * The session id is the parent; the trailing ulid is the event id
- * the producer chose. Reject any file that does not match — the
- * producer forgot the atomic-write dance.
- *
- * Note: `ULID_RE.source` includes `^…$` anchors. We strip them and
- * rebuild without the inner `$` so the two ULID parts can be
- * composed.
- */
-const INBOX_FILENAME_RE = new RegExp(
-  `^[0-9A-HJKMNP-TV-Z]{26}-[0-9A-HJKMNP-TV-Z]{26}\\.json$`,
-);
-
-/**
- * Envelope schema. Required fields per plan.xml:692. `version` is a
- * literal union of every version the schema registry knows
- * (`packages/db/src/event-schema.ts`); unknown versions fail at the
- * envelope-decode step. CURRENT_VERSION is included so producers that
- * emit the latest envelope (claude/codex/gemini/opencode hooks +
- * @cognit/wrap) are always accepted. `payload` is intentionally
- * `Schema.Unknown` because per-payload validation runs against the
- * version+type keyed map below.
- */
-const EnvelopeSchema = Schema.Struct({
-  type: Schema.String.pipe(Schema.minLength(1)),
-  version: Schema.Literal("1.0.0", "1.1.0", CURRENT_VERSION),
-  session_id: Schema.String.pipe(Schema.pattern(ULID_RE)),
-  actor_name: Schema.String.pipe(Schema.minLength(1)),
-  actor_type: ActorType,
-  payload: Schema.Unknown,
-  // When supplied by the producer, the envelope id MUST be a ULID.
-  // The event-store uses it as the events.id PRIMARY KEY; a non-ULID
-  // value would silently break downstream consumers (snapshots, SSE
-  // bus, mempalace links) that key on ULID-shaped strings. Reject at
-  // the envelope boundary instead of corrupting the row.
-  id: Schema.optional(Schema.String.pipe(Schema.pattern(ULID_RE))),
-  source: Schema.optional(
-    Schema.Struct({
-      tool: Schema.String,
-      command: Schema.String,
-      filePath: Schema.optional(Schema.String),
-    }),
-  ),
-  artifactRefs: Schema.optional(Schema.Array(Schema.String)),
-  causationId: Schema.optional(Schema.String),
-  correlationId: Schema.optional(Schema.String),
-  // Bound confidence to [0, 1] (defense-in-depth at the envelope
-  // boundary). Out-of-range values used to surface as a generic
-  // DbError from the INSERT, which the watcher miscategorized as
-  // `actor_not_registered` and confused users investigating
-  // `.cognit/_error/*.reason.txt`.
-  confidence: Schema.optional(
-    Schema.Number.pipe(
-      Schema.greaterThanOrEqualTo(0),
-      Schema.lessThanOrEqualTo(1),
-    ),
-  ),
-  parentVerificationId: Schema.optional(Schema.String),
-  linkedHypothesisId: Schema.optional(Schema.String),
-});
-
-/**
- * Cached compiled payload Schemas, keyed by `"<version>:<type>"`. The
- * schema registry is module-static, so a single lookup table is enough
- * — no per-file cost. The cache is populated lazily on first decode.
- */
-const payloadSchemaCache = new Map<string, Schema.Schema<any, any, never>>();
-
-const lookupPayloadSchema = (
-  version: string,
-  type: string,
-): Schema.Schema<any, any, never> | undefined => {
-  const key = `${version}:${type}`;
-  const cached = payloadSchemaCache.get(key);
-  if (cached) return cached;
-  const byVersion = PAYLOAD_SCHEMAS_BY_VERSION[version];
-  const schema = byVersion?.[type] as Schema.Schema<any, any, never> | undefined;
-  if (schema) payloadSchemaCache.set(key, schema);
-  return schema;
-};
+const isTransientDbError = (e: IngestError): boolean =>
+  e._tag === "DbError" &&
+  /SQLITE_BUSY|SQLITE_LOCKED|database is locked|database table is locked/i.test(
+    `${e.message ?? ""} ${String((e as DbError).cause ?? "")}`,
+  );
 
 /**
  * Watch a directory for `.json` files (atomically renamed from `.tmp`).
- * For each complete file: parse, validate shape, hand to appendEvent,
- * move to `.cognit/processed/<id>.json` on success or `.cognit/_error/`
- * on failure.
+ * For each complete file: parse, hand the envelope to the unified
+ * `SessionService.ingest` entry point, move to
+ * `.cognit/processed/<id>.json` on success or `.cognit/_error/` on
+ * failure.
  *
- * Idempotency is enforced by `appendEvent` (duplicate `id` returns the
- * existing row, no double insert).
- *
- * The snapshot policy is sourced from the `SessionPolicy` service on
- * the R channel (see `SessionService.appendEvent` → `SessionPolicy.everyN`).
+ * Decode + session resolution + append all live in `ingest` (§1.5/§2).
+ * The watcher owns only the file lifecycle: read, parse, the
+ * file-naming protocol check, and the success/error move. Idempotency
+ * is enforced inside `ingest` → `appendEvent` (duplicate `id` returns
+ * the existing row, no double insert).
  */
 export interface InboxWatcherConfig {
   readonly inboxDir: string;
   readonly processedDir: string;
   readonly errorDir: string;
   readonly debounceMs: number;
+  /** Project id — required by `ingest` to mint a bootstrap session. */
+  readonly projectId: string;
+  /**
+   * Project root — when set, `ingest` reads/writes the sticky
+   * `.cognit/current-session` pointer so a burst of placeholder-session
+   * envelopes collapses onto one bootstrap session.
+   */
+  readonly projectRoot?: string;
 }
 
 export const makeInboxWatcher = (config: InboxWatcherConfig) =>
@@ -163,28 +75,18 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
     }).pipe(Effect.ignoreLogged);
 
     /**
-     * Pure processing step: read file, parse, attempt append, move to
-     * success or error dir. This is what unit tests exercise.
+     * Pure processing step: read file, parse, enforce the file-naming
+     * protocol, hand the envelope to `ingest`. `ingest` decodes the
+     * envelope, resolves/creates the session, and appends; a typed
+     * `IngestError` is mapped to a sidecar category here.
      *
-     * Decode order (each step maps to a sidecar category on failure):
+     * Remaining file-level steps (each maps to a sidecar category):
      *   1. JSON.parse                    → invalid_json
-     *   2. Envelope Schema decode        → schema_validation_failure (envelope)
-     *   3. Filename regex (ULID pair)    → unknown_session_id
-     *   4. Payload Schema decode         → schema_validation_failure (payload)
-     *   5. actor_type literal decode     → invalid_actor_type (redundant w/ step 2)
-     *   6. appendEvent typed error map   → category from the typed error
-     *
-     * Step 5 is redundant in practice (envelope decode already
-     * constrains `actor_type` to the literal union), but kept as a
-     * defensive belt-and-braces against schema-registry drift.
-     *
-     * Publish moved to `SessionService.appendEvent` (the chokepoint)
-     * in phase 5.1 — file-based inbox writes go through the same
-     * path as POST /events, so the publish happens there.
+     *   2. Filename regex (ULID pair)    → unknown_session_id
+     * Envelope/payload/actor decode + append errors come back from
+     * `ingest` and are mapped via `mapIngestError`.
      */
-    const processFile = (
-      filePath: string,
-    ): Effect.Effect<void, never, SessionService | Logger> =>
+    const processFile = (filePath: string): Effect.Effect<void, never, SessionService | Logger> =>
       Effect.gen(function* () {
         const base = path.basename(filePath);
         const readResult = yield* Effect.tryPromise({
@@ -207,31 +109,11 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           parsed = JSON.parse(text);
         } catch (e) {
           yield* logger.log("error", { file: filePath, error: String(e) }, "inbox: invalid json");
-          yield* moveToError(
-            filePath,
-            base,
-            config.errorDir,
-            "invalid_json",
-            String(e),
-            logger,
-          );
+          yield* moveToError(filePath, base, config.errorDir, "invalid_json", String(e), logger);
           return;
         }
 
-        // Step 2: envelope schema decode. Coerces `parsed` to the
-        // typed envelope shape used below; failure maps to
-        // `schema_validation_failure` with a category-prefixed
-        // reason.
-        const envelopeResult = Schema.decodeUnknownEither(EnvelopeSchema)(parsed);
-        if (Either.isLeft(envelopeResult)) {
-          const reason = `envelope: ${String(envelopeResult.left)}`;
-          yield* logger.log("error", { file: filePath, reason }, "inbox: envelope decode failed");
-          yield* moveToError(filePath, base, config.errorDir, "schema_validation_failure", reason, logger);
-          return;
-        }
-        const p = envelopeResult.right;
-
-        // Step 3: filename ULID pair. Filenames that don't match
+        // Step 2: filename ULID pair. Filenames that don't match
         // `<session>-<event-ulid>.json` are rejected so producers
         // can't sneak around the atomic-write protocol by writing
         // `badname.json` directly.
@@ -242,135 +124,44 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           return;
         }
 
-        // Step 4: payload schema decode keyed on (version, type).
-        // Fail loudly when no schema is registered: silently skipping
-        // validation would let unknown event types pass the envelope
-        // gate only to be rejected at `appendEvent` with a less
-        // actionable `UnknownEventType` error. Catch it here as
-        // `schema_validation_failure` with the exact (version, type)
-        // pair so the sidecar reason tells the producer what's wrong.
-        const payloadSchema = lookupPayloadSchema(p.version, p.type);
-        if (!payloadSchema) {
-          const reason = `unknown (version, type) pair: ${p.version}/${p.type}`;
-          yield* logger.log(
-            "error",
-            { file: filePath, version: p.version, type: p.type },
-            "inbox: unknown (version, type)",
-          );
-          yield* moveToError(
-            filePath,
-            base,
-            config.errorDir,
-            "schema_validation_failure",
-            reason,
-            logger,
-          );
-          return;
+        // Step 3: unified ingest with bounded retry on transient DB
+        // contention (§3.3). better-sqlite3 is sync; SQLITE_BUSY/LOCKED
+        // is brief. Validation/schema errors are NOT retried (retrying
+        // cannot fix a malformed file) — the loop breaks on the first
+        // non-transient error. Idempotent via event-id dedup in append.
+        let ingestResult: Either.Either<SessionAppendEventResult, IngestError>;
+        for (let attempt = 0; ; attempt++) {
+          const r = yield* sessions
+            .ingest({
+              envelope: parsed,
+              projectId: config.projectId,
+              ...(config.projectRoot !== undefined ? { projectRoot: config.projectRoot } : {}),
+            })
+            .pipe(Effect.either);
+          if (Either.isRight(r) || !isTransientDbError(r.left) || attempt >= MAX_INGEST_RETRIES) {
+            ingestResult = r;
+            break;
+          }
+          yield* Effect.sleep(`${BASE_BACKOFF_MS * 2 ** attempt} millis`);
         }
-        const decoded = Schema.decodeUnknownEither(payloadSchema)(p.payload);
-        if (Either.isLeft(decoded)) {
-          const reason = `payload: ${String(decoded.left)}`;
-          yield* logger.log("error", { file: filePath, reason }, "inbox: payload decode failed");
-          yield* moveToError(
-            filePath,
-            base,
-            config.errorDir,
-            "schema_validation_failure",
-            reason,
-            logger,
-          );
-          return;
-        }
-
-        // Step 5: actor_type decode. Redundant with the envelope
-        // schema (which already constrains the literal) but kept
-        // as a defensive guard.
-        const actorTypeResult = decodeActorType(p.actor_type);
-        if (Either.isLeft(actorTypeResult)) {
-          const reason = String(actorTypeResult.left);
-          yield* logger.log(
-            "error",
-            { file: filePath, actor_type: p.actor_type },
-            "inbox: invalid actor_type",
-          );
-          yield* moveToError(
-            filePath,
-            base,
-            config.errorDir,
-            "invalid_actor_type",
-            reason,
-            logger,
-          );
-          return;
-        }
-        const actorType = actorTypeResult.right;
-
-        // Build the input for SessionService.appendEvent. The explicit
-        // `id` from the inbox JSON is forwarded so duplicate-rename
-        // reprocessing is idempotent at the event-store layer.
-        // `SessionService.appendEvent` reads the configured
-        // `SessionPolicy.everyN` to trigger an auto-snapshot when the
-        // threshold is crossed.
-        const sessionInput: SessionAppendEventInput = {
-          type: p.type,
-          payload: p.payload,
-          sessionId: p.session_id,
-          actor: { name: p.actor_name, type: actorType },
-          ...(p.id !== undefined ? { id: p.id } : {}),
-          ...(p.source !== undefined
-            ? {
-                source: {
-                  tool: p.source.tool,
-                  command: p.source.command,
-                  ...(p.source.filePath !== undefined
-                    ? { filePath: p.source.filePath }
-                    : {}),
-                },
-              }
-            : {}),
-          ...(p.artifactRefs !== undefined ? { artifactRefs: p.artifactRefs } : {}),
-          ...(p.causationId !== undefined ? { causationId: p.causationId } : {}),
-          ...(p.correlationId !== undefined ? { correlationId: p.correlationId } : {}),
-          ...(p.confidence !== undefined ? { confidence: p.confidence } : {}),
-          ...(p.parentVerificationId !== undefined
-            ? { parentVerificationId: p.parentVerificationId }
-            : {}),
-          ...(p.linkedHypothesisId !== undefined
-            ? { linkedHypothesisId: p.linkedHypothesisId }
-            : {}),
-        };
-
-        // Step 6: appendEvent with typed-error → category mapping.
-        // The typed error channel is `SessionError` (DbError |
-        // SessionClosed | UnknownEventType | ValidationFailure |
-        // UnknownSession | ConstraintViolation). `DuplicateEventId`
-        // is caught inside `EventStore.append` and re-fetched before
-        // it can bubble up, so the inbox never sees it directly —
-        // the idempotency check there is the source of truth.
-        const appendResult = yield* sessions.appendEvent(sessionInput).pipe(Effect.either);
-        if (Either.isLeft(appendResult)) {
-          const e = appendResult.left;
-          const { category, reason } = mapAppendError(e);
+        if (Either.isLeft(ingestResult)) {
+          const { category, reason } = mapIngestError(ingestResult.left);
           yield* logger.log(
             "error",
             { file: filePath, error: reason },
-            `inbox: append failed (${category})`,
+            `inbox: ingest failed (${category})`,
           );
           yield* moveToError(filePath, base, config.errorDir, category, reason, logger);
           return;
         }
-        const result = appendResult.right;
+        const result = ingestResult.right;
         yield* logger.log(
           "info",
-          { eventId: result.event.id, type: p.type, snapshotTaken: result.snapshotTaken },
+          { eventId: result.event.id, sessionId: result.event.session_id },
           "inbox: appended",
         );
-        // Publish chokepoint lives in SessionService.appendEvent
-        // (phase 5.1). The inbox watcher goes through the same path
-        // as POST /events, so no second publish here.
         yield* Effect.tryPromise({
-          try: () =>
-            fs.rename(filePath, path.join(config.processedDir, `${result.event.id}.json`)),
+          try: () => fs.rename(filePath, path.join(config.processedDir, `${result.event.id}.json`)),
           catch: (renameErr) =>
             new InboxError({
               file: filePath,
@@ -382,73 +173,6 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
 
     return { processFile };
   });
-
-/**
- * Map a typed `SessionError` from `SessionService.appendEvent` to a
- * sidecar category + human-readable reason. The four spec-listed
- * categories (`invalid_json`, `unknown_session_id`,
- * `schema_validation_failure`, `actor_not_registered`) are covered;
- * the internal categories (`invalid_actor_type`, `invalid_envelope`)
- * never reach this path because the watcher rejects them earlier.
- *
- * Parameter union must match the full `AppendError` set from
- * `packages/db/src/errors.ts` — widening it is the only way the
- * compiler enforces exhaustiveness. Falling through with an unknown
- * tag used to crash the sidecar write because the switch returned
- * `undefined` and the `category` field is non-optional.
- */
-const mapAppendError = (
-  e:
-    | DbError
-    | SessionClosed
-    | UnknownEventType
-    | UnknownEventVersion
-    | ValidationFailure
-    | UnknownSession
-    | ConstraintViolation,
-): { category: import("./inbox-sidecar").InboxFailureCategory; reason: string } => {
-  switch (e._tag) {
-    case "UnknownSession":
-      return {
-        category: "unknown_session_id",
-        reason: `session not found: ${e.sessionId}`,
-      };
-    case "SessionClosed":
-      return {
-        category: "unknown_session_id",
-        reason: `session closed: ${e.sessionId}`,
-      };
-    case "ValidationFailure":
-      return {
-        category: "schema_validation_failure",
-        reason: `${e.type}@${e.version}: ${e.issues}`,
-      };
-    case "UnknownEventType":
-      return {
-        category: "schema_validation_failure",
-        reason: `unknown event type: ${e.type}`,
-      };
-    case "UnknownEventVersion":
-      return {
-        category: "schema_validation_failure",
-        reason: `unknown version ${e.version} for type ${e.type}`,
-      };
-    case "ConstraintViolation":
-      return {
-        category: "actor_not_registered",
-        reason: `rule ${e.ruleId} blocked: ${e.reason}`,
-      };
-    case "DbError":
-      // Storage / driver failure. Distinct from
-      // `actor_not_registered` so users investigating
-      // `.cognit/_error/*.reason.txt` don't go chasing identity
-      // issues when the real cause is disk/db.
-      return {
-        category: "internal_db_error",
-        reason: `db: ${e.message}`,
-      };
-  }
-};
 
 /**
  * Pure chokidar `ignored` predicate. Exported for test coverage.
@@ -476,6 +200,56 @@ export const inboxIgnored = (p: string): boolean => {
  * This is the CLI's `--process` path. The long-running `--watch` path
  * uses `runInboxWatcher` instead.
  */
+
+/** Sentinel file written into `inboxDir` on every successful drain. */
+export const LAST_DRAIN_FILENAME = ".last-drain";
+
+/**
+ * Write the `.last-drain` stamp (ISO timestamp) so `cognit inbox status`
+ * and `cognit doctor` can detect a stalled pipeline. Best-effort: a
+ * write failure is logged and swallowed.
+ */
+const writeLastDrainStamp = (
+  inboxDir: string,
+): Effect.Effect<void, never, Logger> =>
+  Effect.tryPromise({
+    try: () => fs.writeFile(path.join(inboxDir, LAST_DRAIN_FILENAME), new Date().toISOString(), "utf8"),
+    catch: (e) => new InboxError({ file: inboxDir, message: "last-drain stamp", cause: e }),
+  }).pipe(Effect.ignoreLogged);
+
+/**
+ * Read the last-drain timestamp, or `null` when no drain has happened.
+ * CLI-side (status/doctor); not an Effect.
+ */
+export const readLastDrainStamp = async (inboxDir: string): Promise<string | null> => {
+  try {
+    return (await fs.readFile(path.join(inboxDir, LAST_DRAIN_FILENAME), "utf8")).trim();
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Pending + errored file counts for `cognit inbox status` / doctor.
+ * Pending counts only top-level `.json` envelopes in the inbox (not
+ * `processed/`/`_error/` subdirs). Errored counts `.json` envelopes in
+ * `_error/` (sidecar `.reason.txt` files are excluded).
+ */
+export const inboxFileCounts = async (dirs: {
+  inboxDir: string;
+  errorDir: string;
+}): Promise<{ pending: number; errored: number }> => {
+  const topJson = async (dir: string): Promise<number> => {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      return entries.filter((d) => d.isFile() && d.name.endsWith(".json")).length;
+    } catch {
+      return 0;
+    }
+  };
+  return { pending: await topJson(dirs.inboxDir), errored: await topJson(dirs.errorDir) };
+};
+
 export const drainInbox = (
   config: InboxWatcherConfig,
 ): Effect.Effect<{ processed: number; errored: number }, never, SessionService | Logger> =>
@@ -507,6 +281,50 @@ export const drainInbox = (
       processed: afterProcessed - beforeProcessed,
       errored: afterErrored - beforeErrored,
     };
+  }).pipe(
+    // §3.4: stamp a successful drain so doctor/status can flag a stalled
+    // pipeline. Placed LAST so the stamp only reflects a completed drain.
+    Effect.tap(() => writeLastDrainStamp(config.inboxDir)),
+  );
+
+/**
+ * Re-run `processFile` over every `.json` file currently in `errorDir`
+ * (§6 durable retry surface). After a Cognit upgrade that fixes a
+ * decode/handling bug — or once the §2 lazy-create fix has landed —
+ * this salvages legacy errored files (including placeholder-session
+ * files stranded before any session existed) without a manual `mv`.
+ *
+ * Files that now succeed move to `processedDir`; files that still fail
+ * stay in `errorDir` with an updated `reason.txt` (idempotent re-run).
+ * `.reason.txt` sidecars are skipped (only `.json` envelopes are
+ * reprocessed). Counts: `processed` = files that moved out this run;
+ * `errored` = files that remain.
+ */
+export const reprocessErrorDir = (
+  config: InboxWatcherConfig,
+): Effect.Effect<{ processed: number; errored: number }, never, SessionService | Logger> =>
+  Effect.gen(function* () {
+    const { processFile } = yield* makeInboxWatcher(config);
+    const listDir = (dir: string): Effect.Effect<ReadonlyArray<string>, never, never> =>
+      Effect.tryPromise({
+        try: () => fs.readdir(dir),
+        catch: () => [] as ReadonlyArray<string>,
+      }).pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+    const beforeProcessed = (yield* listDir(config.processedDir)).filter((n) =>
+      n.endsWith(".json"),
+    ).length;
+    const entries = yield* listDir(config.errorDir);
+    let total = 0;
+    for (const name of entries) {
+      if (!name.endsWith(".json")) continue;
+      total += 1;
+      yield* processFile(path.join(config.errorDir, name));
+    }
+    const afterProcessed = (yield* listDir(config.processedDir)).filter((n) =>
+      n.endsWith(".json"),
+    ).length;
+    const processed = afterProcessed - beforeProcessed;
+    return { processed, errored: total - processed };
   });
 
 /**
@@ -517,9 +335,7 @@ export const drainInbox = (
  * Callers must provide `SessionService | Logger` to satisfy the R-channel.
  * The watcher materialises this R into a `Runtime` once, then forks each
  * per-file effect onto that runtime — avoiding the `MissingServiceError`
- * trap of an unsafe effect-channel-narrowing cast. (`EventBus` is pulled
- * transitively through `SessionService` post-phase-5.1; it does not appear
- * on this signature.)
+ * trap of an unsafe effect-channel-narrowing cast.
  */
 export const runInboxWatcher = (
   config: InboxWatcherConfig,

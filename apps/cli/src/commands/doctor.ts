@@ -36,8 +36,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { Command } from "commander";
 import { Effect } from "effect";
-import { DbConnection, ProjectService, SessionService } from "@cognit/db";
+import { DbConnection, ProjectService, SessionService, readLastDrainStamp } from "@cognit/db";
 import { COGNIT_SUBDIRS, projectPaths, isCognitProject } from "../paths.js";
+import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
 import { detectAndInstallHooks, type HookInstallResult } from "../hook-installer.js";
 import { emit, getOutputMode } from "../output.js";
@@ -212,17 +213,43 @@ const checkCaptureHealth = async (projectRoot: string): Promise<CheckResult[]> =
   }
   const errors = countJsonFiles(errorDir);
   void processedDir;
+  // Soft cap from config (inbox.max_pending, default 1000). Fall back
+  // to 1000 when yaml is unreadable so doctor still reports something.
+  let maxPending = 1000;
+  try {
+    const cfg = await readConfig(projectPaths(projectRoot).config);
+    maxPending = cfg.inbox.max_pending;
+  } catch {
+    // keep default
+  }
   checks.push({
     id: "capture.inbox_pending",
     label: "capture: inbox pending",
-    status: pending > 50 ? "warn" : "pass",
-    detail: `${pending} file(s) waiting (run \`cognit inbox --process\`)`,
+    status: pending > maxPending ? "warn" : "pass",
+    detail:
+      pending > maxPending
+        ? `${pending} file(s) waiting (exceeds soft cap ${maxPending}; run \`cognit inbox --process\`)`
+        : `${pending} file(s) waiting (run \`cognit inbox --process\`)`,
   });
   checks.push({
     id: "capture.inbox_errors",
     label: "capture: inbox errors",
     status: errors > 0 ? "warn" : "pass",
     detail: errors > 0 ? `${errors} error sidecar(s) in inbox/_error` : "0 error sidecars",
+  });
+  // §3.4: last-drain stamp. A missing or very stale stamp (>3d) signals
+  // a stalled pipeline — no read command has drained the inbox in a
+  // long time, so recently-written files are not yet in SQLite.
+  const lastDrain = await readLastDrainStamp(inboxDir);
+  const drainStale =
+    !lastDrain || Date.now() - new Date(lastDrain).getTime() > 3 * 24 * 60 * 60 * 1000;
+  checks.push({
+    id: "capture.inbox_last_drain",
+    label: "capture: inbox last drain",
+    status: drainStale ? "warn" : "pass",
+    detail: lastDrain
+      ? `last drain ${lastDrain}`
+      : "never drained (run a read command like `cognit continue`)",
   });
 
   return checks;
@@ -369,9 +396,18 @@ const renderText = (checks: ReadonlyArray<CheckResult>): string => {
     lines.push(`${padRight(c.label, labelWidth)}  ${padRight(mark, statusWidth)}  ${c.detail}`);
   }
   const failed = checks.filter((c) => c.status === "fail").length;
-  const summary = failed === 0 ? "All checks passed." : `${failed} check(s) failed.`;
+  const warned = checks.filter((c) => c.status === "warn").length;
+  // §3.3 one-line verdict: BROKEN on any fail, DEGRADED on warn-only,
+  // else HEALTHY.
+  const verdict = failed > 0 ? "BROKEN" : warned > 0 ? "DEGRADED" : "HEALTHY";
+  const summary =
+    failed === 0
+      ? warned === 0
+        ? "All checks passed."
+        : `${warned} check(s) need attention.`
+      : `${failed} check(s) failed.`;
   lines.push("");
-  lines.push(summary);
+  lines.push(`${verdict} — ${summary}`);
   return lines.join("\n") + "\n";
 };
 

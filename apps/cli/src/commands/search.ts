@@ -37,6 +37,7 @@ import { readConfig } from "../yaml-io.js";
 import { withAppLayer } from "../layer-build.js";
 import { getOutputMode, emit } from "../output.js";
 import { requireProjectRoot } from "../auto-session.js";
+import { drainInboxOnce } from "../inbox-drain.js";
 
 interface MatchRow {
   readonly kind: string;
@@ -76,10 +77,7 @@ interface SearchOptions {
  * through on the ranked memory via createdAtMs by re-emitting the
  * caller's pass-through timestamp).
  */
-const toMatchRow = (
-  m: RankedMemory,
-  createdAt: string,
-): MatchRow => {
+const toMatchRow = (m: RankedMemory, createdAt: string): MatchRow => {
   const primary = m.reasons[0] ?? "match";
   return {
     kind: m.kind,
@@ -133,8 +131,7 @@ const renderText = (q: string, response: SearchResponse): string => {
   return lines.join("\n") + "\n";
 };
 
-const truncate = (s: string, n: number): string =>
-  s.length > n ? s.slice(0, n - 1) + "…" : s;
+const truncate = (s: string, n: number): string => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 export function registerSearch(program: Command): void {
   program
@@ -142,12 +139,12 @@ export function registerSearch(program: Command): void {
     .description("fuzzy-search past sessions by goal, observation, decision, or conclusion text")
     .option("--root <path>", "project root (defaults to nearest .cognit/cognit.yaml)")
     .option("--limit <n>", "max sessions to show (default 20)")
-    .option(
-      "--status <s>",
-      "filter to active|paused|closed (default: any)",
-    )
+    .option("--status <s>", "filter to active|paused|closed (default: any)")
     .action(async (query: string, opts: SearchOptions) => {
       const root = opts.root ?? requireProjectRoot();
+      // §1: drain the inbox first so the answer reflects just-written
+      // files. Best-effort; never blocks the read on a drain failure.
+      await drainInboxOnce(root);
       const limit = Math.max(1, Math.min(100, Number(opts.limit ?? "20") || 20));
       const status = opts.status;
 
@@ -201,16 +198,19 @@ export function registerSearch(program: Command): void {
               if (!showResult) continue;
               const ranked = rankSessionMemories(
                 showResult.state,
-                { nowMs, query, projectId: project.id, branchHint: showResult.state.current_hypothesis_id },
+                {
+                  nowMs,
+                  query,
+                  projectId: project.id,
+                  branchHint: showResult.state.current_hypothesis_id,
+                },
                 { includeObservations: true },
               );
               if (ranked.length === 0) continue;
               // Search must filter to memories that actually overlap the
               // query — otherwise a session with old, unrelated memories
               // gets surfaced for any query.
-              const matching = ranked.filter((m) =>
-                m.reasons.some((r) => r.startsWith("matches")),
-              );
+              const matching = ranked.filter((m) => m.reasons.some((r) => r.startsWith("matches")));
               if (matching.length === 0) continue;
               const deduped = deduplicateMemories(matching);
               const capped = topNByKind(deduped, DEFAULT_SEARCH_CAPS);
@@ -219,9 +219,7 @@ export function registerSearch(program: Command): void {
               // Session-level score = its best memory score.
               const best = capped.reduce((acc, m) => (m.score > acc ? m.score : acc), 0);
 
-              const matches: MatchRow[] = capped.map((m) =>
-                toMatchRow(m, s.created_at),
-              );
+              const matches: MatchRow[] = capped.map((m) => toMatchRow(m, s.created_at));
               // Sort within session: score desc, then trust, then recency.
               matches.sort((a, b) => {
                 if (b.score !== a.score) return b.score - a.score;
@@ -253,9 +251,7 @@ export function registerSearch(program: Command): void {
             const open = limited.filter((s) => s.is_open);
             let continueTarget: string | null = null;
             if (open.length > 0) {
-              const sorted = [...open].sort((a, b) =>
-                b.created_at.localeCompare(a.created_at),
-              );
+              const sorted = [...open].sort((a, b) => b.created_at.localeCompare(a.created_at));
               continueTarget = sorted[0]!.session_id;
             } else if (limited.length > 0) {
               const allRows = yield* sessions.list({ projectId: project.id });

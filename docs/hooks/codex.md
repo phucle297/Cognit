@@ -17,9 +17,10 @@ codex-pre.sh / codex-post.sh
    ▼
 .cognit/inbox/<session>-<ulid>.json
    │
-   │ validate + persist + fold state
+   │ validate + persist + fold state (lazy drain on next read command,
+   │ or `cognit inbox --watch` / `--process` / `--reprocess`)
    ▼
-cognit inbox --watch   →   SQLite   →   dashboard
+cognit continue   →   SQLite   →   dashboard
 ```
 
 ## Install

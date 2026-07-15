@@ -1,6 +1,7 @@
 import path from "node:path";
 import process from "node:process";
 import fs from "node:fs";
+import YAML from "yaml";
 import { Command } from "commander";
 import { projectPaths } from "../paths.js";
 
@@ -21,6 +22,27 @@ const readCurrentSession = (projectRoot: string): string | null => {
 };
 
 /**
+ * D-M4-00 §4.1: export `COGNIT_REALTIME=1` only when
+ * `inbox.realtime: true` in cognit.yaml. Sync + lightweight (no full
+ * Schema validation) so `cognit env` stays safe before `init` and
+ * stays fast for shell bootstrap. Omitted when false/missing so
+ * hooks default to lazy drain only.
+ *
+ * Hooks gate fire-and-forget `cognit inbox --process` on this var —
+ * never parse yaml themselves (latency + host constraints).
+ */
+const readRealtime = (projectRoot: string): string | null => {
+  const configPath = projectPaths(projectRoot).config;
+  try {
+    const text = fs.readFileSync(configPath, "utf8");
+    const parsed = YAML.parse(text) as { inbox?: { realtime?: unknown } } | null;
+    return parsed?.inbox?.realtime === true ? "1" : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Registry of env vars exposed by `cognit env`. Static entries are
  * derived from the resolved project root only — no DB read, no
  * `.cognit/` walk-up, so this command is safe to run before
@@ -31,6 +53,10 @@ const readCurrentSession = (projectRoot: string): string | null => {
  * and is omitted when no session has been created yet (so `eval
  * "$(cognit env --shell)"` never exports an empty value).
  *
+ * `COGNIT_REALTIME` is dynamic: exported as `"1"` only when
+ * `inbox.realtime: true` in cognit.yaml (D-M4-00 §4.1). Omitted
+ * otherwise so hooks stay on the lazy-drain path by default.
+ *
  * Add new vars by appending a `KEY -> (root) => value` entry. The
  * `env --shell`, `env` table, and `env KEY` forms all read this
  * single source.
@@ -38,6 +64,7 @@ const readCurrentSession = (projectRoot: string): string | null => {
 const ENV_VARS: Readonly<Record<string, (projectRoot: string) => string | null>> = {
   COGNIT_INBOX: (projectRoot) => projectPaths(projectRoot).inbox,
   COGNIT_SESSION_ID: (projectRoot) => readCurrentSession(projectRoot),
+  COGNIT_REALTIME: (projectRoot) => readRealtime(projectRoot),
 };
 
 const KNOWN_KEYS = Object.keys(ENV_VARS);

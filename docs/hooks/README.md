@@ -2,11 +2,21 @@
 
 External AI CLIs (Claude Code, Codex, Gemini CLI, OpenCode, …)
 publish events to Cognit by writing atomic JSON files into
-`.cognit/inbox/`. The watcher (`cognit inbox --watch`) validates
-each file against the Effect Schema registry, calls
+`.cognit/inbox/`. The inbox is drained into the database **lazily**:
+every read command (`cognit continue`, `cognit search`, `cognit
+events`) validates each pending file against the Effect Schema
+registry, resolves or creates the session, calls
 `SessionService.appendEvent`, and moves it to `.cognit/processed/`.
 On failure the file moves to `.cognit/inbox/_error/` with a sidecar
 `<name>.reason.txt` whose first line is `"<category>: <reason>"`.
+
+No background process is required for basic use. `cognit inbox
+--watch` (a long-running chokidar watcher for real-time freshness)
+and `cognit inbox --process` (a one-shot flush) remain as
+**advanced/optional** knobs — see the inbox command reference in
+[docs/cli.md](../cli.md). `cognit inbox --reprocess` re-runs every
+file in `inbox/_error/` to salvage them after a Cognit upgrade or a
+fix.
 
 Per-provider wiring lives in the linked provider pages
 ([claude-code](./claude-code.md), [codex](./codex.md),
@@ -67,16 +77,18 @@ this order:
 2. **Sticky pointer** at `./.cognit/current-session` — a plain-text
    ULID written by `cognit session create` / `cognit session resume`
    (`apps/cli/src/current-session.ts`).
-3. **Placeholder ULID** (`01HXXXXXXXXXXXXXXXXXXXXXXXX`) — the
-   watcher still parses the envelope and the `unknown_session_id`
-   sidecar fires on first run. This is the documented bootstrap
-   flow when no session is bound yet.
+3. **Placeholder ULID** (`01HXXXXXXXXXXXXXXXXXXXXXXX`) — when no
+   session is bound yet, the producer writes the placeholder. On
+   drain, the consumer **lazily creates** a session and rewrites
+   the pointer (mirroring the CLI verb path), so the file is
+   ingested, not rejected. This is the default out-of-the-box flow.
 
 The host CLI's own `.session_id` (Claude Code, Codex, Gemini CLI) is
-**deliberately not used** — the two namespaces are unrelated, and
-writing an unknown session id into the inbox triggers
-`unknown_session_id` rejection. Bind a Cognit session first via
-`cognit session create`, then start the AI tool's turn.
+**deliberately not used** — the two namespaces are unrelated. You do
+**not** need to run `cognit session create` before starting a turn:
+the consumer auto-binds a session on first use. `cognit session
+create` / `resume` remain available as advanced commands for users
+who want to name or fork a session explicitly.
 
 ### Atomic-write protocol
 
@@ -111,6 +123,39 @@ The destination directory is resolved in this order:
 
 `~/.cognit/inbox/` is **not** a built-in default — it is only used
 when `$COGNIT_INBOX` is explicitly set to that path.
+
+### Near-realtime drain (`$COGNIT_REALTIME`, optional)
+
+By default producers only **write** inbox files. Read commands
+(`continue` / `search` / `events`) drain lazily. For near-realtime
+without a daemon:
+
+1. Set `inbox.realtime: true` in `.cognit/cognit.yaml`.
+2. Re-export env: `eval "$(cognit env --shell)"` (exports
+   `COGNIT_REALTIME=1`).
+3. Producers fire-and-forget `cognit inbox --process` after each
+   successful atomic write. Failures are ignored; the host CLI is
+   never blocked.
+
+Alternatives for continuous freshness: `cognit inbox --watch`,
+`cognit inbox --install-watch` (systemd/launchd unit), or
+`cognit-server --watch-inbox`.
+
+### Hook latency budget (D-M4-00 §4.4)
+
+Shell producers intentionally stay under a few subprocesses per
+fire so host tools stay snappy:
+
+| Step | Cost |
+| ---- | ---- |
+| `jq` parse + envelope build | 1 process |
+| ULID mint (`node`) | 1 process |
+| atomic write (`python3`) | 1 process |
+| optional `cognit inbox --process` | 0 (background, only when `COGNIT_REALTIME=1`) |
+
+Collapsing the ULID mint into the Python atomic-write (dropping one
+subprocess) is a tracked polish item, not required for OOB. Phone-home
+telemetry is out of scope (local-first).
 
 ### Known-files allowlist (`~/.cognit/known-files.txt`)
 

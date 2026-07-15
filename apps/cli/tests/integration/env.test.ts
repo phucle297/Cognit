@@ -84,6 +84,62 @@ describe("cognit env --root <path>", () => {
   });
 });
 
+describe("cognit env COGNIT_REALTIME", () => {
+  it("is omitted from --shell when no cognit.yaml exists", () => {
+    const r = runCli(tmp, ["env", "--shell"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain("COGNIT_REALTIME");
+  });
+
+  it("is omitted when inbox.realtime is false/absent", () => {
+    const cognitDir = path.join(tmp, ".cognit");
+    fs.mkdirSync(cognitDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(cognitDir, "cognit.yaml"),
+      "project:\n  name: env-rt\ninbox:\n  realtime: false\n",
+      "utf8",
+    );
+    const r = runCli(tmp, ["env", "--shell"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).not.toContain("COGNIT_REALTIME");
+  });
+
+  it("exports COGNIT_REALTIME=1 when inbox.realtime is true", () => {
+    const cognitDir = path.join(tmp, ".cognit");
+    fs.mkdirSync(cognitDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(cognitDir, "cognit.yaml"),
+      "project:\n  name: env-rt\ninbox:\n  realtime: true\n",
+      "utf8",
+    );
+    const r = runCli(tmp, ["env", "--shell"]);
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('export COGNIT_REALTIME="1"\n');
+  });
+
+  it("prints 1 for KEY form when realtime is true, empty when false", () => {
+    const cognitDir = path.join(tmp, ".cognit");
+    fs.mkdirSync(cognitDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(cognitDir, "cognit.yaml"),
+      "project:\n  name: env-rt\ninbox:\n  realtime: true\n",
+      "utf8",
+    );
+    const on = runCli(tmp, ["env", "COGNIT_REALTIME"]);
+    expect(on.status).toBe(0);
+    expect(on.stdout).toBe("1\n");
+
+    fs.writeFileSync(
+      path.join(cognitDir, "cognit.yaml"),
+      "project:\n  name: env-rt\ninbox:\n  realtime: false\n",
+      "utf8",
+    );
+    const off = runCli(tmp, ["env", "COGNIT_REALTIME"]);
+    expect(off.status).toBe(0);
+    expect(off.stdout).toBe("\n");
+  });
+});
+
 describe("cognit env COGNIT_SESSION_ID", () => {
   it("is omitted from --shell output when no current-session pointer exists", () => {
     const r = runCli(tmp, ["env", "--shell"]);

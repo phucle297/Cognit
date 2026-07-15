@@ -79,9 +79,35 @@ const ActorsConfig = Schema.Struct({
 type ActorsConfig = Schema.Schema.Type<typeof ActorsConfig>;
 
 const InboxConfig = Schema.Struct({
+  /**
+   * Real-time watcher *hint* (D-M4-00 §5). When true, `cognit init`
+   * may suggest `cognit inbox --watch` (or `--install-watch`). Does
+   * **not** auto-start a daemon — the OOB path is lazy drain via
+   * `auto_drain`. Default true = "watching is available if you want it".
+   */
   watch: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   debounce_ms: Schema.optionalWith(NonNegativeInt, { default: () => 200 }),
   atomic_write_required: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * Near-realtime without a daemon (§4.1). When true, hooks
+   * fire-and-forget `cognit inbox --process` after each write (gated by
+   * the `COGNIT_REALTIME` env var exported by `cognit env`). Default
+   * false — the lazy drain on read commands is enough for most users.
+   */
+  realtime: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Read commands (`continue`/`search`/`events`) drain the inbox
+   * before answering (D-M4-00 §1). Set `false` only when running
+   * `cognit inbox --watch` and wanting read commands to skip the
+   * drain. Default `true` = out-of-the-box ingestion.
+   */
+  auto_drain: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /**
+   * Soft cap on pending inbox files. Crossing it logs a warning and
+   * `cognit doctor` flags DEGRADED. Hard cap is intentionally NOT
+   * enforced (silent drop violates local-first trust). Default 1000.
+   */
+  max_pending: Schema.optionalWith(NonNegativeInt, { default: () => 1000 }),
 });
 type InboxConfig = Schema.Schema.Type<typeof InboxConfig>;
 
@@ -281,7 +307,15 @@ export const CognitConfigSchema = Schema.Struct({
       }) as const,
   }),
   inbox: Schema.optionalWith(InboxConfig, {
-    default: () => ({ watch: true, debounce_ms: 200, atomic_write_required: true }) as const,
+    default: () =>
+      ({
+        watch: true,
+        debounce_ms: 200,
+        atomic_write_required: true,
+        auto_drain: true,
+        max_pending: 1000,
+        realtime: false,
+      }) as const,
   }),
   gravity: Schema.optionalWith(GravityConfig, {
     default: () =>
