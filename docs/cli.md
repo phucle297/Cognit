@@ -60,7 +60,7 @@ count. Each lives in its own file under `apps/cli/src/commands/`.
 | 27 | `agent`      | `apps/cli/src/commands/agent.ts`                | Drive the AI supervisor loop.                                                                                          |
 | 28 | `ask`        | `apps/cli/src/commands/ask.ts`                  | One-shot LLM query routed via the LiteLLM gateway configured in `cognit.yaml → llm.*`.                                 |
 | 29 | `server`     | `apps/cli/src/commands/server.ts`               | Spawn the Hono server in `apps/server` (loopback by default, shares `cognit.db` with the CLI).                        |
-| 30 | `dashboard`  | `apps/cli/src/commands/dashboard.ts`            | Run the dashboard SPA on `127.0.0.1:6970` (proxies `/api` → `127.0.0.1:6971`; `--docker` uses nginx on the same port — see `docs/dashboard.md`). |
+| 30 | `dashboard`  | `apps/cli/src/commands/dashboard.ts`            | Run the dashboard SPA on `127.0.0.1:6970` and API for the current Cognit root on `127.0.0.1:6971` (see `docs/dashboard.md`). |
 
 ## `cognit init` — what it does for you
 

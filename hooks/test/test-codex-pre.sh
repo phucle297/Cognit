@@ -34,7 +34,7 @@ INBOX="${SMOKE}/.cognit/inbox"
 mkdir -p "$INBOX"
 trap 'rm -rf "$SMOKE"' EXIT
 
-SESSION="01HSESSIONCODEXPRE00000000"
+SESSION="01H7SESS10NCODEXPRE00000001"
 printf '%s' "$SESSION" > "${SMOKE}/.cognit/current-session"
 
 # Stage a known-files allowlist under a temp HOME so the script's

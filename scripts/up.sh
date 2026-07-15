@@ -1,31 +1,23 @@
 #!/usr/bin/env bash
-# scripts/up.sh — single-command local startup.
-#
-# Builds + links @cognit/cli onto the host PATH, then starts the backend
-# server in Docker. Replaces the manual three-command install:
+# scripts/up.sh — install Cognit CLI on the host (no Docker).
 #
 #   pnpm install
-#   pnpm build
-#   cd apps/cli && pnpm link --global
-#   docker compose up -d
+#   build @cognit/cli
+#   link `cognit` onto the host PATH
 #
-# Why split host vs container: apps/cli depends on better-sqlite3, a
-# native module. pnpm install inside the Alpine-based Docker image
-# produces the musl prebuild, which won't load on glibc Linux hosts or
-# on macOS. Running the CLI half on the host gives correct libc
-# matching; the server still runs fully containerized.
+# Runtime model (local-first):
+#   cd <your-project> && cognit init
+#   cognit dashboard   # spawns API for that project's .cognit + Vite UI
 #
 # Usage:
-#   scripts/up.sh                      # cold install + start (Docker + CLI link)
-#   scripts/up.sh --no-docker          # install + link CLI only (no Docker)
-#   scripts/up.sh --build              # pass-through to docker compose --build
-#   scripts/up.sh --force-recreate     # pass-through to docker compose --force-recreate
+#   scripts/up.sh                 # install + link CLI
+#   pnpm run setup                # same
+#   scripts/up.sh -h
 #
-# Requirements: Node 22+, pnpm 9, Docker (optional with --no-docker).
+# Requirements: Node 22+, pnpm 9.
 
 set -euo pipefail
 
-# Minimum pnpm version. No exact pin — any pnpm >= min works.
 MIN_PNPM_MAJOR=9
 MIN_PNPM_MINOR=0
 PNPM_VERSION_RAW="$(pnpm --version 2>/dev/null || true)"
@@ -41,28 +33,25 @@ if [ "$PNPM_MAJOR" -lt "$MIN_PNPM_MAJOR" ] || \
   exit 1
 fi
 
-# Resolve repo root from this script's location.
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-# Parse flags. Docker-related flags pass through to `docker compose up -d`.
-NO_DOCKER=0
-DOCKER_ARGS=()
 for arg in "$@"; do
   case "$arg" in
-    --no-docker)        NO_DOCKER=1 ;;
     -h|--help)
       sed -n '2,18p' "$0"
       exit 0
       ;;
-    --) shift; DOCKER_ARGS+=("$@"); break ;;
-    *)                  DOCKER_ARGS+=("$arg") ;;
+    --no-docker|--build|--force-recreate)
+      printf 'note: %s is ignored (Docker is no longer part of setup)\n' "$arg" >&2
+      ;;
+    *)
+      printf 'unknown flag: %s\n' "$arg" >&2
+      exit 2
+      ;;
   esac
 done
 
-# Resolve pnpm global bin dir. Prefer `pnpm bin -g` (always reflects the
-# active pnpm install) over `pnpm config get global-dir` (returns the
-# literal string "undefined" on some pnpm 9 setups, which breaks fallback).
 PNPM_BIN="$(pnpm bin -g 2>/dev/null || true)"
 if [ -z "$PNPM_BIN" ] || [ "$PNPM_BIN" = "undefined" ]; then
   PNPM_BIN="${PNPM_HOME:-${HOME}/.local/share/pnpm}"
@@ -76,60 +65,22 @@ printf '→ build @cognit/cli (tsup + copy-migrations)\n'
 pnpm --filter @cognit/cli build
 
 printf '→ link @cognit/cli → %s\n' "$PNPM_BIN/cognit"
-# Direct symlink + custom bin shim. Bypasses `pnpm link --global` so we
-# don't trip pnpm's global-store layout check (which fails when pnpm
-# version changes between installs — store/v10 vs store/v10/v3 drift).
 GLOBAL_NM="$PNPM_BIN/global/5/node_modules"
 mkdir -p "$GLOBAL_NM/@cognit"
 ln -sfn "$REPO_ROOT/apps/cli" "$GLOBAL_NM/@cognit/cli"
-cat > "$PNPM_BIN/cognit" <<EOF
-#!/usr/bin/env node
-import("$REPO_ROOT/apps/cli/dist/index.js").catch((e) => { console.error(e); process.exit(1); });
-EOF
+# shellcheck disable=SC2016
+printf '%s\n' '#!/usr/bin/env node' "import(\"$REPO_ROOT/apps/cli/dist/index.js\").catch((e) => { console.error(e); process.exit(1); });" > "$PNPM_BIN/cognit"
 chmod +x "$PNPM_BIN/cognit"
 
-if [ "$NO_DOCKER" -eq 1 ]; then
-  cat <<EOF
-
-✓ ready (CLI only — server not started)
-  cognit:   $PNPM_BIN/cognit
-  server:   skipped (--no-docker). Run \`docker compose up -d\` when ready,
-            or \`cognit server\` to run it on the host (loopback :6971).
-  dashboard: cognit dashboard                # vite on :6970 → API :6971
-             cognit dashboard --docker       # nginx SPA on :6970
-
-If 'cognit' is not on PATH:
-  export PATH="$PNPM_BIN:\$PATH"
-EOF
-  exit 0
-fi
-
-if ! command -v docker >/dev/null 2>&1; then
-  printf '! docker not found on PATH — skipping server start.\n' >&2
-  printf '  re-run with --no-docker to suppress this message, or install Docker.\n' >&2
-  cat <<EOF
-
-✓ ready (CLI only — docker missing)
-  cognit:   $PNPM_BIN/cognit
-  server:   NOT started (docker not installed)
-  dashboard: cognit dashboard
-
-If 'cognit' is not on PATH:
-  export PATH="$PNPM_BIN:\$PATH"
-EOF
-  exit 0
-fi
-
-printf '→ docker compose up -d (server published on 127.0.0.1:6971)\n'
-docker compose up -d "${DOCKER_ARGS[@]}"
-
-cat <<EOF
-
-✓ ready
-  cognit:    $PNPM_BIN/cognit
-  API:       http://127.0.0.1:6971   (docker compose publishes it)
-  dashboard: cognit dashboard        (http://127.0.0.1:6970 → API :6971)
-
-If 'cognit' is not on PATH:
-  export PATH="$PNPM_BIN:\$PATH"
-EOF
+printf '\n'
+printf '✓ ready (host-only — no Docker)\n'
+printf '  cognit:    %s\n' "$PNPM_BIN/cognit"
+printf '  next:\n'
+printf '    cd /path/to/your-project\n'
+printf '    cognit init\n'
+printf '    cognit dashboard --no-open\n'
+printf '      # UI  http://127.0.0.1:6970\n'
+printf '      # API http://127.0.0.1:6971  (this project'\''s .cognit)\n'
+printf '\n'
+printf 'If '\''cognit'\'' is not on PATH:\n'
+printf '  export PATH="%s:$PATH"\n' "$PNPM_BIN"

@@ -32,7 +32,7 @@ INBOX="${SMOKE}/.cognit/inbox"
 mkdir -p "$INBOX"
 trap 'rm -rf "$SMOKE"' EXIT
 
-SESSION="01HSESSIONGEMINIPOST0000000"
+SESSION="01H7SESS10NGEM1N1P0ST00001"
 printf '%s' "$SESSION" > "${SMOKE}/.cognit/current-session"
 
 input=$(cat <<JSON

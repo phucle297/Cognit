@@ -58,101 +58,40 @@ of them have: the reasoning between observation and decision.
 
 ## Install
 
-Requirements: **Node.js 22+**, **pnpm 9**, **git**. Docker is optional
-(only if you want the containerized server).
+Requirements: **Node.js 22+**, **pnpm 9**, **git**. Host-only — no Docker.
 
-### Recommended (from source)
+From this monorepo:
 
 ```bash
-git clone https://github.com/phucle297/Cognit
-cd Cognit
-pnpm run setup -- --no-docker   # or: ./scripts/up.sh --no-docker
+pnpm run setup
 ```
 
-`pnpm run setup` is an alias for `scripts/up.sh`. It runs
-`pnpm install`, builds the CLI, and links `cognit` onto your global
-pnpm bin. Pass flags after `--` (e.g. `-- --no-docker`).
-
-| Goal | Command |
-|------|---------|
-| CLI only (no Docker) | `pnpm run setup -- --no-docker` |
-| CLI + local server (Docker Compose) | `pnpm run setup` |
-| Same via shell script | `./scripts/up.sh` / `./scripts/up.sh --no-docker` |
-
-Useful `up.sh` / `setup` flags: `--no-docker`, `--build`,
-`--force-recreate` (the latter two pass through to Docker Compose).
-
-### Manual equivalent
+`pnpm run setup` runs `scripts/up.sh`: `pnpm install`, builds `@cognit/cli`,
+and links `cognit` onto your global pnpm bin.
 
 ```bash
-pnpm install
-pnpm --filter @cognit/cli build
-cd apps/cli && pnpm link --global
-```
+# ensure cognit is on PATH
+export PATH="$(pnpm bin -g):$PATH"
 
-### npm package (when published)
-
-```bash
-npm install -g @cognit/cli
-# requires Node 22+; better-sqlite3 uses prebuilds (build tools only if prebuild missing)
-```
-
-### First project
-
-```bash
-cd <your-project>
+# in any project you want memory for:
+cd /path/to/your-project
 cognit init
+cognit dashboard --no-open
+# UI  → http://127.0.0.1:6970
+# API → http://127.0.0.1:6971  (this project's .cognit/)
 ```
 
-`cognit init` drops a `.cognit/` directory and a `CLAUDE.md` at your
-project root. That `CLAUDE.md` is what teaches your AI tool when to
-use Cognit — you don't need to read it. If you have Claude Code,
-Codex, Gemini CLI, or OpenCode installed, `init` also wires capture
-hooks into each one automatically.
+| Command | What it does |
+|---------|----------------|
+| `pnpm run setup` | Install deps, build CLI, link `cognit` |
+| `pnpm run remove` | Unlink global CLI |
 
-You run `init` once per project. After that, you can forget Cognit
-exists.
-
-### Shell completion
+To uninstall:
 
 ```bash
-cognit completion fish   # print script to stdout
-cognit completion bash
-cognit completion zsh
+pnpm run remove -- --yes
 ```
 
-```fish
-# fish
-cognit completion fish > ~/.config/fish/completions/cognit.fish
-```
-
-```bash
-# bash — eval once, or write into bash-completion dir
-eval "$(cognit completion bash)"
-```
-
-### Teardown (dev / from source)
-
-Mirror of setup — stops Docker, unlinks the global CLI, optionally
-wipes local state:
-
-```bash
-pnpm run remove                 # or: ./scripts/down.sh
-pnpm run remove -- --purge      # also delete this repo's .cognit/
-pnpm run remove -- --clean      # also pnpm clean (node_modules + .turbo)
-pnpm run remove -- --purge --clean --yes   # full nuke, no prompts
-```
-
-| Flag | Effect |
-|------|--------|
-| (none) | Docker down + remove global `cognit` link |
-| `--purge` | Also `rm -rf .cognit/` in the Cognit repo |
-| `--clean` | Also wipe workspace `node_modules` / `.turbo` |
-| `--yes` / `-y` | Skip confirmation prompts |
-
-Does **not** touch `.beads/` (separate issue tracker).
-
----
 
 ## How it works
 
@@ -348,7 +287,7 @@ The README is the user guide. Deeper references live under `docs/`:
 **From a source checkout** (preferred if you used `pnpm run setup`):
 
 ```bash
-pnpm run remove -- --yes          # stop Docker + unlink global CLI
+pnpm run remove -- --yes          # unlink global CLI
 # optional: wipe this repo's .cognit/ and node_modules
 pnpm run remove -- --purge --clean --yes
 ```
@@ -368,7 +307,7 @@ pnpm rm -g @cognit/cli            # or: pnpm rm -g cognit
 Cognit stores project memory inside `.cognit/` at each project root.
 Removing that folder wipes local reasoning for that project. Teardown
 via `pnpm run remove` / `scripts/down.sh` also drops the global CLI
-link and optional Docker volumes. Nothing else is required for a
+link. Nothing else is required for a
 clean uninstall.
 
 ---

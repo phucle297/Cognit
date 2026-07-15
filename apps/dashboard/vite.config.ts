@@ -30,12 +30,11 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 6970,
     strictPort: true,
-    // Proxy only API paths to the Hono server. Everything else
-    // (index.html, /src/*, /@vite/*, /node_modules/*) is served by
-    // vite itself. The server mounts all routes under /api/*.
+    // Proxy /api → Hono. COGNIT_API_PROXY is set by `cognit dashboard`
+    // when the preferred API port (6971) is busy (e.g. docker setup).
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:6971",
+        target: process.env["COGNIT_API_PROXY"] ?? "http://127.0.0.1:6971",
         changeOrigin: false,
       },
     },

@@ -39,27 +39,20 @@ small (see the file header at `router.tsx:1`).
 
 ## Default URL
 
-Simple port model (local-first):
-
-| Surface | Host URL | Notes |
-|---------|----------|--------|
-| Hono API | `http://127.0.0.1:6971` | `docker compose up -d` publishes it; or `cognit server` |
-| Dashboard UI | `http://127.0.0.1:6970` | `cognit dashboard` (vite) or `--docker` (nginx SPA) |
-
-**Normal flow**
+Host-only. No Docker.
 
 ```bash
-# In the Cognit repo (once)
-docker compose up -d          # API on 127.0.0.1:6971
-
-# Anywhere (global CLI link)
-cognit dashboard              # UI on 127.0.0.1:6970 → proxies /api to :6971
+cd /path/to/your-repo   # after cognit init
+cognit dashboard --no-open
+# UI  http://127.0.0.1:6970
+# API http://127.0.0.1:6971  (auto-started for this root's .cognit/)
 ```
 
-Vite proxies `/api/*` to `http://127.0.0.1:6971`. The browser only
-talks to `:6970`; you never need to open `:6971` in a browser tab.
+| Port | Role |
+|------|------|
+| 6970 | Vite UI |
+| 6971 | Hono API bound to the root you started from |
 
-**Docker SPA (`cognit dashboard --docker`).** Optional nginx image on
-the same host port `:6970`, proxying `/api/*` to the `server` service
-on the compose network (or to host-published `:6971` when using the
-host vite path above).
+`cognit dashboard` spawns both processes. Change directory (or pass
+`--root`) to view another project's memory.
+

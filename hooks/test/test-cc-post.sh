@@ -31,7 +31,7 @@ trap 'rm -rf "$SMOKE"' EXIT
 # Pre-seed a sticky session id so the script does NOT fall back to
 # the placeholder ULID (that path is exercised elsewhere; here we
 # want a stable session_id on the envelope).
-SESSION="01HSESSIONCCPOST000000000"
+SESSION="01H7SESS10NCCPXST000000001"
 printf '%s' "$SESSION" > "${SMOKE}/.cognit/current-session"
 
 input=$(cat <<JSON

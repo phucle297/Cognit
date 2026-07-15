@@ -1,34 +1,8 @@
 /**
  * cognit.ts — OpenCode plugin → Cognit inbox.
  *
- * Reference producer, ships at repo-root `hooks/opencode/`. Subscribes
- * to OpenCode's `tool.execute.after` event, builds an
- * `observation_recorded` envelope v1.2.0 FLAT (actor_name /
- * actor_type) per `packages/wrap/src/index.ts:72`, and atomic-writes
- * it to `<projectRoot>/.cognit/inbox/<session-id>-<event-id>.json`
- * (project-relative, with `$COGNIT_INBOX` override) following the
- * protocol from `packages/wrap/src/atomic-write.ts`
- * (`open(O_CREAT|O_EXCL|O_WRONLY)` → write → fsync → close → rename).
- *
- * The plugin runs in the OpenCode host process (Bun / Node), so it
- * shares the `ulid` npm package the DB uses — no shelling out to a
- * Node ULID helper. fsync is done via `fs.openSync` + `fsyncSync` +
- * `closeSync` on the temp file BEFORE the rename, mirroring
- * `atomic-write.ts:78-97` step-for-step. The `wx` flag refuses to
- * overwrite a leftover `.tmp` (defensive against crashes).
- *
- * Session id resolution order:
- *   1. `$COGNIT_SESSION_ID` env var (set by `eval "$(cognit env --shell)"`)
- *   2. sticky pointer at `.cognit/current-session` (written by
- *      `cognit session create` / `cognit session resume`)
- *   3. placeholder ULID (the `unknown_session_id` sidecar will fire on
- *      first run, which is the documented bootstrap flow)
- *
- * Drop-in install paths (OpenCode loads the first match):
- *   - project:  `<repo>/.opencode/plugins/cognit.ts`
- *   - user:     `~/.config/opencode/plugins/cognit.ts`
- *
- * Reference: https://opencode.ai/docs/plugins/
+ * Session id: COGNIT_SESSION_ID → .cognit/current-session → mint + stick.
+ * Event id: pure Crockford ULID (no npm `ulid` dependency).
  */
 import {
   openSync,
@@ -37,25 +11,63 @@ import {
   renameSync,
   writeFileSync,
   mkdirSync,
+  readFileSync,
+  existsSync,
 } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { ulid } from "ulid";
 import type { Plugin } from "@opencode-ai/plugin";
 
-/**
- * Inbox directory. Cognit is per-project local-first, so the canonical
- * inbox is `<projectRoot>/.cognit/inbox/`, resolved from
- * `process.cwd()` (the project the OpenCode host was launched from).
- * `COGNIT_INBOX` overrides the project-local default.
- */
-const inboxDir: string =
-  process.env.COGNIT_INBOX ?? join(process.cwd(), ".cognit", "inbox");
+const ENCODING = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const ULID_RE = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
-/**
- * Mint a v1.2.0 envelope and atomic-write it to the inbox.
- * Mirrors `packages/wrap/src/atomic-write.ts::atomicWriteJson`.
- */
+const encodeTime = (now: number, len = 10): string => {
+  let t = now;
+  let out = "";
+  for (let i = len; i > 0; i--) {
+    const mod = t % 32;
+    out = ENCODING[mod]! + out;
+    t = Math.floor(t / 32);
+  }
+  return out;
+};
+
+const encodeRandom = (len = 16): string => {
+  const bytes = randomBytes(len);
+  let out = "";
+  for (let i = 0; i < len; i++) out += ENCODING[bytes[i]! & 31];
+  return out;
+};
+
+const mintUlid = (): string => encodeTime(Date.now()) + encodeRandom();
+
+const projectRoot = (): string => process.cwd();
+const cognitDir = (): string => join(projectRoot(), ".cognit");
+const stickyPath = (): string => join(cognitDir(), "current-session");
+
+const resolveSessionId = (): string => {
+  const env = process.env.COGNIT_SESSION_ID?.trim() ?? "";
+  if (ULID_RE.test(env)) return env;
+  try {
+    if (existsSync(stickyPath())) {
+      const s = readFileSync(stickyPath(), "utf8").trim();
+      if (ULID_RE.test(s)) return s;
+    }
+  } catch {
+    /* ignore */
+  }
+  const s = mintUlid();
+  mkdirSync(cognitDir(), { recursive: true, mode: 0o700 });
+  const tmp = join(cognitDir(), `current-session.tmp.${process.pid}`);
+  writeFileSync(tmp, s, { encoding: "utf8", mode: 0o600 });
+  renameSync(tmp, stickyPath());
+  return s;
+};
+
+const inboxDir: string =
+  process.env.COGNIT_INBOX ?? join(projectRoot(), ".cognit", "inbox");
+
 const send = (params: {
   readonly type:
     | "observation_recorded"
@@ -68,7 +80,7 @@ const send = (params: {
 }): string => {
   mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
 
-  const eventId = ulid();
+  const eventId = mintUlid();
   const tmp = join(inboxDir, `${params.sessionId}-${eventId}.json.tmp`);
   const dest = join(inboxDir, `${params.sessionId}-${eventId}.json`);
 
@@ -83,7 +95,6 @@ const send = (params: {
     payload: params.payload,
   };
 
-  // Atomic write: open(wx) → write → fsync → close → rename.
   const fd = openSync(tmp, "wx", 0o600);
   try {
     writeFileSync(fd, JSON.stringify(envelope));
@@ -93,9 +104,6 @@ const send = (params: {
   }
   renameSync(tmp, dest);
 
-  // D-M4-00 §4.1: when COGNIT_REALTIME=1 (from cognit env --shell when
-  // inbox.realtime is true), fire-and-forget a one-shot drain. Never
-  // await; never let a missing/failing cognit block the host.
   if (process.env.COGNIT_REALTIME === "1") {
     try {
       const child = spawn("cognit", ["inbox", "--process"], {
@@ -104,31 +112,19 @@ const send = (params: {
       });
       child.unref();
     } catch {
-      // ignore — optional path
+      /* optional */
     }
   }
 
   return dest;
 };
 
-/**
- * Plugin entry. OpenCode invokes this once on startup; the returned
- * object declares the lifecycle hooks we care about.
- *
- * Plugin ships only `tool.execute.after` (the PostToolUse analog).
- * Pre-tool hooks (`tool.execute.before`) → `hypothesis_created` are
- * not wired in this plugin; the Claude-Code / Codex / Gemini pre
- * hooks cover the hypothesis_created emission across providers.
- */
 export const CognitInbox: Plugin = async () => ({
   "tool.execute.after": async (input, output) => {
     try {
       send({
         type: "observation_recorded",
-        // OpenCode does not expose a stable session id today; the
-        // placeholder ULID lets the watcher parse the envelope while
-        // the first session-registration envelope re-maps the actor.
-        sessionId: process.env.COGNIT_SESSION_ID ?? "01HXXXXXXXXXXXXXXXXXXXXXXX",
+        sessionId: resolveSessionId(),
         actorName: "opencode",
         payload: {
           text: `tool ${input.tool} returned`,
@@ -138,9 +134,6 @@ export const CognitInbox: Plugin = async () => ({
         },
       });
     } catch (err) {
-      // Plugin handlers MUST NOT throw — OpenCode would abort the
-      // host. Log via the host's client if available, fall back to
-      // stderr.
       // eslint-disable-next-line no-console
       console.error(`cognit plugin: failed to emit observation: ${String(err)}`);
     }

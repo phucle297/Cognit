@@ -1,33 +1,27 @@
 /**
  * apps/cli/src/commands/dashboard.ts
  *
- * `cognit dashboard [--root <path>] [--port <n>] [--api-port <n>] [--no-open] [--docker]`
+ * `cognit dashboard [--root <path>] [--port <n>] [--api-port <n>] [--no-open]`
  *
- * Local-only tool — no auth. Data model for the UI:
- *   One Cognit root (the directory with `.cognit/`) per process.
- *   There is no multi-project picker. Run from (or `--root`) the
- *   directory you care about after `cognit init`.
+ * Host-only local-first:
+ *   1. Resolve Cognit root (cwd / --root / $COGNIT_ROOT)
+ *   2. Spawn API for THAT root on 127.0.0.1:<api-port> (default 6971;
+ *      auto-bump if busy)
+ *   3. Spawn Vite UI on 127.0.0.1:<ui-port> (default 6970), proxy /api → API
  *
- * Default (host) flow:
- *   1. Resolve root: --root → $COGNIT_ROOT → nearest .cognit/cognit.yaml
- *   2. Spawn API server for that root on 127.0.0.1:6971
- *   3. Spawn Vite dashboard on 127.0.0.1:6970 (proxies /api → :6971)
- *
- * `--docker` is optional legacy path (compose volume, not cwd DB).
+ * No Docker. Run `pnpm run setup` once to link the CLI, then from any
+ * project: `cognit init` + `cognit dashboard`.
  */
 import { Command } from "commander";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findProjectRoot } from "../paths.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-/**
- * Resolve monorepo root whether this file is:
- *   - source: apps/cli/src/commands/dashboard.ts  (4× ..)
- *   - bundle: apps/cli/dist/index.js               (3× ..)
- */
+
 const resolveRepoRoot = (): string => {
   const candidates = [
     path.resolve(HERE, "..", "..", ".."), // dist/
@@ -47,27 +41,33 @@ const REPO_ROOT = resolveRepoRoot();
 const SERVER_ENTRY = path.resolve(REPO_ROOT, "apps", "server", "src", "index.ts");
 
 interface DashboardOptions {
-  docker?: boolean;
   port?: string;
   apiPort?: string;
-  build?: boolean;
   open?: boolean;
   root?: string;
 }
 
-const findComposeRoot = (start: string): string | undefined => {
-  let dir = path.resolve(start);
-  for (let i = 0; i < 8; i++) {
-    if (existsSync(path.join(dir, "docker-compose.yml"))) return dir;
-    const parent = path.dirname(dir);
-    if (parent === dir) return undefined;
-    dir = parent;
-  }
-  return undefined;
-};
+const isPortFree = (port: number, host = "127.0.0.1"): Promise<boolean> =>
+  new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.once("error", () => resolve(false));
+    srv.once("listening", () => {
+      srv.close(() => resolve(true));
+    });
+    srv.listen(port, host);
+  });
 
-const runningInsideDocker = (): boolean =>
-  existsSync("/.dockerenv") || Boolean(process.env["DOCKER_CONTAINER_ID"]);
+const pickFreePort = async (
+  start: number,
+  exclude: ReadonlySet<number> = new Set(),
+): Promise<number> => {
+  for (let p = start; p < start + 30; p++) {
+    if (exclude.has(p)) continue;
+    if (await isPortFree(p)) return p;
+  }
+  throw new Error(`no free port in range ${start}–${start + 29}`);
+};
 
 const openBrowser = (url: string): void => {
   const cmd =
@@ -89,7 +89,6 @@ const openBrowser = (url: string): void => {
   }
 };
 
-/** Kill all children on SIGINT/SIGTERM; exit when the primary (UI) exits. */
 const wireProcessGroup = (children: ChildProcess[], primary: ChildProcess): void => {
   const killAll = (sig: NodeJS.Signals): void => {
     for (const c of children) {
@@ -101,6 +100,18 @@ const wireProcessGroup = (children: ChildProcess[], primary: ChildProcess): void
   };
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
+  for (const c of children) {
+    if (c === primary) continue;
+    c.on("exit", (code, sig) => {
+      if (code && code !== 0) {
+        process.stderr.write(
+          `cognit: API process exited (code=${code}${sig ? ` signal=${sig}` : ""}). Stopping UI.\n`,
+        );
+        killAll("SIGTERM");
+        process.exit(code);
+      }
+    });
+  }
   primary.on("exit", (code, sig) => {
     process.removeListener("SIGINT", onSignal);
     process.removeListener("SIGTERM", onSignal);
@@ -119,57 +130,16 @@ export function registerDashboard(program: Command): void {
   program
     .command("dashboard")
     .description(
-      "start the dashboard for this Cognit root (cwd / --root); API + UI, no project picker",
+      "start the dashboard for this Cognit root (cwd / --root); API + UI",
     )
-    .option("--docker", "legacy: docker compose dashboard (volume DB, not cwd)")
     .option("--root <path>", "Cognit root (default: $COGNIT_ROOT or nearest .cognit/)")
     .option("--port <n>", "dashboard UI port (default: 6970)")
-    .option("--api-port <n>", "API port (default: 6971)")
-    .option("--build", "with --docker: force-rebuild dashboard image")
+    .option("--api-port <n>", "preferred API port (default: 6971; auto-bumps if busy)")
     .option("--no-open", "do not open the browser automatically")
     .action(async (opts: DashboardOptions) => {
-      const useDocker =
-        opts.docker === true ||
-        process.env["COGNIT_DOCKER"] === "1" ||
-        runningInsideDocker();
-      const uiPort = opts.port ?? "6970";
-      const apiPort = opts.apiPort ?? "6971";
-      const url = `http://127.0.0.1:${uiPort}/`;
+      const preferredUi = Number(opts.port ?? "6970");
+      const preferredApi = Number(opts.apiPort ?? "6971");
 
-      if (useDocker) {
-        const repoRoot = findComposeRoot(process.cwd()) ?? REPO_ROOT;
-        const composeFile = path.join(repoRoot, "docker-compose.yml");
-        if (!existsSync(composeFile)) {
-          process.stderr.write(
-            `cognit: docker-compose.yml not found. Prefer host mode: run \`cognit dashboard\` from a project after \`cognit init\`.\n`,
-          );
-          process.exitCode = 2;
-          return;
-        }
-        const args = [
-          "compose",
-          "-f",
-          composeFile,
-          "--profile",
-          "dashboard",
-          "run",
-          "--rm",
-          "-p",
-          `127.0.0.1:${uiPort}:${uiPort}`,
-          "--service-ports",
-          "dashboard",
-        ];
-        if (opts.build) args.push("--build");
-        process.stderr.write(
-          `cognit: starting dashboard via docker compose on ${url} (API is compose volume, not cwd)\n`,
-        );
-        const child = spawn("docker", args, { cwd: repoRoot, stdio: "inherit" });
-        wireProcessGroup([child], child);
-        if (opts.open !== false) setTimeout(() => openBrowser(url), 1500);
-        return;
-      }
-
-      // --- Host mode: one root = this directory's .cognit ---
       const root =
         opts.root ??
         process.env["COGNIT_ROOT"] ??
@@ -190,30 +160,64 @@ export function registerDashboard(program: Command): void {
       const tsx = tsxCandidates.find((p) => existsSync(p));
       if (!tsx || !existsSync(SERVER_ENTRY)) {
         process.stderr.write(
-          `cognit: cannot find server entry/tsx under ${REPO_ROOT}. Rebuild the monorepo (pnpm install).\n`,
+          `cognit: cannot find server entry/tsx under ${REPO_ROOT}. Run \`pnpm run setup\` from the Cognit monorepo.\n`,
         );
         process.exitCode = 1;
         return;
       }
 
+      let apiPort: number;
+      let uiPort: number;
+      try {
+        apiPort = await pickFreePort(preferredApi);
+        uiPort = await pickFreePort(preferredUi, new Set([apiPort]));
+      } catch (e) {
+        process.stderr.write(`cognit: ${(e as Error).message}\n`);
+        process.exitCode = 1;
+        return;
+      }
+
+      if (apiPort !== preferredApi) {
+        process.stderr.write(
+          `cognit: port ${preferredApi} is busy; using API port ${apiPort} for this project's .cognit.\n`,
+        );
+      }
+      if (uiPort !== preferredUi) {
+        process.stderr.write(`cognit: UI port ${preferredUi} busy; using ${uiPort}.\n`);
+      }
+
+      const url = `http://127.0.0.1:${uiPort}/`;
+      const apiUrl = `http://127.0.0.1:${apiPort}`;
+
       process.stderr.write(
         `cognit: root=${root}\n` +
-          `cognit: starting API on http://127.0.0.1:${apiPort} (this root's .cognit)\n` +
+          `cognit: starting API on ${apiUrl} (this root's .cognit)\n` +
           `cognit: starting UI  on ${url}\n`,
       );
 
       const server = spawn(
         tsx,
         [SERVER_ENTRY, "--host", "127.0.0.1", "--port", String(apiPort), "--root", root],
-        { stdio: "inherit", cwd: REPO_ROOT },
+        {
+          stdio: "inherit",
+          cwd: REPO_ROOT,
+          env: { ...process.env, COGNIT_REPO_ROOT: REPO_ROOT },
+        },
       );
 
-      const pnpmLocal = path.join(REPO_ROOT, "node_modules", ".bin", "pnpm");
-      const pnpm = existsSync(pnpmLocal) ? pnpmLocal : "pnpm";
+      const viteBin =
+        [
+          path.join(REPO_ROOT, "apps", "dashboard", "node_modules", ".bin", "vite"),
+          path.join(REPO_ROOT, "node_modules", ".bin", "vite"),
+        ].find((p) => existsSync(p)) ?? "vite";
       const ui = spawn(
-        pnpm,
-        ["--filter", "@cognit/dashboard", "dev", "--", "--port", uiPort, "--strictPort"],
-        { stdio: "inherit", cwd: REPO_ROOT },
+        viteBin,
+        ["--host", "127.0.0.1", "--port", String(uiPort), "--strictPort"],
+        {
+          stdio: "inherit",
+          cwd: path.join(REPO_ROOT, "apps", "dashboard"),
+          env: { ...process.env, COGNIT_API_PROXY: apiUrl },
+        },
       );
 
       wireProcessGroup([server, ui], ui);

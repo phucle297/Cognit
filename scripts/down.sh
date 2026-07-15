@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
-# scripts/down.sh — single-command local teardown. Mirror of up.sh.
+# scripts/down.sh — teardown host CLI link (mirror of up.sh). No Docker.
 #
 # Usage:
-#   scripts/down.sh                      # teardown docker + unlink CLI
-#   scripts/down.sh --purge              # also wipe .cognit/ local state
+#   scripts/down.sh                      # unlink CLI
+#   scripts/down.sh --purge              # also wipe this repo's .cognit/ (if any)
 #   scripts/down.sh --clean              # also pnpm clean (node_modules + .turbo)
-#   scripts/down.sh --purge --clean      # full nuke
+#   scripts/down.sh --purge --clean      # full nuke of install artifacts
 #   scripts/down.sh --yes                # skip confirmations
-#
-# Why host teardown: up.sh links @cognit/cli onto the host PATH so
-# better-sqlite3 gets the glibc prebuild, not the musl one from the
-# Alpine image. down.sh must remove that global link too, or 'cognit'
-# stays on PATH pointing at a stale dist.
 #
 # Does NOT touch .beads/ (separate issue tracker, user-managed).
 
@@ -39,79 +34,62 @@ for arg in "$@"; do
   esac
 done
 
-# Resolve pnpm global bin dir the same way up.sh does. Prefer `pnpm bin -g`.
 PNPM_BIN="$(pnpm bin -g 2>/dev/null || true)"
 if [ -z "$PNPM_BIN" ] || [ "$PNPM_BIN" = "undefined" ]; then
   PNPM_BIN="${PNPM_HOME:-${HOME}/.local/share/pnpm}"
 fi
 
-confirm() {
-  $YES && return 0
-  local prompt="$1"
-  read -r -p "$prompt [y/N] " ans
-  [[ "$ans" == "y" || "$ans" == "Y" ]]
-}
-
-# 1. Docker — stop + wipe named volume.
-if command -v docker >/dev/null 2>&1 && [ -f docker-compose.yml ]; then
-  printf '→ docker compose down -v (wipe cognit-data volume)\n'
-  docker compose down -v --remove-orphans 2>/dev/null || true
-  printf '→ removing cognit-server / cognit-dashboard images\n'
-  docker image rm -f cognit:server cognit:dashboard 2>/dev/null || true
-else
-  printf '→ skip docker (no docker or no compose file)\n'
+COGNIT_BIN=""
+if [ -x "$PNPM_BIN/cognit" ]; then
+  COGNIT_BIN="$PNPM_BIN/cognit"
+elif command -v cognit >/dev/null 2>&1; then
+  COGNIT_BIN="$(command -v cognit)"
 fi
 
-# 2. Global CLI link — inverse of up.sh's direct symlink + shim.
-# Removes the bin shim + the global/5/node_modules symlink directly.
-# Bypasses `pnpm unlink --global` to avoid pnpm's global-store check
-# (fails when pnpm version changes between installs).
-COGNIT_BIN="${PNPM_BIN}/cognit"
-COGNIT_LINK="${PNPM_BIN}/global/5/node_modules/@cognit/cli"
-
-if [ -L "$COGNIT_BIN" ] || [ -e "$COGNIT_BIN" ]; then
-  printf '→ removing @cognit/cli bin shim (bin: %s)\n' "$COGNIT_BIN"
+printf '→ unlink host CLI\n'
+if [ -n "$COGNIT_BIN" ] && [ -e "$COGNIT_BIN" ]; then
   rm -f "$COGNIT_BIN"
-else
-  printf '→ no @cognit/cli bin shim under %s\n' "$PNPM_BIN"
-  COGNIT_BIN=""
+  printf '  removed %s\n' "$COGNIT_BIN"
+fi
+GLOBAL_NM="$PNPM_BIN/global/5/node_modules/@cognit/cli"
+if [ -L "$GLOBAL_NM" ] || [ -e "$GLOBAL_NM" ]; then
+  rm -rf "$GLOBAL_NM"
+  printf '  removed %s\n' "$GLOBAL_NM"
 fi
 
-if [ -L "$COGNIT_LINK" ]; then
-  printf '→ removing @cognit/cli global link (%s)\n' "$COGNIT_LINK"
-  rm -f "$COGNIT_LINK"
+# Best-effort: stop leftover containers from the old Docker setup.
+if command -v docker >/dev/null 2>&1; then
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'cognit-server'; then
+    printf '→ remove leftover cognit-server container (old Docker setup)\n'
+    docker rm -f cognit-server 2>/dev/null || true
+  fi
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -qx 'cognit-dashboard'; then
+    printf '→ remove leftover cognit-dashboard container (old Docker setup)\n'
+    docker rm -f cognit-dashboard 2>/dev/null || true
+  fi
+  docker image rm -f cognit:server cognit:dashboard 2>/dev/null || true
+  docker volume rm -f cognit_cognit-data 2>/dev/null || true
 fi
 
-# 3. Local state — only on --purge.
 if [ "$PURGE" -eq 1 ]; then
-  if [ -d .cognit ]; then
-    if confirm "delete .cognit/ (cognit.db, agent state, inbox, artifacts)?"; then
-      printf '→ rm -rf .cognit/\n'
-      rm -rf .cognit
-    fi
+  if [ "$YES" -ne 1 ]; then
+    printf 'About to rm -rf %s/.cognit — type yes: ' "$REPO_ROOT"
+    read -r ans
+    [ "$ans" = "yes" ] || { printf 'aborted\n'; exit 1; }
   fi
-else
-  printf '→ keep .cognit/ (use --purge to wipe)\n'
+  if [ -d "$REPO_ROOT/.cognit" ]; then
+    printf '→ purge %s/.cognit\n' "$REPO_ROOT"
+    rm -rf "$REPO_ROOT/.cognit"
+  fi
 fi
 
-# 4. Build artifacts — only on --clean.
 if [ "$CLEAN" -eq 1 ]; then
-  if confirm "run pnpm clean (delete node_modules + .turbo across workspaces)?"; then
-    printf '→ pnpm clean\n'
-    pnpm clean
-  fi
-else
-  printf '→ keep node_modules + .turbo (use --clean to wipe)\n'
+  printf '→ pnpm clean\n'
+  pnpm run clean 2>/dev/null || true
 fi
 
-cat <<EOF
-
-✓ teardown complete
-  docker:   containers + cognit-data volume removed
-  cli:      global @cognit/cli link removed (bin: ${COGNIT_BIN:-not found})
-  state:    .cognit/ $( [ "$PURGE" -eq 1 ] && echo 'wiped' || echo 'kept' )
-  modules:  node_modules + .turbo $( [ "$CLEAN" -eq 1 ] && echo 'wiped' || echo 'kept' )
-  beads:    .beads/ untouched (separate issue tracker)
-
-reinstall: scripts/up.sh
-EOF
+printf '\n'
+printf '✓ removed\n'
+printf '  cli:      global cognit link cleared\n'
+printf '  leftovers: old cognit Docker containers/images cleaned if present\n'
+printf '  next:     pnpm run setup   # to reinstall CLI\n'

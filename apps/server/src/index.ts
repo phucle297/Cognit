@@ -9,10 +9,8 @@
  * Concurrent reads are safe; the DB is opened with WAL.
  *
  * Local-only tool: NO auth. The server is bound to loopback by
- * default (`127.0.0.1`); for docker compose we bind `0.0.0.0` but
- * the server stays inside the user-defined docker network — there
- * is no published port. Treat the loopback boundary as the only
- * security guarantee.
+ * default (`127.0.0.1`). Local-only tool — treat the loopback
+ * boundary as the primary security guarantee.
  *
  * Routes:
  *   GET  /healthz, /health         (orchestrator probe)
@@ -27,6 +25,8 @@
  */
 import { Command } from "commander";
 import path from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -116,9 +116,8 @@ const appLayer = Layer.provideMerge(
 const runtime = ManagedRuntime.make(appLayer);
 
 // Resolve projectId. v1 is single-project-per-db. Empty volumes
-// (fresh `docker compose up -d` after `down -v`) have a migrated
-// schema but no project row — auto-ensure one so the API boots
-// without a demo seed or manual `cognit init` inside the container.
+// empty DBs have a migrated schema but no project row — auto-ensure
+// one so the API boots without a demo seed.
 // Name: $COGNIT_PROJECT_NAME, else "local". Idempotent via ProjectService.ensure.
 const DEFAULT_PROJECT_NAME = process.env["COGNIT_PROJECT_NAME"]?.trim() || "local";
 const projectIdEffect = Effect.gen(function* () {
@@ -191,18 +190,31 @@ registerVerifyRoutes(app, { runtime, projectId });
 registerActorsRoutes(app, { runtime, projectId });
 registerRulesRoutes(app, { runtime, projectId });
 
-// Same-origin dashboard (phase 6): serve `apps/dashboard/dist` from
-// the same port. `serveStatic` resolves lazily per-request; if the
-// dist does not exist yet, every GET /* falls through to 404.
-// Static files are served before auth (the dashboard is the entry
-// point), and the auth gate above exempts only API routes.
-const dashboardRoot = path.resolve(root, "..", "apps", "dashboard", "dist");
-app.use(
-  "*",
-  serveStatic({
-    root: dashboardRoot,
-  }) as unknown as Parameters<typeof app.use>[1],
+// Same-origin dashboard dist (optional). Only mount when a real
+// `apps/dashboard/dist` exists in the monorepo — never invent a path
+// under an external `--root` project (that produced bogus paths like
+// `<parent>/apps/dashboard/dist` and noisy serveStatic warnings).
+// Dev UI is Vite on :6970; API-only is fine without static files.
+const hereDir = path.dirname(fileURLToPath(import.meta.url));
+const dashboardDistCandidates = [
+  process.env["COGNIT_REPO_ROOT"]
+    ? path.join(process.env["COGNIT_REPO_ROOT"], "apps", "dashboard", "dist")
+    : "",
+  path.resolve(hereDir, "../../dashboard/dist"), // apps/server/src → apps/dashboard/dist
+  path.resolve(hereDir, "../dashboard/dist"),
+  path.resolve(root, "apps/dashboard/dist"), // root is monorepo
+].filter((p) => p.length > 0);
+const dashboardRoot = dashboardDistCandidates.find(
+  (p) => existsSync(p) && existsSync(path.join(p, "index.html")),
 );
+if (dashboardRoot) {
+  app.use(
+    "*",
+    serveStatic({
+      root: dashboardRoot,
+    }) as unknown as Parameters<typeof app.use>[1],
+  );
+}
 
 let server: ReturnType<typeof serve> | undefined;
 server = serve({ fetch: app.fetch, hostname: opts.host, port: opts.port }, (info) => {
@@ -212,6 +224,17 @@ server = serve({ fetch: app.fetch, hostname: opts.host, port: opts.port }, (info
   process.stdout.write(
     `cognit-server: project=${projectId} db=${dbPath} bind=${cfg.bind}\n`,
   );
+});
+server.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    process.stderr.write(
+      `cognit-server: port ${opts.port} already in use (EADDRINUSE). ` +
+        `Stop the other process or pick another --port.\n`,
+    );
+    process.exit(1);
+  }
+  process.stderr.write(`cognit-server: listen error: ${err.message}\n`);
+  process.exit(1);
 });
 
 // §4.3: optional in-process inbox watcher. Covers the dashboard/SSE

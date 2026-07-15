@@ -11,19 +11,14 @@
 # close → rename) — see the python block at the bottom for the exact
 # POSIX sequence.
 #
-# SESSION ID RESOLUTION — order matters:
+# SESSION ID RESOLUTION — order matters (see hook-lib.sh):
 #   1. `$COGNIT_SESSION_ID` env var (set by `eval "$(cognit env --shell)"`)
-#   2. sticky pointer `.cognit/current-session` (written by
-#      `cognit session create` / `cognit session resume`)
-#   3. placeholder ULID `01HXXX...` so the watcher can still parse
-#      the envelope (the `unknown_session_id` sidecar will fire on
-#      first run, which is the documented bootstrap flow)
+#   2. sticky pointer `.cognit/current-session` (valid 26-char ULID)
+#   3. mint a new ULID, write sticky pointer, use it for this + later hooks
+# Session DB row is lazy-created on drain (`cognit continue` / inbox process).
 #
-# We deliberately do NOT use Gemini CLI's `.session_id` as the Cognit
-# session id — the two namespaces are unrelated, and writing an
-# unknown session id into the inbox triggers
-# `unknown_session_id` rejection. Bind a Cognit session first via
-# `cognit session create`, then start the Gemini CLI turn.
+# Event ids are always 26-char Crockford ULIDs from `ulid.mjs` — short
+# hex/base36 fallbacks are forbidden (they reject as bad filenames).
 #
 # Wire in `~/.gemini/settings.json` (user layer) or
 # `.gemini/settings.json` (project layer):
@@ -47,6 +42,22 @@
 # stderr text and continues — it does not block the tool call.
 set -euo pipefail
 
+# Shared ULID + sticky session.
+# Installed layout: ~/.cognit/hooks/{hook-lib.sh,ulid.mjs,cc-post.sh}
+# Dev layout:       hooks/<tool>/*.sh + hooks/shared/{hook-lib.sh,ulid.mjs}
+_HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+if [[ -f "${_HOOK_DIR}/hook-lib.sh" ]]; then
+  source "${_HOOK_DIR}/hook-lib.sh"
+elif [[ -f "${_HOOK_DIR}/../shared/hook-lib.sh" ]]; then
+  source "${_HOOK_DIR}/../shared/hook-lib.sh"
+  # Point helper lookups at shared/ for ulid.mjs
+  _HOOK_DIR="$(cd "${_HOOK_DIR}/../shared" && pwd)"
+else
+  echo "cognit hook: missing hook-lib.sh (re-run cognit init to reinstall hooks)" >&2
+  exit 1
+fi
+
 # Resolve the inbox dir. `COGNIT_INBOX` overrides the default.
 # Cognit is per-project local-first, so the canonical inbox is the
 # project-relative `./.cognit/inbox/` (resolved from CWD, where the
@@ -57,27 +68,15 @@ mkdir -p "$inbox_dir"
 # Read the full AfterTool payload from stdin.
 input="$(cat)"
 
-# Session id resolution — see header comment for ordering.
-session="${COGNIT_SESSION_ID:-}"
-if [[ -z "$session" && -f ./.cognit/current-session ]]; then
-  session="$(tr -d '[:space:]' < ./.cognit/current-session)"
-fi
-if [[ -z "$session" ]]; then
-  session="01HXXXXXXXXXXXXXXXXXXXXXXX"
-fi
+# Session id: COGNIT_SESSION_ID → sticky pointer → mint + stick (see hook-lib.sh).
+session="$(cognits_session_id)"
 
 tool="$(jq -r '.tool_name // "unknown"' <<<"$input")"
 tool_input="$(jq -c '.tool_input // {}' <<<"$input")"
 tool_response="$(jq -c '.tool_response // null' <<<"$input")"
 
-# Mint a fresh ULID via node — same alphabet/length as the `ulid`
-# package used by the DB. Keeping generation in a small node one-liner
-# avoids pulling in another binary dependency on the host.
-event_id="$(node -e 'process.stdout.write(require("ulid")())' \
-  2>/dev/null || node -e '
-    const t=Date.now();let r="";for(let i=0;i<10;i++)r+=Math.floor(Math.random()*16).toString(16);
-    process.stdout.write(t.toString(36).toUpperCase().padStart(10,"0").slice(-10)+r.toUpperCase().slice(0,16));
-  ')"
+# Mint event ULID (26-char Crockford) via shared helper — never short fallbacks.
+event_id="$(cognits_ulid)"
 
 dest="$inbox_dir/${session}-${event_id}.json"
 

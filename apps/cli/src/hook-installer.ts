@@ -376,8 +376,24 @@ function installTool(spec: ToolSpec): HookInstallResult {
   }
 }
 
+/** Shared helpers every shell producer needs (ULID mint + sticky session). */
+function installSharedProducers(): void {
+  const shared = [
+    { src: path.join(HOOKS_SRC, "shared", "ulid.mjs"), dst: "ulid.mjs", mode: 0o755 },
+    { src: path.join(HOOKS_SRC, "shared", "hook-lib.sh"), dst: "hook-lib.sh", mode: 0o644 },
+  ] as const;
+  for (const p of shared) {
+    if (!fs.existsSync(p.src)) {
+      // Source tree incomplete — producers will fall back to inline mint.
+      continue;
+    }
+    atomicCopyFile(p.src, path.join(HOOKS_DIR, p.dst), p.mode);
+  }
+}
+
 export function detectAndInstallHooks(): HookInstallResult[] {
   fs.mkdirSync(HOOKS_DIR, { recursive: true });
+  installSharedProducers();
   return TOOLS.map(installTool);
 }
 
