@@ -65,17 +65,25 @@ inbox_dir="${COGNIT_INBOX:-./.cognit/inbox}"
 mkdir -p "$inbox_dir"
 
 input="$(cat)"
+cognits_hook_debug_dump "$input"
 
-# Session id resolution — same order as cc-pre.sh.
 # Session id: COGNIT_SESSION_ID → sticky pointer → mint + stick (see hook-lib.sh).
 session="$(cognits_session_id)"
-actor_name="$(cognits_actor_name "$session" "codex" "$input")"
+# Detect host CLI (claude-code | codex | grok | …) for source labeling.
+host_info="$(cognits_detect_host "$input" "codex")"
+host_id="${host_info%%|*}"
+host_event="${host_info#*|}"
+[[ -z "$host_event" || "$host_event" == "$host_info" ]] && host_event="PreToolUse"
+actor_default="$(cognits_host_actor_default "$host_id")"
+actor_name="$(cognits_actor_name "$session" "$actor_default" "$input")"
 
-tool="$(jq -r '.tool_name // "unknown"' <<<"$input")"
-file_path="$(jq -r '.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // ""' <<<"$input")"
+fields="$(cognits_tool_fields_json "$input" "pre")"
+tool="$(jq -r '.tool // "unknown"' <<<"$fields")"
+file_path="$(jq -r '.file_path // ""' <<<"$fields")"
+text="$(jq -r '.text // ("agent intends to invoke " + .tool)' <<<"$fields")"
 
 # Known-files gate. If the file is in the allowlist, do nothing
-# (silent exit 0). Codex treats exit 0 as "do not block".
+# (silent exit 0). Claude Code treats exit 0 as "do not block".
 if [[ -n "$file_path" && -f "$HOME/.cognit/known-files.txt" ]]; then
   if grep -Fxq "$file_path" "$HOME/.cognit/known-files.txt"; then
     exit 0
@@ -88,21 +96,16 @@ event_id="$(cognits_ulid)"
 dest="$inbox_dir/${session}-${event_id}.json"
 
 # Build the envelope. `hypothesis_created` requires `title` + `text`
-# (both non-empty) per the payload schema. We always have a title
-# (the tool name), and `text` carries the file path or a generic
-# "tool invoked" message when no path is present.
+# (both non-empty) per the payload schema.
 title="$tool"
-if [[ -n "$file_path" ]]; then
-  text="agent intends to $tool $file_path"
-else
-  text="agent intends to invoke $tool"
-fi
 
 payload="$(jq -n \
   --arg version   "1.2.0" \
   --arg session   "$session" \
   --arg type      "hypothesis_created" \
-  --arg     actorName "$actor_name" \
+  --arg actorName "$actor_name" \
+  --arg     hostId    "$host_id" \
+  --arg     hostEvent "$host_event" \
   --arg title     "$title" \
   --arg text      "$text" \
   --arg id        "$event_id" \
@@ -113,25 +116,12 @@ payload="$(jq -n \
      actor_name: $actorName,
      actor_type: "worker",
      id:         $id,
-     source:     {tool: "codex", command: "PreToolUse"},
+     source:     {tool: $hostId, command: $hostEvent},
      payload:    {title: $title, text: $text}
    }')"
 
-# Atomic write — open(O_CREAT|O_EXCL|O_WRONLY) → write → fsync → close
-# → rename in one python process. Mirrors
-# `packages/wrap/src/atomic-write.ts::atomicWriteJson` step-for-step.
-python3 - "$dest" "$payload" <<'PY'
-import os, sys
-path, payload = sys.argv[1], sys.argv[2]
-tmp = path + ".tmp"
-fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-try:
-    os.write(fd, payload.encode("utf-8"))
-    os.fsync(fd)
-finally:
-    os.close(fd)
-os.rename(tmp, path)
-PY
+cognits_atomic_write_json "$dest" "$payload"
+
 # D-M4-00 §4.1: near-realtime without a daemon. When
 # `inbox.realtime: true`, `cognit env --shell` exports
 # COGNIT_REALTIME=1; fire-and-forget a one-shot drain so SQLite sees

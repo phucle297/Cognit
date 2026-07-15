@@ -63,7 +63,7 @@ describe("detectAndInstallHooks", () => {
   it("reports `tool-not-detected` when no AI tool directories exist", async () => {
     const { detectAndInstallHooks } = await loadInstaller();
     const results = detectAndInstallHooks();
-    expect(results).toHaveLength(4);
+    expect(results).toHaveLength(5);
     for (const r of results) {
       expect(r.status).toBe("tool-not-detected");
     }

@@ -67,14 +67,24 @@ mkdir -p "$inbox_dir"
 
 # Read the full PostToolUse payload from stdin.
 input="$(cat)"
+cognits_hook_debug_dump "$input"
 
 # Session id: COGNIT_SESSION_ID → sticky pointer → mint + stick (see hook-lib.sh).
 session="$(cognits_session_id)"
-actor_name="$(cognits_actor_name "$session" "claude" "$input")"
+# Detect host CLI (claude-code | codex | grok | …) for source labeling.
+host_info="$(cognits_detect_host "$input" "claude-code")"
+host_id="${host_info%%|*}"
+host_event="${host_info#*|}"
+[[ -z "$host_event" || "$host_event" == "$host_info" ]] && host_event="PostToolUse"
+actor_default="$(cognits_host_actor_default "$host_id")"
+actor_name="$(cognits_actor_name "$session" "$actor_default" "$input")"
 
-tool="$(jq -r '.tool_name // "unknown"' <<<"$input")"
-tool_input="$(jq -c '.tool_input // {}' <<<"$input")"
-tool_response="$(jq -c '.tool_response // null' <<<"$input")"
+# Multi-path tool parse (Claude snake_case + Grok camelCase + peers).
+fields="$(cognits_tool_fields_json "$input" "post")"
+tool="$(jq -r '.tool // "unknown"' <<<"$fields")"
+tool_input="$(jq -c '.tool_input // {}' <<<"$fields")"
+tool_response="$(jq -c '.tool_response // null' <<<"$fields")"
+text="$(jq -r '.text // ("tool " + .tool + " returned")' <<<"$fields")"
 
 # Mint event ULID (26-char Crockford) via shared helper — never short fallbacks.
 event_id="$(cognits_ulid)"
@@ -83,15 +93,16 @@ dest="$inbox_dir/${session}-${event_id}.json"
 
 # Build the envelope. `version: "1.2.0"` matches the wrap producer and
 # the inbox watcher's EnvelopeSchema literal union. `actor_name` and
-# `actor_type` are top-level (FLAT), not nested under `actor:`. The
-# `id` field is the per-event ULID; the watcher uses it as the
-# primary key in the events table.
+# `actor_type` are top-level (FLAT), not nested under `actor:`.
 payload="$(jq -n \
   --arg     version   "1.2.0" \
   --arg     session   "$session" \
   --arg     type      "observation_recorded" \
   --arg     actorName "$actor_name" \
+  --arg     hostId    "$host_id" \
+  --arg     hostEvent "$host_event" \
   --arg     tool      "$tool" \
+  --arg     text      "$text" \
   --argjson toolInput "$tool_input" \
   --argjson toolResp  "$tool_response" \
   --arg     id        "$event_id" \
@@ -102,36 +113,16 @@ payload="$(jq -n \
      actor_name: $actorName,
      actor_type: "worker",
      id:         $id,
-     source:     {tool: "claude-code", command: "PostToolUse"},
+     source:     {tool: $hostId, command: $hostEvent},
      payload:    {
-       text: ("tool " + $tool + " returned"),
+       text: $text,
        tool: $tool,
        tool_input: $toolInput,
        tool_response: $toolResp
      }
    }')"
 
-# Atomic write — open(O_CREAT|O_EXCL|O_WRONLY) → write → fsync → close
-# → rename. Done in one python process so the fsync is guaranteed to
-# land on the same fd the bytes were written to (a shell `printf > tmp
-# && python fsync tmp` split can lose the guarantee if the bash-side
-# write hasn't flushed to the kernel page cache before the python
-# process reopens the file). This mirrors
-# `packages/wrap/src/atomic-write.ts::atomicWriteJson` step-for-step.
-# Payload is passed via argv (the heredoc body is the python program;
-# python ignores stdin in argv-only mode).
-python3 - "$dest" "$payload" <<'PY'
-import os, sys
-path, payload = sys.argv[1], sys.argv[2]
-tmp = path + ".tmp"
-fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-try:
-    os.write(fd, payload.encode("utf-8"))
-    os.fsync(fd)
-finally:
-    os.close(fd)
-os.rename(tmp, path)
-PY
+cognits_atomic_write_json "$dest" "$payload"
 
 # D-M4-00 §4.1: near-realtime without a daemon. When
 # `inbox.realtime: true`, `cognit env --shell` exports

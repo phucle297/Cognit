@@ -16,6 +16,7 @@ import { Command } from "commander";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import net from "node:net";
+import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findProjectRoot } from "../paths.js";
@@ -68,6 +69,36 @@ const pickFreePort = async (
   }
   throw new Error(`no free port in range ${start}–${start + 29}`);
 };
+
+
+/** Poll until GET /api/healthz returns 200, or timeout. */
+const waitForApi = (apiUrl: string, timeoutMs = 15_000): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const started = Date.now();
+    const tick = (): void => {
+      const req = http.get(`${apiUrl}/api/healthz`, (res) => {
+        res.resume();
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve();
+          return;
+        }
+        retry();
+      });
+      req.on("error", () => retry());
+      req.setTimeout(800, () => {
+        req.destroy();
+        retry();
+      });
+    };
+    const retry = (): void => {
+      if (Date.now() - started > timeoutMs) {
+        reject(new Error(`API not ready at ${apiUrl} within ${timeoutMs}ms`));
+        return;
+      }
+      setTimeout(tick, 150);
+    };
+    tick();
+  });
 
 const openBrowser = (url: string): void => {
   const cmd =
@@ -205,6 +236,19 @@ export function registerDashboard(program: Command): void {
         },
       );
 
+      // Wait for healthz before Vite — otherwise the first SSE/proxy
+      // requests hit ECONNREFUSED while the server is still booting.
+      try {
+        process.stderr.write(`cognit: waiting for API ${apiUrl}/api/healthz …\n`);
+        await waitForApi(apiUrl);
+        process.stderr.write(`cognit: API ready\n`);
+      } catch (e) {
+        process.stderr.write(`cognit: ${(e as Error).message}\n`);
+        if (!server.killed) server.kill("SIGTERM");
+        process.exitCode = 1;
+        return;
+      }
+
       const viteBin =
         [
           path.join(REPO_ROOT, "apps", "dashboard", "node_modules", ".bin", "vite"),
@@ -223,7 +267,7 @@ export function registerDashboard(program: Command): void {
       wireProcessGroup([server, ui], ui);
 
       if (opts.open !== false) {
-        setTimeout(() => openBrowser(url), 2000);
+        setTimeout(() => openBrowser(url), 500);
       }
     });
 }

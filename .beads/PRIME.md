@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Dashboard: remove mock data; fix home project/session
+search: CLI-agnostic hooks: Claude Code + Codex + Grok Build
 queue: 
 next: 

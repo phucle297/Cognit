@@ -20,7 +20,7 @@ fix.
 
 Per-provider wiring lives in the linked provider pages
 ([claude-code](./claude-code.md), [codex](./codex.md),
-[opencode](./opencode.md), [gemini-cli](./gemini-cli.md)). Each
+[opencode](./opencode.md), [gemini-cli](./gemini-cli.md), [grok-build](./grok-build.md)). Each
 provider page is a thin wrapper — install command + the host CLI's
 hook event mapping + the payload shape. Producer scripts and
 shared algorithms live below in **Common behavior**.
@@ -43,6 +43,8 @@ no nested `actor`) matching `packages/wrap/src/index.ts:72`
 | Codex CLI      | `hooks/codex/codex-pre.sh`           | `PreToolUse`         |
 | OpenCode       | `hooks/opencode/cognit.ts`           | `tool.execute.after` |
 | Gemini CLI     | `hooks/gemini-cli/gemini-post.sh`    | `AfterTool`          |
+| Grok Build     | `hooks/claude-code/cc-post.sh` (shared, host-detected) | `PostToolUse` |
+| Grok Build     | `hooks/claude-code/cc-pre.sh` (shared, host-detected)  | `PreToolUse`  |
 
 Install:
 
@@ -59,6 +61,12 @@ cp hooks/opencode/cognit.ts                   ~/.cognit/hooks/cognit.ts
 ---
 
 ## Common behavior
+
+Shell producers are **CLI-agnostic**: they multi-path parse tool fields
+(Claude snake_case, Grok/Cursor camelCase, Codex `name`/`arguments`) and
+set `source.tool` from runtime detection (`GROK_*` env, JSON shape, installer fallback).
+Minimum supported hosts: **Claude Code**, **Codex CLI**, **Grok Build**.
+
 
 Every shipped producer (shell script or TypeScript plugin) follows
 the same three algorithms. Provider pages link here instead of

@@ -98,5 +98,20 @@ if [[ "$session_id" != "$SESSION" ]]; then
   exit 1
 fi
 
+
+# 6. tool name extracted from tool_name
+tool="$(jq -r '.payload.tool // ""' "$envelope")"
+if [[ "$tool" != "Edit" ]]; then
+  echo "FAIL: expected payload.tool=Edit, got tool=$tool" >&2
+  exit 1
+fi
+
+# 7. summary text mentions tool / path
+ptext="$(jq -r '.payload.text // ""' "$envelope")"
+if [[ "$ptext" != *Edit* ]]; then
+  echo "FAIL: expected payload.text to mention Edit, got text=$ptext" >&2
+  exit 1
+fi
+
 echo "PASS: cc-post.sh emitted valid envelope at $envelope (version=$version, actor_name=$actor_name, id=$id, mode=0o$mode)"
 exit 0

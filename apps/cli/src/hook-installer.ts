@@ -10,6 +10,7 @@
  *      - Codex        → `~/.codex/`
  *      - Gemini CLI   → `~/.gemini/`
  *      - OpenCode     → `~/.config/opencode/`
+ *      - Grok Build   → `~/.grok/` (also reads Claude settings)
  * 2. Copies the producer scripts (shell scripts + the OpenCode
  *    plugin) into `~/.cognit/hooks/` atomically. The destination
  *    directory is per-user and lives outside the project so hooks
@@ -32,7 +33,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export type SupportedTool = "claude-code" | "codex" | "gemini-cli" | "opencode";
+export type SupportedTool = "claude-code" | "codex" | "gemini-cli" | "opencode" | "grok";
 
 export type HookInstallStatus =
   | "installed"
@@ -110,14 +111,16 @@ const claudeCode: ToolSpec = {
     const post = asArray(hooks["PostToolUse"]) ?? [];
     const pre = asArray(hooks["PreToolUse"]) ?? [];
     if (!hasCognitHook({ hooks: { PostToolUse: post } }, "PostToolUse", "cc-post.sh")) {
+      // Broad matcher: Claude tools + Grok aliases (Grok scans ~/.claude
+      // settings and maps Bash↔run_terminal_command etc.). Empty/.* = all.
       post.push({
-        matcher: "Edit|Write|Bash",
+        matcher: ".*",
         hooks: [{ type: "command", command: "~/.cognit/hooks/cc-post.sh" }],
       });
     }
     if (!hasCognitHook({ hooks: { PreToolUse: pre } }, "PreToolUse", "cc-pre.sh")) {
       pre.push({
-        matcher: "Read|Edit|Write",
+        matcher: ".*",
         hooks: [{ type: "command", command: "~/.cognit/hooks/cc-pre.sh" }],
       });
     }
@@ -210,7 +213,53 @@ const opencode: ToolSpec = {
   merge: (settings) => settings,
 };
 
-const TOOLS: ReadonlyArray<ToolSpec> = [claudeCode, codex, geminiCli, opencode];
+
+const grok: ToolSpec = {
+  id: "grok",
+  label: "Grok Build",
+  detectPath: path.join(os.homedir(), ".grok"),
+  // Reuse Claude producers — scripts auto-detect host via GROK_* env + camelCase JSON.
+  producers: [
+    { src: path.join(HOOKS_SRC, "claude-code", "cc-post.sh"), dst: "cc-post.sh", mode: 0o755 },
+    { src: path.join(HOOKS_SRC, "claude-code", "cc-pre.sh"), dst: "cc-pre.sh", mode: 0o755 },
+  ],
+  // Grok loads global hooks from ~/.grok/hooks/*.json (always trusted).
+  settingsPath: path.join(os.homedir(), ".grok", "hooks", "cognit.json"),
+  emptySettings: () => ({ hooks: {} }),
+  alreadyWired: (settings) =>
+    hasCognitHook(settings, "PostToolUse", "cc-post.sh") ||
+    hasCognitHook(settings, "post_tool_use", "cc-post.sh"),
+  merge: (settings) => {
+    const hooks = asObject(settings["hooks"]) ?? {};
+    const post = asArray(hooks["PostToolUse"]) ?? asArray(hooks["post_tool_use"]) ?? [];
+    const pre = asArray(hooks["PreToolUse"]) ?? asArray(hooks["pre_tool_use"]) ?? [];
+    // Prefer PascalCase keys (Grok accepts both; Claude-compat shape).
+    const nextPost = [...post];
+    const nextPre = [...pre];
+    if (!nextPost.some((entry) => entryReferencesScript(entry, "cc-post.sh"))) {
+      nextPost.push({
+        matcher: ".*",
+        hooks: [{ type: "command", command: "~/.cognit/hooks/cc-post.sh" }],
+      });
+    }
+    if (!nextPre.some((entry) => entryReferencesScript(entry, "cc-pre.sh"))) {
+      nextPre.push({
+        matcher: ".*",
+        hooks: [{ type: "command", command: "~/.cognit/hooks/cc-pre.sh" }],
+      });
+    }
+    return {
+      ...settings,
+      hooks: {
+        ...hooks,
+        PostToolUse: nextPost,
+        PreToolUse: nextPre,
+      },
+    };
+  },
+};
+
+const TOOLS: ReadonlyArray<ToolSpec> = [claudeCode, codex, geminiCli, opencode, grok];
 
 // --- helpers ----------------------------------------------------------
 
