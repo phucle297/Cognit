@@ -12,7 +12,7 @@ import { Schema } from "effect";
  * the gravity engine consults them and falls back to the rule-based
  * formula when no AI rank is present.
  */
-export const CURRENT_VERSION = "1.2.0" as const;
+export const CURRENT_VERSION = "1.3.0" as const;
 
 /**
  * Per-event-type payload Schemas. Each is a Struct with the fields the
@@ -253,6 +253,52 @@ const ProjectCreatedPayload = Schema.Struct({
  * Typed as `Schema<any, any, never>` because the value type differs
  * per row. Callers should `decodeUnknownEither` and pattern-match.
  */
+
+/** D-M5-00: engineering action (meaning). Tool lives under evidence. */
+const ActionRecordedPayload = Schema.Struct({
+  text: Schema.String.pipe(Schema.minLength(1)),
+  action_kind: Schema.Literal(
+    "applied_fix",
+    "refactored",
+    "generated",
+    "configured",
+    "documented",
+    "dependency_change",
+    "other",
+  ),
+  evidence: Schema.optional(
+    Schema.Struct({
+      tool: Schema.String,
+      path: Schema.optional(Schema.NullOr(Schema.String)),
+      command: Schema.optional(Schema.NullOr(Schema.String)),
+      summary: Schema.optional(Schema.NullOr(Schema.String)),
+      truncated: Schema.optional(Schema.Boolean),
+      content_chars: Schema.optional(Schema.Number),
+      excerpt: Schema.optional(Schema.NullOr(Schema.String)),
+    }),
+  ),
+  related_observation_ids: Schema.optionalWith(Schema.Array(Schema.String), {
+    default: () => [] as string[],
+  }),
+  linked_hypothesis_id: Schema.optionalWith(Schema.NullOr(Schema.String), {
+    default: () => null,
+  }),
+});
+
+/** D-M5-00: raw host tool capture before semantic classification. */
+const RawToolSignalPayload = Schema.Struct({
+  phase: Schema.Literal("pre", "post", "failure"),
+  host: Schema.String,
+  tool: Schema.String,
+  tool_input: Schema.optional(Schema.Unknown),
+  tool_response: Schema.optional(Schema.NullOr(Schema.Unknown)),
+  text: Schema.String.pipe(Schema.minLength(1)),
+  path: Schema.optional(Schema.NullOr(Schema.String)),
+  command: Schema.optional(Schema.NullOr(Schema.String)),
+  exit_code: Schema.optional(Schema.NullOr(Schema.Number)),
+  duration_ms: Schema.optional(Schema.NullOr(Schema.Number)),
+});
+
 export const PAYLOAD_SCHEMAS_V1: Readonly<Record<string, Schema.Schema<any, any, never>>> = {
   project_created: ProjectCreatedPayload,
   session_created: SessionCreatedPayload,
@@ -348,6 +394,16 @@ export const PAYLOAD_SCHEMAS_V1_2_0: Readonly<Record<string, Schema.Schema<any, 
 } as const;
 
 /**
+ * v1.3.0 — D-M5-00 semantic pipeline types:
+ * `action_recorded` (state) + `raw_tool_signal` (non-state transport).
+ */
+export const PAYLOAD_SCHEMAS_V1_3_0: Readonly<Record<string, Schema.Schema<any, any, never>>> = {
+  ...PAYLOAD_SCHEMAS_V1_2_0,
+  action_recorded: ActionRecordedPayload,
+  raw_tool_signal: RawToolSignalPayload,
+} as const;
+
+/**
  * Schema map keyed by payload version. The migration runner uses this
  * to pick the right schema for the `to` version. Unlisted versions
  * fall back to v1.0.0 strict schemas (defensive default — unknown
@@ -359,6 +415,7 @@ export const PAYLOAD_SCHEMAS_BY_VERSION: Readonly<
   "1.0.0": PAYLOAD_SCHEMAS_V1,
   "1.1.0": PAYLOAD_SCHEMAS_V1_1_0,
   "1.2.0": PAYLOAD_SCHEMAS_V1_2_0,
+  "1.3.0": PAYLOAD_SCHEMAS_V1_3_0,
 };
 
 /**
@@ -380,10 +437,12 @@ export const PAYLOAD_SCHEMAS_CURRENT: Readonly<
 
 /**
  * Convenience: the same map typed as a record of Schemas.
+ * Keys follow CURRENT_VERSION so append accepts types introduced in
+ * later maps (e.g. `action_recorded` / `raw_tool_signal` in v1.3.0).
  */
-export type PayloadSchemaByType = typeof PAYLOAD_SCHEMAS_V1_1_0;
-export type EventType = keyof PayloadSchemaByType;
-export const EVENT_TYPES: ReadonlyArray<string> = Object.keys(PAYLOAD_SCHEMAS_V1_2_0);
+export type PayloadSchemaByType = typeof PAYLOAD_SCHEMAS_CURRENT;
+export type EventType = string;
+export const EVENT_TYPES: ReadonlyArray<string> = Object.keys(PAYLOAD_SCHEMAS_CURRENT);
 
 /**
  * Compile-time drift check: ensure `PAYLOAD_SCHEMAS_V1`

@@ -2,7 +2,7 @@ import { Effect, Either, Layer, Schema } from "effect";
 import { MigrationRegistry } from "./context";
 import {
   PAYLOAD_SCHEMAS_BY_VERSION,
-  PAYLOAD_SCHEMAS_V1_2_0,
+  PAYLOAD_SCHEMAS_V1_3_0,
 } from "./event-schema";
 import { MigrationTransformError, ValidationFailure } from "./errors";
 import { semverGte, semverCompare } from "./semver";
@@ -50,6 +50,12 @@ const TRANSFORMS: ReadonlyArray<Transform> = [
     to: "1.2.0",
     fn: (payload) => payload,
   },
+  {
+    from: "1.2.0",
+    to: "1.3.0",
+    // Identity: action_recorded + raw_tool_signal are additive types.
+    fn: (payload) => payload,
+  },
 ];
 
 /** Live layer. */
@@ -61,7 +67,12 @@ export const MigrationRegistryLive: Layer.Layer<MigrationRegistry> = Layer.succe
       if (!semverGte(to, from)) {
         return [];
       }
-      return TRANSFORMS.filter((t) => semverGte(t.to, to) && semverGte(t.from, from));
+      // Only steps whose [from,to] lies within the requested range.
+      // (Previous filter used t.to >= target which incorrectly pulled
+      // later identity steps into shorter paths.)
+      return TRANSFORMS.filter(
+        (t) => semverGte(t.from, from) && semverGte(to, t.to) && semverGte(t.to, t.from),
+      );
     },
     knownVersions: () => Object.keys(PAYLOAD_SCHEMAS_BY_VERSION),
   },
@@ -74,7 +85,7 @@ export const MigrationRegistryLive: Layer.Layer<MigrationRegistry> = Layer.succe
  * signal, so a forward-default is safe.
  */
 const schemaMapFor = (version: string): Readonly<Record<string, Schema.Schema<any, any, never>>> =>
-  PAYLOAD_SCHEMAS_BY_VERSION[version] ?? PAYLOAD_SCHEMAS_V1_2_0;
+  PAYLOAD_SCHEMAS_BY_VERSION[version] ?? PAYLOAD_SCHEMAS_V1_3_0;
 
 /**
  * Lift a stored payload to `target` version by walking transforms.

@@ -95,12 +95,13 @@ const InboxConfig = Schema.Struct({
   debounce_ms: Schema.optionalWith(NonNegativeInt, { default: () => 200 }),
   atomic_write_required: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
-   * Near-realtime without a daemon (§4.1). When true, hooks
-   * fire-and-forget `cognit inbox --process` after each write (gated by
-   * the `COGNIT_REALTIME` env var exported by `cognit env`). Default
-   * false — the lazy drain on read commands is enough for most users.
+   * Near-realtime without a daemon (§4.1). When true (default), hooks
+   * fire-and-forget `cognit inbox --process` after each write and on
+   * Stop/SessionEnd. Hooks self-resolve this flag (and COGNIT_REALTIME);
+   * agents need not `eval "$(cognit env)"`. Set false to opt out of
+   * hook-side drain (lazy drain on read commands remains).
    */
-  realtime: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  realtime: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
    * Read commands (`continue`/`search`/`events`) drain the inbox
    * before answering (D-M4-00 §1). Set `false` only when running
@@ -114,6 +115,20 @@ const InboxConfig = Schema.Struct({
    * enforced (silent drop violates local-first trust). Default 1000.
    */
   max_pending: Schema.optionalWith(NonNegativeInt, { default: () => 1000 }),
+  /**
+   * D-M5-00 Phase 4: when true, ingest may call an external SoftClassifier
+   * (e.g. LLM) for low-confidence classes. Default false — pure heuristics
+   * always run; network LLM is opt-in (latency + privacy).
+   */
+  semantic_llm: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+  /**
+   * Confidence below this triggers soft-refine heuristics (and optional LLM).
+   * Default 0.7.
+   */
+  soft_confidence_threshold: Schema.optionalWith(
+    Schema.Number.pipe(Schema.greaterThanOrEqualTo(0), Schema.lessThanOrEqualTo(1)),
+    { default: () => 0.7 },
+  ),
 });
 type InboxConfig = Schema.Schema.Type<typeof InboxConfig>;
 
@@ -321,7 +336,9 @@ export const CognitConfigSchema = Schema.Struct({
         atomic_write_required: true,
         auto_drain: true,
         max_pending: 1000,
-        realtime: false,
+        realtime: true,
+        semantic_llm: false,
+        soft_confidence_threshold: 0.7,
       }) as const,
   }),
   gravity: Schema.optionalWith(GravityConfig, {

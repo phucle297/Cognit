@@ -18,7 +18,7 @@ count. Each lives in its own file under `apps/cli/src/commands/`.
 |---|---------------|-------------------------------------------|----------------------------------------------------------------------------------------------------------|
 | 1 | `init`        | `apps/cli/src/commands/init.ts`           | Initialise a local Cognit project (creates `.cognit/` tree, writes `cognit.yaml`, adds `.gitignore`).    |
 | 2 | `config`      | `apps/cli/src/commands/config.ts`         | Show or edit the local `cognit.yaml` (flags: `--show`, `--edit`).                                        |
-| 3 | `env`         | `apps/cli/src/commands/env.ts`            | Print hook-relevant env vars (`$COGNIT_INBOX`, `$COGNIT_SESSION_ID`, `$COGNIT_REALTIME` when `inbox.realtime` is on) for the current project. |
+| 3 | `env`         | `apps/cli/src/commands/env.ts`            | Print hook-relevant env vars (`$COGNIT_INBOX`, `$COGNIT_SESSION_ID`, `$COGNIT_REALTIME` default on / 0 when `inbox.realtime: false`) for the current project. |
 | 4 | `session`     | `apps/cli/src/commands/session.ts`        | Manage sessions: create / list / show / resume / close / fork.                                           |
 
 ## Event authoring

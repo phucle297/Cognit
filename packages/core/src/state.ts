@@ -50,6 +50,24 @@ export type SessionLifecycle = "active" | "paused" | "closed";
 export type VerificationKind = "test" | "lint" | "build" | "exec" | "typecheck";
 export type ArtifactRole = "evidence" | "code" | "log" | "config";
 
+/** Kind of engineering action (meaning, not tool name). D-M5-00. */
+export type ActionKind =
+  | "applied_fix"
+  | "refactored"
+  | "generated"
+  | "configured"
+  | "documented"
+  | "dependency_change"
+  | "other";
+
+export interface ActionState {
+  readonly id: string;
+  readonly text: string;
+  readonly action_kind: ActionKind;
+  readonly created_at: string;
+  readonly last_event_id: string;
+}
+
 export interface ObservationState {
   readonly id: string;
   readonly text: string;
@@ -241,6 +259,7 @@ export interface SessionState {
   readonly current_verification_id: string | null;
 
   readonly observations: ReadonlyArray<ObservationState>;
+  readonly actions: ReadonlyArray<ActionState>;
   readonly findings: ReadonlyArray<FindingState>;
   readonly hypotheses: ReadonlyMap<string, HypothesisState>;
   readonly theories: ReadonlyMap<string, TheoryState>;
@@ -280,6 +299,7 @@ export const emptySessionState = (params: {
   current_conclusion_id: null,
   current_verification_id: null,
   observations: [],
+  actions: [],
   findings: [],
   hypotheses: new Map(),
   theories: new Map(),

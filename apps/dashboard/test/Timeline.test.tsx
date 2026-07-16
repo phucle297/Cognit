@@ -112,11 +112,11 @@ describe("TimelinePage (6.8.2.P4)", () => {
     await user.click(screen.getByTestId("timeline-kind-decision"));
 
     await waitFor(() => {
-      // 3 decision events remain
+      // 3 decision events remain (badge shows family/Title Case label)
       const kinds = screen.getAllByTestId("timeline-event-kind");
-      const decisionCount = kinds.filter((k) => k.textContent === "decision").length;
+      const decisionCount = kinds.filter((k) => k.textContent === "Decision").length;
       expect(decisionCount).toBe(3);
-      const toolCallCount = kinds.filter((k) => k.textContent === "tool_call").length;
+      const toolCallCount = kinds.filter((k) => k.textContent === "Tool Call").length;
       expect(toolCallCount).toBe(0);
     });
   });
@@ -248,11 +248,85 @@ describe("TimelinePage (6.8.2.P4)", () => {
     expect(await screen.findByTestId("timeline-page")).toBeInTheDocument();
     await waitFor(() => {
       const kinds = screen.getAllByTestId("timeline-event-kind").map((el) => el.textContent);
-      expect(kinds).toEqual(expect.arrayContaining(["observation_recorded", "session_created"]));
+      // D-M5-00 family labels on badges
+      expect(kinds).toEqual(expect.arrayContaining(["Observe", "System"]));
       expect(kinds.length).toBe(2);
     });
     // summary from payload (formatPayloadSummary → "text: tool Bash returned")
     expect(screen.getByText(/text: tool Bash returned/i)).toBeInTheDocument();
   });
 
+  it("shows family labels and action_kind summary; hides raw_tool_signal by default", async () => {
+    const wireEvents = [
+      {
+        id: "01EV0000000000000000000010",
+        type: "action_recorded",
+        session_id: "01TEST",
+        actor_id: "01ACT",
+        created_at: "2026-06-17T10:00:00.000Z",
+        payload_json: JSON.stringify({
+          text: "patched login race",
+          action_kind: "applied_fix",
+          evidence: { tool: "Edit" },
+        }),
+      },
+      {
+        id: "01EV0000000000000000000011",
+        type: "verification_passed",
+        session_id: "01TEST",
+        actor_id: "01ACT",
+        created_at: "2026-06-17T10:01:00.000Z",
+        payload_json: JSON.stringify({ exit_code: 0 }),
+      },
+      {
+        id: "01EV0000000000000000000012",
+        type: "raw_tool_signal",
+        session_id: "01TEST",
+        actor_id: "01ACT",
+        created_at: "2026-06-17T10:02:00.000Z",
+        payload_json: JSON.stringify({ tool: "Bash", command: "ls" }),
+      },
+    ];
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (String(url).includes("/events")) {
+        return Promise.resolve(
+          new Response(envelope({ events: wireEvents }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          }),
+        );
+      }
+      if (String(url).endsWith("/sessions/01TEST")) {
+        return Promise.resolve(
+          new Response(
+            envelope({ session: { id: "01TEST", goal: "demo goal", status: "active" } }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(new Response("{}", { status: 404 }));
+    }) as unknown as typeof fetch;
+
+    const { default: userEvent } = await import("@testing-library/user-event");
+    const user = userEvent.setup();
+    renderTimeline();
+
+    expect(await screen.findByTestId("timeline-page")).toBeInTheDocument();
+    await waitFor(() => {
+      const kinds = screen.getAllByTestId("timeline-event-kind").map((el) => el.textContent);
+      expect(kinds).toEqual(expect.arrayContaining(["Action", "Verify"]));
+      expect(kinds).not.toContain("Raw Tool Signal");
+      expect(kinds.length).toBe(2);
+    });
+    expect(screen.getByText(/Applied fix: patched login race/i)).toBeInTheDocument();
+    // chip still lists raw_tool_signal so user can opt in
+    expect(screen.getByTestId("timeline-kind-raw_tool_signal")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("timeline-kind-raw_tool_signal"));
+    await waitFor(() => {
+      const kinds = screen.getAllByTestId("timeline-event-kind").map((el) => el.textContent);
+      expect(kinds).toContain("Raw Tool Signal");
+      expect(kinds.length).toBe(1);
+    });
+  });
 });

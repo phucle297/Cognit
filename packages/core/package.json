@@ -14,7 +14,8 @@
     "./reducer": "./src/reducer.ts",
     "./ranking": "./src/ranking.ts",
     "./state": "./src/state.ts",
-    "./serialize-state": "./src/serialize-state.ts"
+    "./serialize-state": "./src/serialize-state.ts",
+    "./semantics": "./src/semantics/index.ts"
   },
   "scripts": {
     "build": "echo \"core: no build (no emit)\"",

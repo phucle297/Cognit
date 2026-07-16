@@ -54,6 +54,7 @@ describe("event-types sets", () => {
       "session_paused",
       "session_closed",
       "observation_recorded",
+      "action_recorded",
       "finding_created",
       "hypothesis_created",
       "hypothesis_weakened",
@@ -89,6 +90,7 @@ describe("event-types sets", () => {
       "constraint_rule_added",
       "constraint_rule_applied",
       "snapshot_created",
+      "raw_tool_signal",
     ];
     for (const t of documented) {
       expect(NON_STATE_EVENT_TYPES.has(t)).toBe(true);
@@ -110,6 +112,7 @@ describe("event-types switch exhaustiveness", () => {
       case "session_paused":
       case "session_closed":
       case "observation_recorded":
+      case "action_recorded":
       case "finding_created":
       case "hypothesis_created":
       case "hypothesis_weakened":

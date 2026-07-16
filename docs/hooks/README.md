@@ -2,7 +2,8 @@
 
 External AI CLIs (Claude Code, Codex, Gemini CLI, OpenCode, …)
 publish events to Cognit by writing atomic JSON files into
-`.cognit/inbox/`. The inbox is drained into the database **lazily**:
+`.cognit/inbox/`. The inbox is drained into the database by **hooks**
+(default ON) and also **lazily** on read commands:
 every read command (`cognit continue`, `cognit search`, `cognit
 events`) validates each pending file against the Effect Schema
 registry, resolves or creates the session, calls
@@ -149,18 +150,25 @@ The destination directory is resolved in this order:
 `~/.cognit/inbox/` is **not** a built-in default — it is only used
 when `$COGNIT_INBOX` is explicitly set to that path.
 
-### Near-realtime drain (`$COGNIT_REALTIME`, optional)
+### Automatic drain (agent OOB, default ON)
 
-By default producers only **write** inbox files. Read commands
-(`continue` / `search` / `events`) drain lazily. For near-realtime
-without a daemon:
+Producers **write** inbox files, then **fire-and-forget**
+`cognit inbox --process` so SQLite (and the dashboard) stay fresh
+without a manual step. Agents do not need
+`eval "$(cognit env --shell)"` — hooks self-resolve config.
 
-1. Set `inbox.realtime: true` in `.cognit/cognit.yaml`.
-2. Re-export env: `eval "$(cognit env --shell)"` (exports
-   `COGNIT_REALTIME=1`).
-3. Producers fire-and-forget `cognit inbox --process` after each
-   successful atomic write. Failures are ignored; the host CLI is
-   never blocked.
+| When | Behaviour |
+| ---- | --------- |
+| After each tool pre/post write | Debounced background drain (~2s) |
+| `Stop` / `SessionEnd` (Claude + Grok) | Forced drain (no debounce) |
+| `cognit dashboard` start | One-shot drain before API/UI |
+| Read commands (`continue` / `search` / `events`) | Lazy drain via `inbox.auto_drain` |
+
+**Opt out:** set `inbox.realtime: false` in `.cognit/cognit.yaml`,
+or export `COGNIT_REALTIME=0`.
+
+**Opt in explicitly (shell):** `eval "$(cognit env --shell)"` exports
+`COGNIT_REALTIME=1` by default (or `0` when yaml disables it).
 
 Alternatives for continuous freshness: `cognit inbox --watch`,
 `cognit inbox --install-watch` (systemd/launchd unit), or
@@ -176,7 +184,7 @@ fire so host tools stay snappy:
 | `jq` parse + envelope build | 1 process |
 | ULID mint (`node`) | 1 process |
 | atomic write (`python3`) | 1 process |
-| optional `cognit inbox --process` | 0 (background, only when `COGNIT_REALTIME=1`) |
+| optional `cognit inbox --process` | 0 (background, default ON; debounced) |
 
 Collapsing the ULID mint into the Python atomic-write (dropping one
 subprocess) is a tracked polish item, not required for OOB. Phone-home

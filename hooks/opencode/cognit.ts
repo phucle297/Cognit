@@ -3,6 +3,7 @@
  *
  * Session id: COGNIT_SESSION_ID → .cognit/current-session → mint + stick.
  * Event id: pure Crockford ULID (no npm `ulid` dependency).
+ * Emits `raw_tool_signal` v1.3.0 (evidence only; ingest Phase 2b classifies).
  */
 import {
   openSync,
@@ -86,13 +87,10 @@ const inboxDir: string =
   process.env.COGNIT_INBOX ?? join(projectRoot(), ".cognit", "inbox");
 
 const send = (params: {
-  readonly type:
-    | "observation_recorded"
-    | "hypothesis_created"
-    | "verification_passed"
-    | "verification_failed";
+  readonly type: "raw_tool_signal";
   readonly sessionId: string;
   readonly actorName: string;
+  readonly sourceCommand: string;
   readonly payload: Readonly<Record<string, unknown>>;
 }): string => {
   mkdirSync(inboxDir, { recursive: true, mode: 0o700 });
@@ -102,13 +100,13 @@ const send = (params: {
   const dest = join(inboxDir, `${params.sessionId}-${eventId}.json`);
 
   const envelope = {
-    version: "1.2.0" as const,
+    version: "1.3.0" as const,
     type: params.type,
     session_id: params.sessionId,
     actor_name: params.actorName,
     actor_type: "worker" as const,
     id: eventId,
-    source: { tool: "opencode", command: "tool.execute.after" },
+    source: { tool: "opencode", command: params.sourceCommand },
     payload: params.payload,
   };
 
@@ -121,7 +119,11 @@ const send = (params: {
   }
   renameSync(tmp, dest);
 
-  if (process.env.COGNIT_REALTIME === "1") {
+  // Agent OOB drain (default ON). Opt-out: COGNIT_REALTIME=0.
+  // Mirrors hooks/shared/hook-lib.sh cognits_maybe_drain.
+  const rt = (process.env.COGNIT_REALTIME ?? "").toLowerCase();
+  const optedOut = rt === "0" || rt === "false" || rt === "no" || rt === "off";
+  if (!optedOut) {
     try {
       const child = spawn("cognit", ["inbox", "--process"], {
         detached: true,
@@ -140,20 +142,40 @@ export const CognitInbox: Plugin = async () => ({
   "tool.execute.after": async (input, output) => {
     try {
       const sessionId = resolveSessionId();
+      const tool = String(input.tool ?? "unknown");
+      const args = (input.args ?? {}) as Record<string, unknown>;
+      const pathVal =
+        (typeof args.file_path === "string" && args.file_path) ||
+        (typeof args.filePath === "string" && args.filePath) ||
+        (typeof args.path === "string" && args.path) ||
+        null;
+      const commandVal =
+        (typeof args.command === "string" && args.command) ||
+        (typeof args.cmd === "string" && args.cmd) ||
+        null;
       send({
-        type: "observation_recorded",
+        type: "raw_tool_signal",
         sessionId,
         actorName: resolveActorName(sessionId),
+        sourceCommand: "tool.execute.after",
         payload: {
-          text: `tool ${input.tool} returned`,
-          tool: input.tool,
-          args: input.args,
-          output,
+          phase: "post",
+          host: "opencode",
+          tool,
+          tool_input: args,
+          tool_response: output,
+          text: pathVal
+            ? `tool ${tool} → ${pathVal}`
+            : commandVal
+              ? `tool ${tool}: ${String(commandVal).slice(0, 200)}`
+              : `tool ${tool} returned`,
+          path: pathVal,
+          command: commandVal,
         },
       });
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error(`cognit plugin: failed to emit observation: ${String(err)}`);
+      console.error(`cognit plugin: failed to emit raw_tool_signal: ${String(err)}`);
     }
   },
 });

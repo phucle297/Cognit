@@ -34,16 +34,91 @@ export const formatIso = (iso: string | null | undefined): string => {
   );
 };
 
+/** D-M5-00: raw event type → semantic family badge label. */
+const EVENT_FAMILY_LABELS: Readonly<Record<string, string>> = {
+  observation_recorded: "Observe",
+  action_recorded: "Action",
+  verification_started: "Verify",
+  verification_passed: "Verify",
+  verification_failed: "Verify",
+  verification_errored: "Verify",
+  verification_cancelled: "Verify",
+  verification_rerun: "Verify",
+  decision_proposed: "Decide",
+  decision_accepted: "Decide",
+  decision_rejected: "Decide",
+  decision_superseded: "Decide",
+  conclusion_proposed: "Conclude",
+  conclusion_verified: "Conclude",
+  conclusion_rejected: "Conclude",
+  hypothesis_created: "Hypothesis",
+  hypothesis_weakened: "Hypothesis",
+  hypothesis_rejected: "Hypothesis",
+  hypothesis_promoted: "Hypothesis",
+  hypothesis_ranked: "Hypothesis",
+  actor_registered: "System",
+  session_created: "System",
+  snapshot_created: "System",
+  project_created: "System",
+};
+
+/**
+ * Map a raw event `type`/`kind` to a short semantic family label
+ * (Observe / Action / Verify / …). Unknown types become Title Case
+ * of the snake_case name.
+ */
+export const eventFamilyLabel = (kind: string | null | undefined): string => {
+  if (!kind) return "—";
+  const mapped = EVENT_FAMILY_LABELS[kind];
+  if (mapped) return mapped;
+  return kind
+    .split("_")
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+};
+
+/**
+ * Human label for `action_kind` (`applied_fix` → "Applied fix").
+ * Sentence-style: first word capitalised, rest lower.
+ */
+export const formatActionKindLabel = (kind: string): string => {
+  const parts = kind.split("_").filter(Boolean);
+  if (parts.length === 0) return kind;
+  return parts
+    .map((w, i) =>
+      i === 0
+        ? w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+        : w.toLowerCase(),
+    )
+    .join(" ");
+};
+
 /**
  * Summarise an event payload (object) for the Timeline row.
- * Picks the first scalar field after `kind` and renders
- * `key: value`; otherwise returns a short JSON preview.
+ *
+ * Prefer:
+ * - `action_kind` + optional `text` → "Applied fix: …"
+ * - `text` alone → "text: …"
+ * - otherwise first scalar field after `kind`/`id`.
  */
 export const formatPayloadSummary = (payload: unknown): string => {
   if (payload === null || payload === undefined) return "";
   if (typeof payload === "string") return payload;
   if (typeof payload !== "object") return String(payload);
   const obj = payload as Record<string, unknown>;
+
+  const actionKind = typeof obj.action_kind === "string" ? obj.action_kind : null;
+  const text = typeof obj.text === "string" ? obj.text : null;
+  if (actionKind) {
+    const label = formatActionKindLabel(actionKind);
+    if (text && text.length > 0) return `${label}: ${text}`;
+    return label;
+  }
+  if (text && text.length > 0) {
+    return `text: ${text}`;
+  }
+
   const keys = Object.keys(obj);
   const summaryKey = keys.find((k) => k !== "kind" && k !== "id");
   if (!summaryKey) return JSON.stringify(payload).slice(0, 80);

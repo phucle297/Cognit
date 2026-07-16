@@ -20,6 +20,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findProjectRoot } from "../paths.js";
+import { drainInboxOnce } from "../inbox-drain.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -182,6 +183,14 @@ export function registerDashboard(program: Command): void {
         );
         process.exitCode = 2;
         return;
+      }
+
+      // Flush pending inbox files so the UI is not empty on first paint
+      // (hooks write to inbox; API reads SQLite only).
+      try {
+        await drainInboxOnce(root);
+      } catch {
+        /* best-effort; dashboard still starts */
       }
 
       const tsxCandidates = [

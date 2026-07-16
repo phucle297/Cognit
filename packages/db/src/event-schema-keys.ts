@@ -104,7 +104,10 @@ const _everySchemaKeyIsKnown: SchemaKeys extends KnownEventType ? true : false =
 //    `PAYLOAD_SCHEMAS_CURRENT` lookup at write time.
 //    Drift direction: canonical set has a pre-v1.2.0 state event the
 //    schema map forgot.
-type _PreV1_2_StateEventType = Exclude<StateEventType, "hypothesis_ranked">;
+type _PreV1_2_StateEventType = Exclude<
+  StateEventType,
+  "hypothesis_ranked" | "action_recorded"
+>;
 const _everyStateTypeHasSchema: _PreV1_2_StateEventType extends SchemaKeys ? true : false = true;
 
 // 3. Combined tuple exposed so a future test can introspect both

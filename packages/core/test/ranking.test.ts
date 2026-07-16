@@ -161,6 +161,7 @@ const buildState = (
     current_conclusion_id: null,
     current_verification_id: null,
     observations: extra.observations ?? [],
+    actions: [],
     findings: [],
     hypotheses,
     theories: new Map(),

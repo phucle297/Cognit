@@ -5,16 +5,18 @@
 # Spins up /tmp/cognit-smoke-codex with a .cognit/inbox/ tree and
 # a .cognit/current-session pointer, pipes a mocked PreToolUse JSON
 # payload (matching the shape Codex CLI emits) into codex-pre.sh,
-# and asserts the resulting envelope file matches the v1.2.0
-# contract for the Codex pre-hook producer (AC48):
+# and asserts the resulting envelope file matches the v1.3.0
+# raw_tool_signal contract for the Codex pre-hook producer:
 #
-#   - type       = "hypothesis_created"
-#   - title      = <tool name>     (e.g. "edit")
-#   - text       contains the file path
-#   - version    = "1.2.0"
-#   - actor_name = "codex"
-#   - id         present
-#   - file mode  = 0o600
+#   - type         = "raw_tool_signal"
+#   - version      = "1.3.0"
+#   - payload.phase = "pre"
+#   - payload.tool  = "edit"
+#   - text         contains the file path
+#   - payload.path  = file path
+#   - actor_name   = "codex+..."
+#   - id           present
+#   - file mode    = 0o600
 #
 # Also guards the known-files gate by pre-seeding
 # $HOME/.cognit/known-files.txt with a *different* file path (the
@@ -71,35 +73,49 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-# 1. type = "hypothesis_created"
+# 1. type = "raw_tool_signal"
 type="$(jq -r '.type' "$envelope")"
-if [[ "$type" != "hypothesis_created" ]]; then
-  echo "FAIL: expected type=hypothesis_created, got type=$type (file: $envelope)" >&2
+if [[ "$type" != "raw_tool_signal" ]]; then
+  echo "FAIL: expected type=raw_tool_signal, got type=$type (file: $envelope)" >&2
   exit 1
 fi
 
-# 2. title = <tool name> (the script's `title` is set to `$tool`)
-title="$(jq -r '.payload.title' "$envelope")"
-if [[ "$title" != "edit" ]]; then
-  echo "FAIL: expected payload.title=edit, got payload.title=$title" >&2
+# 2. payload.tool = edit
+tool="$(jq -r '.payload.tool' "$envelope")"
+if [[ "$tool" != "edit" ]]; then
+  echo "FAIL: expected payload.tool=edit, got payload.tool=$tool" >&2
   exit 1
 fi
 
-# 3. text contains the file path
+# 3. phase = pre
+phase="$(jq -r '.payload.phase' "$envelope")"
+if [[ "$phase" != "pre" ]]; then
+  echo "FAIL: expected payload.phase=pre, got payload.phase=$phase" >&2
+  exit 1
+fi
+
+# 4. text contains the file path
 text="$(jq -r '.payload.text' "$envelope")"
 if [[ "$text" != *"/tmp/codex-target.ts"* ]]; then
   echo "FAIL: expected payload.text to contain '/tmp/codex-target.ts', got payload.text=$text" >&2
   exit 1
 fi
 
-# 4. version = 1.2.0
-version="$(jq -r '.version' "$envelope")"
-if [[ "$version" != "1.2.0" ]]; then
-  echo "FAIL: expected version=1.2.0, got version=$version" >&2
+# 5. path field set
+path="$(jq -r '.payload.path // ""' "$envelope")"
+if [[ "$path" != "/tmp/codex-target.ts" ]]; then
+  echo "FAIL: expected payload.path=/tmp/codex-target.ts, got path=$path" >&2
   exit 1
 fi
 
-# 5. actor_name = <model>+<hash> (default family codex when no MODEL env)
+# 6. version = 1.3.0
+version="$(jq -r '.version' "$envelope")"
+if [[ "$version" != "1.3.0" ]]; then
+  echo "FAIL: expected version=1.3.0, got version=$version" >&2
+  exit 1
+fi
+
+# 7. actor_name = <model>+<hash> (default family codex when no MODEL env)
 actor_name="$(jq -r '.actor_name' "$envelope")"
 expected_actor="codex+${SESSION: -6}"
 if [[ "$actor_name" != "$expected_actor" ]]; then
@@ -107,19 +123,19 @@ if [[ "$actor_name" != "$expected_actor" ]]; then
   exit 1
 fi
 
-# 6. id present
+# 8. id present
 id="$(jq -r '.id // ""' "$envelope")"
 if [[ -z "$id" || "$id" == "null" ]]; then
   echo "FAIL: id field missing or empty" >&2
   exit 1
 fi
 
-# 7. file mode = 0o600
+# 9. file mode = 0o600
 mode="$(stat -c '%a' "$envelope" 2>/dev/null || stat -f '%Lp' "$envelope")"
 if [[ "$mode" != "600" ]]; then
   echo "FAIL: expected mode 0o600, got 0o$mode" >&2
   exit 1
 fi
 
-echo "PASS: codex-pre.sh emitted valid envelope at $envelope (type=$type, title=$title, text=$text, version=$version, actor_name=$actor_name, id=$id, mode=0o$mode)"
+echo "PASS: codex-pre.sh emitted valid envelope at $envelope (type=$type, phase=$phase, tool=$tool, text=$text, version=$version, actor_name=$actor_name, id=$id, mode=0o$mode)"
 exit 0

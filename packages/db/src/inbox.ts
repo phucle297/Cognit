@@ -155,13 +155,21 @@ export const makeInboxWatcher = (config: InboxWatcherConfig) =>
           return;
         }
         const result = ingestResult.right;
+        // Prefer first domain event id; fall back to synthetic/last
+        // event (envelope id on skip) so processed/ rename stays stable.
+        const processedId = result.events?.[0]?.id ?? result.event.id;
         yield* logger.log(
           "info",
-          { eventId: result.event.id, sessionId: result.event.session_id },
-          "inbox: appended",
+          {
+            eventId: processedId,
+            sessionId: result.event.session_id,
+            ...(result.skipped === true ? { skipped: true } : {}),
+            ...(result.events !== undefined ? { eventCount: result.events.length } : {}),
+          },
+          result.skipped === true ? "inbox: ingested (pipeline skip)" : "inbox: appended",
         );
         yield* Effect.tryPromise({
-          try: () => fs.rename(filePath, path.join(config.processedDir, `${result.event.id}.json`)),
+          try: () => fs.rename(filePath, path.join(config.processedDir, `${processedId}.json`)),
           catch: (renameErr) =>
             new InboxError({
               file: filePath,

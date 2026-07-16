@@ -9,7 +9,7 @@
  */
 import type { JSX } from "react";
 import { Badge } from "@/shared/ui/badge";
-import { formatIso, formatPayloadSummary, formatUlid } from "@/lib/format";
+import { eventFamilyLabel, formatIso, formatPayloadSummary, formatUlid } from "@/lib/format";
 
 export type EventRowShape = {
   id: string;
@@ -34,8 +34,8 @@ export const EventRow = ({ event }: EventRowProps): JSX.Element => {
       <span className="font-mono text-xs text-muted-foreground">{formatUlid(event.id)}</span>
       <span className="font-mono text-xs text-muted-foreground">{formatIso(event.ts)}</span>
       <span>
-        <Badge variant="outline" data-testid="event-kind">
-          {event.kind}
+        <Badge variant="outline" data-testid="event-kind" title={event.kind}>
+          {eventFamilyLabel(event.kind)}
         </Badge>
       </span>
       <span className="truncate text-muted-foreground">

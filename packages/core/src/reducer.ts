@@ -173,6 +173,34 @@ export const applyEvent = (state: SessionState, event: ReducerEvent): SessionSta
       };
       return { ...next, observations: [...state.observations, obs] };
     }
+    case "action_recorded": {
+      // D-M5-00: engineering work with meaning (tool is evidence only).
+      const text = getString(payload, "text") ?? "";
+      const kindRaw = getString(payload, "action_kind") ?? "other";
+      const allowed = new Set([
+        "applied_fix",
+        "refactored",
+        "generated",
+        "configured",
+        "documented",
+        "dependency_change",
+        "other",
+      ]);
+      const action_kind = (allowed.has(kindRaw) ? kindRaw : "other") as import("./state.js").ActionKind;
+      const act = {
+        id: event.id,
+        text,
+        action_kind,
+        created_at: event.created_at,
+        last_event_id: event.id,
+      };
+      return {
+        ...next,
+        actions: [...state.actions, act],
+        last_event_id: event.id,
+        last_event_at: event.created_at,
+      };
+    }
     case "finding_created": {
       const text = getString(payload, "text") ?? "";
       const related = getStringArray(payload, "related_observation_ids");

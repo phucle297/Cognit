@@ -16,6 +16,7 @@ export const STATE_EVENT_TYPES_TUPLE = [
   "session_paused",
   "session_closed",
   "observation_recorded",
+  "action_recorded",
   "finding_created",
   "hypothesis_created",
   "hypothesis_weakened",
@@ -53,6 +54,7 @@ export const NON_STATE_EVENT_TYPES_TUPLE = [
   "constraint_rule_added",
   "constraint_rule_applied",
   "snapshot_created",
+  "raw_tool_signal",
 ] as const;
 
 /** Union of event types the reducer actively folds into state. */

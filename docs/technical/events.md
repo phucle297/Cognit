@@ -53,7 +53,17 @@ The wrap producer emits the four canonical types:
 
 Hooks may also emit:
 
-- `hypothesis_created`     — emitted pre-tool by Claude Code / Codex / Gemini.
+- `hypothesis_created`     — **legacy** pre-tool (being replaced by semantic pipeline).
+- `raw_tool_signal`        — D-M5-00 transport: raw host tool capture (not a timeline domain type).
+- `action_recorded`        — D-M5-00: engineering work with meaning; tool is evidence only.
+
+### Semantic pipeline (D-M5-00)
+
+Domain event type is derived from **meaning**, not tool name:
+
+`raw_tool_signal → normalize → classify → produce → append`
+
+See `plan/designs/D-M5-00-semantic-events.md` and `packages/core/src/semantics/`.
 
 Each type has its own payload schema; see
 `packages/db/src/event-schema.ts` for the authoritative Effect Schema

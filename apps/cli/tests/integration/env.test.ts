@@ -19,7 +19,8 @@ describe("cognit env --shell", () => {
   it("prints an eval-able export line for COGNIT_INBOX", () => {
     const r = runCli(tmp, ["env", "--shell"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe(`export COGNIT_INBOX="${tmp}/.cognit/inbox"\n`);
+    expect(r.stdout).toContain(`export COGNIT_INBOX="${tmp}/.cognit/inbox"\n`);
+    expect(r.stdout).toContain(`export COGNIT_REALTIME="1"\n`);
   });
 
   it("does not create .cognit/ as a side effect", () => {
@@ -64,7 +65,8 @@ describe("cognit env --root <path>", () => {
     fs.mkdirSync(otherRoot, { recursive: true });
     const r = runCli(otherRoot, ["env", "--root", otherRoot, "--shell"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toBe(`export COGNIT_INBOX="${otherRoot}/.cognit/inbox"\n`);
+    expect(r.stdout).toContain(`export COGNIT_INBOX="${otherRoot}/.cognit/inbox"\n`);
+    expect(r.stdout).toContain(`export COGNIT_REALTIME="1"\n`);
   });
 
   it("subcommand-level --root works after the positional KEY", () => {
@@ -85,13 +87,13 @@ describe("cognit env --root <path>", () => {
 });
 
 describe("cognit env COGNIT_REALTIME", () => {
-  it("is omitted from --shell when no cognit.yaml exists", () => {
+  it("defaults ON (exports 1) when no cognit.yaml exists", () => {
     const r = runCli(tmp, ["env", "--shell"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).not.toContain("COGNIT_REALTIME");
+    expect(r.stdout).toContain('export COGNIT_REALTIME="1"\n');
   });
 
-  it("is omitted when inbox.realtime is false/absent", () => {
+  it("exports COGNIT_REALTIME=0 when inbox.realtime is false", () => {
     const cognitDir = path.join(tmp, ".cognit");
     fs.mkdirSync(cognitDir, { recursive: true });
     fs.writeFileSync(
@@ -101,7 +103,7 @@ describe("cognit env COGNIT_REALTIME", () => {
     );
     const r = runCli(tmp, ["env", "--shell"]);
     expect(r.status).toBe(0);
-    expect(r.stdout).not.toContain("COGNIT_REALTIME");
+    expect(r.stdout).toContain('export COGNIT_REALTIME="0"\n');
   });
 
   it("exports COGNIT_REALTIME=1 when inbox.realtime is true", () => {
@@ -117,7 +119,7 @@ describe("cognit env COGNIT_REALTIME", () => {
     expect(r.stdout).toContain('export COGNIT_REALTIME="1"\n');
   });
 
-  it("prints 1 for KEY form when realtime is true, empty when false", () => {
+  it("prints 1 for KEY form when realtime is true/default, 0 when false", () => {
     const cognitDir = path.join(tmp, ".cognit");
     fs.mkdirSync(cognitDir, { recursive: true });
     fs.writeFileSync(
@@ -136,7 +138,7 @@ describe("cognit env COGNIT_REALTIME", () => {
     );
     const off = runCli(tmp, ["env", "COGNIT_REALTIME"]);
     expect(off.status).toBe(0);
-    expect(off.stdout).toBe("\n");
+    expect(off.stdout).toBe("0\n");
   });
 });
 

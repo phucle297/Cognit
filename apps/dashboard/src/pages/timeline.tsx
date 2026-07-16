@@ -28,7 +28,7 @@ import type { StatusKey } from "@/shared/config/status";
 import { PauseSseButton } from "@/components/PauseSseButton";
 import type { EventRowShape } from "@/components/EventRow";
 import { normalizeEvent, normalizeEvents } from "@/lib/normalize-event";
-import { formatIso, formatPayloadSummary, formatUlid } from "@/lib/format";
+import { eventFamilyLabel, formatIso, formatPayloadSummary, formatUlid } from "@/lib/format";
 import {
   RejectionSheet,
   type RejectionSummary,
@@ -146,6 +146,11 @@ export const TimelinePage = (): JSX.Element => {
       return false;
     };
     return allEvents.filter((e) => {
+      // D-M5-00: raw_tool_signal is transport noise — hide unless
+      // the user explicitly selects that kind chip.
+      if (e.kind === "raw_tool_signal" && !selectedKinds.includes("raw_tool_signal")) {
+        return false;
+      }
       if (!matchesKind(e.kind)) return false;
       if (selectedActors.length > 0 && !selectedActors.includes(e.actor ?? "")) return false;
       if (actorLower.length > 0 && !(e.actor ?? "").toLowerCase().includes(actorLower)) return false;
@@ -231,8 +236,8 @@ export const TimelinePage = (): JSX.Element => {
       header: "Type",
       width: "16rem",
       render: (e) => (
-        <Badge variant="neutral" data-testid="timeline-event-kind">
-          {e.kind}
+        <Badge variant="neutral" data-testid="timeline-event-kind" title={e.kind}>
+          {eventFamilyLabel(e.kind)}
         </Badge>
       ),
     },
@@ -245,7 +250,9 @@ export const TimelinePage = (): JSX.Element => {
     {
       key: "summary",
       header: "Summary",
-      render: (e) => <span className="text-sm text-muted-foreground">{formatPayloadSummary(e.payload)}</span>,
+      render: (e) => (
+        <span className="text-sm text-muted-foreground">{formatPayloadSummary(e.payload)}</span>
+      ),
     },
     {
       // Phase B.4 row action — only `hypothesis_rejected` rows get

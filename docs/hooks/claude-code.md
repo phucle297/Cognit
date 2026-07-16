@@ -57,10 +57,10 @@ blocks the call.
 
 ## Flow
 
-| Host event   | Script      | Cognit envelope       |
-|--------------|-------------|------------------------|
-| `PreToolUse` | `cc-pre.sh` | `hypothesis_created`   |
-| `PostToolUse`| `cc-post.sh`| `observation_recorded` |
+| Host event   | Script      | Cognit envelope                          |
+|--------------|-------------|------------------------------------------|
+| `PreToolUse` | `cc-pre.sh` | `raw_tool_signal` (phase `pre`)          |
+| `PostToolUse`| `cc-post.sh`| `raw_tool_signal` (phase `post`)         |
 
 Both scripts follow the **Common behavior** algorithms in
 [`docs/hooks/README.md`](./README.md#common-behavior):
@@ -76,33 +76,46 @@ section.
 
 ## Payload
 
-`observation_recorded` payload (PostToolUse):
+Hooks emit evidence-only `raw_tool_signal` (v1.3.0). Semantic
+classification into observation/action happens at ingest (Phase 2b),
+not in the bash producers.
+
+`raw_tool_signal` payload (PostToolUse, phase `post`):
 
 ```json
 {
-  "text": "tool Edit returned",
+  "phase": "post",
+  "host": "claude-code",
   "tool": "Edit",
   "tool_input": {...},
-  "tool_response": {...}
+  "tool_response": {...},
+  "text": "tool Edit → /tmp/foo.ts",
+  "path": "/tmp/foo.ts",
+  "command": null
 }
 ```
 
-`hypothesis_created` payload (PreToolUse):
+`raw_tool_signal` payload (PreToolUse, phase `pre`):
 
 ```json
 {
-  "title": "Edit",
-  "text": "agent intends to Edit /tmp/foo.ts"
+  "phase": "pre",
+  "host": "claude-code",
+  "tool": "Edit",
+  "tool_input": {...},
+  "text": "agent intends to Edit /tmp/foo.ts",
+  "path": "/tmp/foo.ts",
+  "command": null
 }
 ```
 
-Canonical envelope (v1.2.0 FLAT — see [`docs/technical/events.md`](../technical/events.md)
+Canonical envelope (v1.3.0 FLAT — see [`docs/technical/events.md`](../technical/events.md)
 for the full schema):
 
 ```json
 {
-  "version": "1.2.0",
-  "type": "observation_recorded",
+  "version": "1.3.0",
+  "type": "raw_tool_signal",
   "session_id": "01HXY...ULID",
   "actor_name": "claude-code",
   "actor_type": "worker",

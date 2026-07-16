@@ -1057,6 +1057,7 @@ describe("reducer — internal coverage of all event types", () => {
       "session_paused",
       "session_closed",
       "observation_recorded",
+      "action_recorded",
       "finding_created",
       "hypothesis_created",
       "hypothesis_weakened",
@@ -1097,6 +1098,7 @@ describe("reducer — internal coverage of all event types", () => {
       "constraint_rule_added",
       "constraint_rule_applied",
       "snapshot_created",
+      "raw_tool_signal",
     ]) {
       expect(_internal.NON_STATE_EVENT_TYPES.has(t), `non-state event ${t}`).toBe(true);
     }

@@ -102,14 +102,20 @@ const claudeCode: ToolSpec = {
   producers: [
     { src: path.join(HOOKS_SRC, "claude-code", "cc-post.sh"), dst: "cc-post.sh", mode: 0o755 },
     { src: path.join(HOOKS_SRC, "claude-code", "cc-pre.sh"), dst: "cc-pre.sh", mode: 0o755 },
+    { src: path.join(HOOKS_SRC, "claude-code", "cc-drain.sh"), dst: "cc-drain.sh", mode: 0o755 },
   ],
   settingsPath: path.join(os.homedir(), ".claude", "settings.json"),
   emptySettings: () => ({}),
-  alreadyWired: (settings) => hasCognitHook(settings, "PostToolUse", "cc-post.sh"),
+  alreadyWired: (settings) =>
+    hasCognitHook(settings, "PostToolUse", "cc-post.sh") &&
+    hasCognitHook(settings, "Stop", "cc-drain.sh") &&
+    hasCognitHook(settings, "SessionEnd", "cc-drain.sh"),
   merge: (settings) => {
     const hooks = asObject(settings["hooks"]) ?? {};
     const post = asArray(hooks["PostToolUse"]) ?? [];
     const pre = asArray(hooks["PreToolUse"]) ?? [];
+    const stop = asArray(hooks["Stop"]) ?? [];
+    const sessionEnd = asArray(hooks["SessionEnd"]) ?? [];
     if (!hasCognitHook({ hooks: { PostToolUse: post } }, "PostToolUse", "cc-post.sh")) {
       // Broad matcher: Claude tools + Grok aliases (Grok scans ~/.claude
       // settings and maps Bash↔run_terminal_command etc.). Empty/.* = all.
@@ -124,7 +130,28 @@ const claudeCode: ToolSpec = {
         hooks: [{ type: "command", command: "~/.cognit/hooks/cc-pre.sh" }],
       });
     }
-    return { ...settings, hooks: { ...hooks, PostToolUse: post, PreToolUse: pre } };
+    // End-of-turn / end-of-session force-drain so dashboard sees events
+    // without a manual `cognit inbox --process`.
+    if (!hasCognitHook({ hooks: { Stop: stop } }, "Stop", "cc-drain.sh")) {
+      stop.push({
+        hooks: [{ type: "command", command: "~/.cognit/hooks/cc-drain.sh" }],
+      });
+    }
+    if (!hasCognitHook({ hooks: { SessionEnd: sessionEnd } }, "SessionEnd", "cc-drain.sh")) {
+      sessionEnd.push({
+        hooks: [{ type: "command", command: "~/.cognit/hooks/cc-drain.sh" }],
+      });
+    }
+    return {
+      ...settings,
+      hooks: {
+        ...hooks,
+        PostToolUse: post,
+        PreToolUse: pre,
+        Stop: stop,
+        SessionEnd: sessionEnd,
+      },
+    };
   },
 };
 
@@ -222,20 +249,29 @@ const grok: ToolSpec = {
   producers: [
     { src: path.join(HOOKS_SRC, "claude-code", "cc-post.sh"), dst: "cc-post.sh", mode: 0o755 },
     { src: path.join(HOOKS_SRC, "claude-code", "cc-pre.sh"), dst: "cc-pre.sh", mode: 0o755 },
+    { src: path.join(HOOKS_SRC, "claude-code", "cc-drain.sh"), dst: "cc-drain.sh", mode: 0o755 },
   ],
   // Grok loads global hooks from ~/.grok/hooks/*.json (always trusted).
   settingsPath: path.join(os.homedir(), ".grok", "hooks", "cognit.json"),
   emptySettings: () => ({ hooks: {} }),
   alreadyWired: (settings) =>
-    hasCognitHook(settings, "PostToolUse", "cc-post.sh") ||
-    hasCognitHook(settings, "post_tool_use", "cc-post.sh"),
+    (hasCognitHook(settings, "PostToolUse", "cc-post.sh") ||
+      hasCognitHook(settings, "post_tool_use", "cc-post.sh")) &&
+    (hasCognitHook(settings, "Stop", "cc-drain.sh") ||
+      hasCognitHook(settings, "stop", "cc-drain.sh")) &&
+    (hasCognitHook(settings, "SessionEnd", "cc-drain.sh") ||
+      hasCognitHook(settings, "session_end", "cc-drain.sh")),
   merge: (settings) => {
     const hooks = asObject(settings["hooks"]) ?? {};
     const post = asArray(hooks["PostToolUse"]) ?? asArray(hooks["post_tool_use"]) ?? [];
     const pre = asArray(hooks["PreToolUse"]) ?? asArray(hooks["pre_tool_use"]) ?? [];
+    const stop = asArray(hooks["Stop"]) ?? asArray(hooks["stop"]) ?? [];
+    const sessionEnd = asArray(hooks["SessionEnd"]) ?? asArray(hooks["session_end"]) ?? [];
     // Prefer PascalCase keys (Grok accepts both; Claude-compat shape).
     const nextPost = [...post];
     const nextPre = [...pre];
+    const nextStop = [...stop];
+    const nextSessionEnd = [...sessionEnd];
     if (!nextPost.some((entry) => entryReferencesScript(entry, "cc-post.sh"))) {
       nextPost.push({
         matcher: ".*",
@@ -248,12 +284,25 @@ const grok: ToolSpec = {
         hooks: [{ type: "command", command: "~/.cognit/hooks/cc-pre.sh" }],
       });
     }
+    // Force-drain when a turn or session ends (no matcher — lifecycle events reject matchers).
+    if (!nextStop.some((entry) => entryReferencesScript(entry, "cc-drain.sh"))) {
+      nextStop.push({
+        hooks: [{ type: "command", command: "~/.cognit/hooks/cc-drain.sh" }],
+      });
+    }
+    if (!nextSessionEnd.some((entry) => entryReferencesScript(entry, "cc-drain.sh"))) {
+      nextSessionEnd.push({
+        hooks: [{ type: "command", command: "~/.cognit/hooks/cc-drain.sh" }],
+      });
+    }
     return {
       ...settings,
       hooks: {
         ...hooks,
         PostToolUse: nextPost,
         PreToolUse: nextPre,
+        Stop: nextStop,
+        SessionEnd: nextSessionEnd,
       },
     };
   },

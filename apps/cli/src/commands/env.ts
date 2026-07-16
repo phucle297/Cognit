@@ -22,23 +22,24 @@ const readCurrentSession = (projectRoot: string): string | null => {
 };
 
 /**
- * D-M4-00 §4.1: export `COGNIT_REALTIME=1` only when
- * `inbox.realtime: true` in cognit.yaml. Sync + lightweight (no full
- * Schema validation) so `cognit env` stays safe before `init` and
- * stays fast for shell bootstrap. Omitted when false/missing so
- * hooks default to lazy drain only.
+ * D-M4-00 §4.1 + agent OOB: export `COGNIT_REALTIME` for shell bootstrap.
+ * Default ON (hooks self-drain without requiring eval). Explicit
+ * `inbox.realtime: false` exports `"0"` so producers can opt out.
+ * Missing yaml / missing field → `"1"`.
  *
- * Hooks gate fire-and-forget `cognit inbox --process` on this var —
- * never parse yaml themselves (latency + host constraints).
+ * Hooks also self-resolve yaml when this env is unset (agent hosts
+ * rarely run `eval "$(cognit env --shell)"`).
  */
 const readRealtime = (projectRoot: string): string | null => {
   const configPath = projectPaths(projectRoot).config;
   try {
     const text = fs.readFileSync(configPath, "utf8");
     const parsed = YAML.parse(text) as { inbox?: { realtime?: unknown } } | null;
-    return parsed?.inbox?.realtime === true ? "1" : null;
+    if (parsed?.inbox?.realtime === false) return "0";
+    return "1";
   } catch {
-    return null;
+    // No yaml yet (pre-init): still default ON for OOB agent capture.
+    return "1";
   }
 };
 
@@ -53,9 +54,8 @@ const readRealtime = (projectRoot: string): string | null => {
  * and is omitted when no session has been created yet (so `eval
  * "$(cognit env --shell)"` never exports an empty value).
  *
- * `COGNIT_REALTIME` is dynamic: exported as `"1"` only when
- * `inbox.realtime: true` in cognit.yaml (D-M4-00 §4.1). Omitted
- * otherwise so hooks stay on the lazy-drain path by default.
+ * `COGNIT_REALTIME` is dynamic: `"1"` by default (agent OOB drain);
+ * `"0"` only when `inbox.realtime: false` in cognit.yaml.
  *
  * Add new vars by appending a `KEY -> (root) => value` entry. The
  * `env --shell`, `env` table, and `env KEY` forms all read this

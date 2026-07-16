@@ -5,10 +5,13 @@
 # Spins up /tmp/cognit-smoke with a .cognit/inbox/ tree and a
 # .cognit/current-session pointer, pipes a mocked PostToolUse JSON
 # payload into cc-post.sh, and asserts the resulting envelope file
-# matches the v1.2.0 contract:
+# matches the v1.3.0 raw_tool_signal contract:
 #
-#   - version     = "1.2.0"
-#   - actor_name  = "claude-code"
+#   - version     = "1.3.0"
+#   - type        = "raw_tool_signal"
+#   - payload.phase = "post"
+#   - payload.host  = "claude-code"
+#   - actor_name  = "claude+..."
 #   - id          present (ULID-shaped, non-empty)
 #   - file mode   = 0o600
 #
@@ -61,14 +64,21 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-# 1. version = 1.2.0
+# 1. version = 1.3.0
 version="$(jq -r '.version' "$envelope")"
-if [[ "$version" != "1.2.0" ]]; then
-  echo "FAIL: expected version=1.2.0, got version=$version (file: $envelope)" >&2
+if [[ "$version" != "1.3.0" ]]; then
+  echo "FAIL: expected version=1.3.0, got version=$version (file: $envelope)" >&2
   exit 1
 fi
 
-# 2. actor_name = <model>+<session-hash6> (default model family "claude")
+# 2. type = raw_tool_signal
+type="$(jq -r '.type' "$envelope")"
+if [[ "$type" != "raw_tool_signal" ]]; then
+  echo "FAIL: expected type=raw_tool_signal, got type=$type" >&2
+  exit 1
+fi
+
+# 3. actor_name = <model>+<session-hash6> (default model family "claude")
 actor_name="$(jq -r '.actor_name' "$envelope")"
 expected_actor="claude+${SESSION: -6}"
 if [[ "$actor_name" != "$expected_actor" ]]; then
@@ -76,21 +86,21 @@ if [[ "$actor_name" != "$expected_actor" ]]; then
   exit 1
 fi
 
-# 3. id present and non-empty
+# 4. id present and non-empty
 id="$(jq -r '.id // ""' "$envelope")"
 if [[ -z "$id" || "$id" == "null" ]]; then
   echo "FAIL: id field missing or empty" >&2
   exit 1
 fi
 
-# 4. file mode = 0o600
+# 5. file mode = 0o600
 mode="$(stat -c '%a' "$envelope" 2>/dev/null || stat -f '%Lp' "$envelope")"
 if [[ "$mode" != "600" ]]; then
   echo "FAIL: expected mode 0o600, got 0o$mode" >&2
   exit 1
 fi
 
-# 5. session_id matches our pre-seeded sticky pointer (regression
+# 6. session_id matches our pre-seeded sticky pointer (regression
 #    for "we don't trust the agent's session id").
 session_id="$(jq -r '.session_id' "$envelope")"
 if [[ "$session_id" != "$SESSION" ]]; then
@@ -98,20 +108,36 @@ if [[ "$session_id" != "$SESSION" ]]; then
   exit 1
 fi
 
-
-# 6. tool name extracted from tool_name
+# 7. payload phase / host / tool
+phase="$(jq -r '.payload.phase // ""' "$envelope")"
+if [[ "$phase" != "post" ]]; then
+  echo "FAIL: expected payload.phase=post, got phase=$phase" >&2
+  exit 1
+fi
+host="$(jq -r '.payload.host // ""' "$envelope")"
+if [[ "$host" != "claude-code" ]]; then
+  echo "FAIL: expected payload.host=claude-code, got host=$host" >&2
+  exit 1
+fi
 tool="$(jq -r '.payload.tool // ""' "$envelope")"
 if [[ "$tool" != "Edit" ]]; then
   echo "FAIL: expected payload.tool=Edit, got tool=$tool" >&2
   exit 1
 fi
 
-# 7. summary text mentions tool / path
+# 8. path from tool_input.file_path
+path="$(jq -r '.payload.path // ""' "$envelope")"
+if [[ "$path" != "/tmp/example.ts" ]]; then
+  echo "FAIL: expected payload.path=/tmp/example.ts, got path=$path" >&2
+  exit 1
+fi
+
+# 9. summary text mentions tool / path
 ptext="$(jq -r '.payload.text // ""' "$envelope")"
 if [[ "$ptext" != *Edit* ]]; then
   echo "FAIL: expected payload.text to mention Edit, got text=$ptext" >&2
   exit 1
 fi
 
-echo "PASS: cc-post.sh emitted valid envelope at $envelope (version=$version, actor_name=$actor_name, id=$id, mode=0o$mode)"
+echo "PASS: cc-post.sh emitted valid envelope at $envelope (version=$version, type=$type, phase=$phase, actor_name=$actor_name, id=$id, mode=0o$mode)"
 exit 0

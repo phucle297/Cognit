@@ -1181,3 +1181,287 @@ describe("SessionService — constraint chokepoint (phase 3c)", () => {
     );
   });
 });
+
+// ─── D-M5-00 Phase 2b: ingest semantic pipeline ───────────────────
+
+/**
+ * Crockford base32 ULIDs for envelope/session ids in ingest tests.
+ * UuidTest IDs use base36 and can include lowercase letters that fail
+ * EnvelopeSchema's ULID pattern — seed real ULIDs instead.
+ */
+const INGEST_PROJECT = "01PRJ0000000000ABCDEFGHJK0";
+const INGEST_SESSION = "01SESS000000000ABCDEFGHJK0";
+const INGEST_EVENT_WRITE = "01WRTE0000000000ABCDEFGHJK";
+const INGEST_EVENT_READ = "01READ0000000000ABCDEFGHJK";
+const INGEST_EVENT_TODO = "01TDWR0000000000ABCDEFGHJK";
+const INGEST_EVENT_LEGACY = "01PAST0000000000ABCDEFGHJK";
+const INGEST_EVENT_VERIFY = "01VRFY0000000000ABCDEFGHJK";
+const INGEST_EVENT_CLI = "01CMAN0000000000ABCDEFGHJK";
+
+const seedIngestSession = (
+  conn: Context.Tag.Service<typeof DbConnection>,
+  goal: string,
+): { projectId: string; sessionId: string } => {
+  const projectId = INGEST_PROJECT;
+  const sessionId = INGEST_SESSION;
+  const now = new Date().toISOString();
+  conn.handle.run(`INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)`, [
+    projectId,
+    "ingest-test",
+    now,
+  ]);
+  conn.handle.run(
+    `INSERT INTO sessions (id, project_id, goal, status, created_at) VALUES (?, ?, ?, ?, ?)`,
+    [sessionId, projectId, goal, "active", now],
+  );
+  return { projectId, sessionId };
+};
+
+describe("SessionService.ingest (semantic pipeline)", () => {
+  let dbPath = "";
+  beforeEach(async () => {
+    dbPath = await withTempDb();
+  });
+
+  const runWithLayer = <A, E, R>(eff: Effect.Effect<A, E, R>): Promise<A> =>
+    Effect.runPromise(
+      eff.pipe(Effect.provide(makeTestLayer(dbPath))) as Effect.Effect<A, E, never>,
+    );
+
+  const domainTypes = (conn: Context.Tag.Service<typeof DbConnection>, sessionId: string) =>
+    conn.handle
+      .all<{ type: string }>(
+        "SELECT type FROM events WHERE session_id = ? AND type NOT IN ('session_created', 'actor_registered') ORDER BY created_at ASC, id ASC",
+        [sessionId],
+      )
+      .map((r) => r.type);
+
+  it("raw_tool_signal write → action_recorded (not the transport type)", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const { projectId, sessionId } = seedIngestSession(conn, "scaffold module");
+
+        const r = yield* service.ingest({
+          projectId,
+          envelope: {
+            version: "1.3.0",
+            type: "raw_tool_signal",
+            session_id: sessionId,
+            actor_name: "grok",
+            actor_type: "worker",
+            id: INGEST_EVENT_WRITE,
+            source: { tool: "grok", command: "PostToolUse" },
+            payload: {
+              phase: "post",
+              host: "grok",
+              tool: "write",
+              text: "tool write → /src/x.ts",
+              path: "/src/x.ts",
+              tool_input: { file_path: "/src/x.ts", content: "hi" },
+            },
+          },
+        });
+
+        expect(r.skipped).not.toBe(true);
+        expect(r.events).toHaveLength(1);
+        expect(r.event.type).toBe("action_recorded");
+        expect(r.event.id).toBe(INGEST_EVENT_WRITE);
+        const payload = JSON.parse(r.event.payload_json) as { action_kind?: string };
+        expect(payload.action_kind).toBeDefined();
+
+        const types = domainTypes(conn, sessionId);
+        expect(types).toEqual(["action_recorded"]);
+        expect(types).not.toContain("raw_tool_signal");
+      }),
+    );
+  });
+
+  it("raw_tool_signal read → observation_recorded", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const { projectId, sessionId } = seedIngestSession(conn, "inspect code");
+
+        const r = yield* service.ingest({
+          projectId,
+          envelope: {
+            version: "1.3.0",
+            type: "raw_tool_signal",
+            session_id: sessionId,
+            actor_name: "claude-code",
+            actor_type: "worker",
+            id: INGEST_EVENT_READ,
+            source: { tool: "claude-code", command: "PostToolUse" },
+            payload: {
+              phase: "post",
+              host: "claude-code",
+              tool: "read_file",
+              text: "read /src/user.ts",
+              path: "/src/user.ts",
+            },
+          },
+        });
+
+        expect(r.event.type).toBe("observation_recorded");
+        expect(domainTypes(conn, sessionId)).toEqual(["observation_recorded"]);
+      }),
+    );
+  });
+
+  it("raw_tool_signal todo_write → ignore success (no domain events)", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const { projectId, sessionId } = seedIngestSession(conn, "todos");
+
+        const r = yield* service.ingest({
+          projectId,
+          envelope: {
+            version: "1.3.0",
+            type: "raw_tool_signal",
+            session_id: sessionId,
+            actor_name: "claude-code",
+            actor_type: "worker",
+            id: INGEST_EVENT_TODO,
+            source: { tool: "claude-code", command: "PostToolUse" },
+            payload: {
+              phase: "post",
+              host: "claude-code",
+              tool: "todo_write",
+              text: "updated todos",
+            },
+          },
+        });
+
+        expect(r.skipped).toBe(true);
+        expect(r.events).toEqual([]);
+        expect(r.event.id).toBe(INGEST_EVENT_TODO);
+        expect(r.event.session_id).toBe(sessionId);
+        // No domain rows (seeded session has no session_created either).
+        expect(domainTypes(conn, sessionId)).toEqual([]);
+      }),
+    );
+  });
+
+  it("legacy observation_recorded with source PostToolUse reclassifies to action_recorded", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const { projectId, sessionId } = seedIngestSession(conn, "fix login bug");
+
+        // Legacy hook envelope: type is observation_recorded but payload
+        // carries tool fields (stripped from schema validation only;
+        // decodeEnvelope preserves the original payload object).
+        const r = yield* service.ingest({
+          projectId,
+          envelope: {
+            version: "1.2.0",
+            type: "observation_recorded",
+            session_id: sessionId,
+            actor_name: "claude-code",
+            actor_type: "worker",
+            id: INGEST_EVENT_LEGACY,
+            source: { tool: "claude-code", command: "PostToolUse" },
+            payload: {
+              text: "tool Edit returned",
+              tool: "Edit",
+              tool_input: { file_path: "/src/user.ts" },
+              tool_response: { ok: true },
+            },
+          },
+        });
+
+        expect(r.skipped).not.toBe(true);
+        expect(r.event.type).toBe("action_recorded");
+        expect(domainTypes(conn, sessionId)).toEqual(["action_recorded"]);
+        expect(domainTypes(conn, sessionId)).not.toContain("observation_recorded");
+      }),
+    );
+  });
+
+
+  it("raw_tool_signal shell pnpm test → verification_started + verification_passed (idempotent reprocess)", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const { projectId, sessionId } = seedIngestSession(conn, "run tests");
+
+        const envelope = {
+          version: "1.3.0" as const,
+          type: "raw_tool_signal",
+          session_id: sessionId,
+          actor_name: "grok",
+          actor_type: "worker" as const,
+          id: INGEST_EVENT_VERIFY,
+          source: { tool: "grok", command: "PostToolUse" },
+          payload: {
+            phase: "post",
+            host: "grok",
+            tool: "run_terminal_command",
+            command: "pnpm test",
+            text: "tool run_terminal_command: pnpm test",
+            exit_code: 0,
+            tool_input: { command: "pnpm test" },
+            tool_response: { ok: true, exit_code: 0 },
+          },
+        };
+
+        const r = yield* service.ingest({ projectId, envelope });
+        expect(r.skipped).not.toBe(true);
+        expect(r.events?.map((e) => e.type)).toEqual([
+          "verification_started",
+          "verification_passed",
+        ]);
+        expect(domainTypes(conn, sessionId)).toEqual([
+          "verification_started",
+          "verification_passed",
+        ]);
+
+        // Reprocess same envelope — deterministic ids, no duplicates
+        const r2 = yield* service.ingest({ projectId, envelope });
+        expect(r2.events?.map((e) => e.type)).toEqual([
+          "verification_started",
+          "verification_passed",
+        ]);
+        expect(domainTypes(conn, sessionId)).toEqual([
+          "verification_started",
+          "verification_passed",
+        ]);
+      }),
+    );
+  });
+
+  it("CLI observation_recorded without hook source bypasses pipeline", async () => {
+    await runWithLayer(
+      Effect.gen(function* () {
+        const conn = yield* DbConnection;
+        const service = yield* SessionService;
+        const { projectId, sessionId } = seedIngestSession(conn, "manual note");
+
+        const r = yield* service.ingest({
+          projectId,
+          envelope: {
+            version: "1.3.0",
+            type: "observation_recorded",
+            session_id: sessionId,
+            actor_name: "alice",
+            actor_type: "human",
+            id: INGEST_EVENT_CLI,
+            payload: { text: "I noticed the auth middleware skips CORS" },
+          },
+        });
+
+        expect(r.skipped).not.toBe(true);
+        expect(r.event.type).toBe("observation_recorded");
+        expect(r.event.id).toBe(INGEST_EVENT_CLI);
+        expect(domainTypes(conn, sessionId)).toEqual(["observation_recorded"]);
+      }),
+    );
+  });
+});

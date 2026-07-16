@@ -381,7 +381,18 @@ describe("migratePayload — v1.1.0 → v1.2.0", () => {
     await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
   });
 
-  it("v1.0.0 → v1.2.0 picks the single sufficient transform (minimum path)", async () => {
+  it("v1.2.0 → v1.3.0 identity path exists", async () => {
+    const program = Effect.gen(function* () {
+      const reg = yield* MigrationRegistry;
+      const path = reg.transformsFor("1.2.0", "1.3.0");
+      expect(path).toHaveLength(1);
+      expect(path[0]?.from).toBe("1.2.0");
+      expect(path[0]?.to).toBe("1.3.0");
+    });
+    await Effect.runPromise(program.pipe(Effect.provide(MigrationRegistryLive)));
+  });
+
+  it("v1.0.0 → v1.2.0 walks the identity chain", async () => {
     // The runner picks transforms with t.to >= to AND t.from >= from.
     // For 1.0.0 -> 1.2.0: the 1.0.0->1.1.0 transform is excluded (its
     // t.to = 1.1.0 is below 1.2.0). Only the 1.1.0->1.2.0 identity
@@ -390,8 +401,8 @@ describe("migratePayload — v1.1.0 → v1.2.0", () => {
     const program = Effect.gen(function* () {
       const reg = yield* MigrationRegistry;
       const path = reg.transformsFor("1.0.0", "1.2.0");
-      expect(path).toHaveLength(1);
       expect(path.map((t) => `${t.from}->${t.to}`)).toEqual([
+        "1.0.0->1.1.0",
         "1.1.0->1.2.0",
       ]);
     });

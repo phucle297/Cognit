@@ -53,6 +53,11 @@ import {
   type IngestError,
 } from "./envelope";
 import { readCurrentSession, writeCurrentSession } from "@cognit/core/current-session";
+import {
+  semanticPipeline,
+  type NormalizeRawInput,
+  type SessionContext,
+} from "@cognit/core/semantics";
 
 export type SessionError =
   | DbError
@@ -99,8 +104,20 @@ export interface SessionAppendEventInput {
 }
 
 export interface SessionAppendEventResult {
+  /**
+   * Last appended domain event, or a synthetic row when the semantic
+   * pipeline produced zero domain events (ignore). Always present so
+   * inbox rename and existing callers keep working via `event.id`.
+   */
   readonly event: EventRow;
+  /** All domain events appended by this call (empty when skipped). */
+  readonly events?: ReadonlyArray<EventRow>;
   readonly snapshotTaken: boolean;
+  /**
+   * True when the semantic pipeline classified the envelope as ignore
+   * and nothing was written to the event log.
+   */
+  readonly skipped?: boolean;
 }
 
 /**
@@ -250,6 +267,166 @@ class SessionAlreadyClosedError {
 }
 
 const nowIso = (): string => new Date().toISOString();
+
+const asPayloadRecord = (v: unknown): Record<string, unknown> | null =>
+  v !== null && typeof v === "object" && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : null;
+
+/**
+ * Legacy hook producers stamped `source.command` as PreToolUse /
+ * PostToolUse / AfterTool (and camelCase / snake_case variants). CLI
+ * verbs and wrap use real command strings — those must NOT reclassify.
+ */
+const isLegacyHookCommand = (command: string | undefined): boolean => {
+  if (command === undefined || command.length === 0) return false;
+  const c = command.replace(/[^a-zA-Z]/g, "").toLowerCase();
+  return (
+    c === "pretooluse" ||
+    c === "posttooluse" ||
+    c === "aftertool" ||
+    c === "pretool" ||
+    c === "posttool" ||
+    c.startsWith("pretooluse") ||
+    c.startsWith("posttooluse") ||
+    c.startsWith("aftertool")
+  );
+};
+
+/** Map host hook command → pipeline phase when payload.phase is absent. */
+const phaseFromSourceCommand = (
+  command: string | undefined,
+): "pre" | "post" | "failure" | undefined => {
+  if (command === undefined) return undefined;
+  const c = command.toLowerCase();
+  if (c.includes("fail")) return "failure";
+  if (c.includes("pre")) return "pre";
+  if (c.includes("post") || c.includes("after")) return "post";
+  return undefined;
+};
+
+/**
+ * Whether this envelope should run the D-M5-00 semantic pipeline.
+ *   - raw_tool_signal (new hooks)
+ *   - legacy observation/hypothesis from Pre/Post/After tool hooks
+ * CLI verbs and other types bypass.
+ */
+/**
+ * Deterministic domain event ids for multi-event produce sets so
+ * reprocess does not mint new ULIDs for follow-on events.
+ * Index 0 reuses the envelope id; later indices rewrite the last
+ * two Crockford chars from the index.
+ */
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const derivedDomainEventId = (envelopeId: string, index: number): string => {
+  if (index === 0) return envelopeId;
+  if (envelopeId.length !== 26) return envelopeId;
+  const c0 = CROCKFORD[index % 32]!;
+  const c1 = CROCKFORD[Math.floor(index / 32) % 32]!;
+  return `${envelopeId.slice(0, 24)}${c1}${c0}`;
+};
+
+const shouldClassify = (decoded: DecodedEnvelope): boolean => {
+  if (decoded.type === "raw_tool_signal") return true;
+  if (
+    (decoded.type === "observation_recorded" || decoded.type === "hypothesis_created") &&
+    isLegacyHookCommand(decoded.source?.command)
+  ) {
+    return true;
+  }
+  return false;
+};
+
+const optionalString = (v: unknown): string | null =>
+  typeof v === "string" && v.length > 0 ? v : null;
+
+const optionalNumber = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? v : null;
+
+/**
+ * Build pipeline input from a decoded envelope payload + source.
+ * Preserves extra keys on legacy observation payloads (tool, tool_input)
+ * because decodeEnvelope keeps the original payload object.
+ */
+const buildNormalizeRawInput = (decoded: DecodedEnvelope): NormalizeRawInput => {
+  const payload = asPayloadRecord(decoded.payload) ?? {};
+  const phase =
+    optionalString(payload["phase"]) ??
+    phaseFromSourceCommand(decoded.source?.command) ??
+    "post";
+  const host = optionalString(payload["host"]) ?? optionalString(decoded.source?.tool);
+  // Legacy PreToolUse hypothesis_created often puts the tool name in title.
+  const tool =
+    optionalString(payload["tool"]) ??
+    optionalString(payload["tool_name"]) ??
+    optionalString(payload["toolName"]) ??
+    optionalString(payload["title"]);
+  const toolInput = payload["tool_input"] ?? payload["toolInput"];
+  const toolResponse = payload["tool_response"] ?? payload["toolResponse"];
+  const text = optionalString(payload["text"]);
+  const path = optionalString(payload["path"]);
+  const command = optionalString(payload["command"]);
+  const exitCode =
+    optionalNumber(payload["exit_code"]) ?? optionalNumber(payload["exitCode"]);
+
+  const out: {
+    phase: string;
+    host?: string;
+    tool?: string;
+    toolInput?: unknown;
+    toolResponse?: unknown | null;
+    text?: string;
+    path?: string;
+    command?: string;
+    exitCode?: number | null;
+    raw: unknown;
+  } = {
+    phase,
+    raw: decoded.payload,
+  };
+  if (host !== null) out.host = host;
+  if (tool !== null) out.tool = tool;
+  if (toolInput !== undefined) out.toolInput = toolInput;
+  if (toolResponse !== undefined) out.toolResponse = toolResponse;
+  if (text !== null) out.text = text;
+  if (path !== null) out.path = path;
+  if (command !== null) out.command = command;
+  if (exitCode !== null) out.exitCode = exitCode;
+  return out;
+};
+
+/**
+ * Synthetic EventRow when the pipeline ignores a signal (no domain
+ * events appended). Carries the envelope id so inbox rename stays
+ * deterministic and idempotent.
+ */
+const syntheticSkippedEventRow = (opts: {
+  readonly id: string;
+  readonly projectId: string;
+  readonly sessionId: string;
+  readonly type: string;
+  readonly version: string;
+}): EventRow => ({
+  id: opts.id,
+  project_id: opts.projectId,
+  session_id: opts.sessionId,
+  actor_id: "",
+  type: opts.type,
+  version: opts.version,
+  payload_json: "{}",
+  source_json: null,
+  artifact_refs_json: null,
+  causation_id: null,
+  correlation_id: null,
+  confidence: null,
+  parent_verification_id: null,
+  linked_hypothesis_id: null,
+  stdout_excerpt: null,
+  exit_code: null,
+  duration_ms: null,
+  created_artifact_id: null,
+  created_at: nowIso(),
+});
 
 /** Insert a sessions row inside the supplied connection. Synchronous on the driver. */
 const insertSessionRow = (
@@ -1153,8 +1330,14 @@ export const SessionServiceLive: Layer.Layer<
 
     /**
      * Unified envelope entry point (§1.5). Decode → resolve/create
-     * session → append (with constraint check via `appendEvent`). Inbox
-     * JSON and server `POST /events` both go through here.
+     * session → (optional D-M5-00 semantic classify) → append domain
+     * events via `appendEvent`. Inbox JSON and server `POST /events`
+     * both go through here.
+     *
+     * Classification path (raw_tool_signal + legacy Pre/Post tool hooks):
+     * never appends the transport envelope itself — only produced domain
+     * events. Empty produce (ignore) succeeds without a log write.
+     * CLI verbs and other types still single-append as before.
      */
     const _ingest = (input: IngestInput): Effect.Effect<SessionAppendEventResult, IngestError> =>
       Effect.gen(function* () {
@@ -1169,7 +1352,87 @@ export const SessionServiceLive: Layer.Layer<
           lazyCreate: input.lazyCreate ?? true,
           ...(input.goalHint !== undefined ? { goalHint: input.goalHint } : {}),
         });
-        return yield* self.appendEvent(envelopeToAppendInput(decoded, sessionId));
+
+        if (!shouldClassify(decoded)) {
+          const single = yield* self.appendEvent(envelopeToAppendInput(decoded, sessionId));
+          return {
+            event: single.event,
+            events: [single.event],
+            snapshotTaken: single.snapshotTaken,
+          };
+        }
+
+        // Optional goal for action_kind hints (e.g. "fix" → applied_fix).
+        const sessionRow = yield* trySync(
+          () => fetchSession(conn, sessionId),
+          (e) => new DbError({ message: "ingest: fetch session for classify", cause: e }),
+        );
+        const sessionContext: SessionContext | undefined =
+          sessionRow !== undefined && sessionRow.goal.length > 0
+            ? { goal: sessionRow.goal }
+            : undefined;
+
+        const produced = semanticPipeline(
+          buildNormalizeRawInput(decoded),
+          sessionContext,
+        );
+
+        if (produced.length === 0) {
+          // Ignore: succeed without appending. Synthetic row keeps
+          // inbox rename + callers that read result.event.id working.
+          const skipId = decoded.id ?? (yield* uuid.make());
+          const synthetic = syntheticSkippedEventRow({
+            id: skipId,
+            projectId: sessionRow?.project_id ?? input.projectId,
+            sessionId,
+            type: decoded.type,
+            version: decoded.version,
+          });
+          yield* logger.log(
+            "info",
+            { sessionId, envelopeId: skipId, type: decoded.type },
+            "ingest: semantic pipeline ignored signal (no domain events)",
+          );
+          return {
+            event: synthetic,
+            events: [],
+            snapshotTaken: false,
+            skipped: true,
+          };
+        }
+
+        const appended: EventRow[] = [];
+        let snapshotTaken = false;
+        for (let i = 0; i < produced.length; i++) {
+          const p = produced[i]!;
+          // Deterministic ids: envelope id + derived siblings so reprocess
+          // is idempotent for multi-event produces (verify start+outcome).
+          const eventId =
+            decoded.id !== undefined ? derivedDomainEventId(decoded.id, i) : undefined;
+          const appendInput: SessionAppendEventInput = {
+            sessionId,
+            type: p.type,
+            payload: p.payload,
+            actor: { name: decoded.actorName, type: decoded.actorType },
+            ...(eventId !== undefined ? { id: eventId } : {}),
+            ...(decoded.source !== undefined ? { source: decoded.source } : {}),
+            ...(decoded.id !== undefined ? { correlationId: decoded.id } : {}),
+            ...(p.confidence !== undefined ? { confidence: p.confidence } : {}),
+            ...(p.linked_hypothesis_id != null && p.linked_hypothesis_id !== undefined
+              ? { linkedHypothesisId: p.linked_hypothesis_id }
+              : {}),
+          };
+          const r = yield* self.appendEvent(appendInput);
+          appended.push(r.event);
+          if (r.snapshotTaken) snapshotTaken = true;
+        }
+
+        const last = appended[appended.length - 1]!;
+        return {
+          event: last,
+          events: appended,
+          snapshotTaken,
+        };
       });
 
     return { ...self, ingest: _ingest };

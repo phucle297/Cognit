@@ -2,15 +2,17 @@ import { describe, expect, it } from "vitest";
 import { Either, Schema } from "effect";
 import {
   CURRENT_VERSION,
+  PAYLOAD_SCHEMAS_BY_VERSION,
   EVENT_TYPES,
   PAYLOAD_SCHEMAS_V1,
   PAYLOAD_SCHEMAS_V1_1_0,
   PAYLOAD_SCHEMAS_V1_2_0,
+  PAYLOAD_SCHEMAS_V1_3_0,
 } from "../src";
 
 describe("event schema registry", () => {
-  it("CURRENT_VERSION is 1.2.0", () => {
-    expect(CURRENT_VERSION).toBe("1.2.0");
+  it("CURRENT_VERSION is 1.3.0", () => {
+    expect(CURRENT_VERSION).toBe("1.3.0");
   });
 
   it("every event type from plan.xml has a schema", () => {
@@ -277,5 +279,24 @@ describe("event schema registry", () => {
     for (const t of Object.keys(PAYLOAD_SCHEMAS_V1_1_0)) {
       expect(PAYLOAD_SCHEMAS_V1_2_0[t]).toBeDefined();
     }
+  });
+});
+
+describe("payload schemas v1.3.0 (D-M5-00)", () => {
+  it("registers action_recorded and raw_tool_signal", () => {
+    expect(PAYLOAD_SCHEMAS_V1_3_0["action_recorded"]).toBeDefined();
+    expect(PAYLOAD_SCHEMAS_V1_3_0["raw_tool_signal"]).toBeDefined();
+    expect(PAYLOAD_SCHEMAS_V1_2_0["action_recorded"]).toBeUndefined();
+  });
+
+  it("decodes action_recorded payload", async () => {
+    const { Schema } = await import("effect");
+    const schema = PAYLOAD_SCHEMAS_V1_3_0["action_recorded"]!;
+    const decoded = Schema.decodeUnknownEither(schema)({
+      text: "Applied fix in user.ts",
+      action_kind: "applied_fix",
+      evidence: { tool: "search_replace", path: "/src/user.ts" },
+    });
+    expect(decoded._tag).toBe("Right");
   });
 });

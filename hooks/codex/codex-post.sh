@@ -3,9 +3,10 @@
 # codex-post.sh — Codex CLI PostToolUse hook → Cognit inbox.
 #
 # Reference producer. Reads the PostToolUse JSON payload from stdin,
-# builds an `observation_recorded` envelope v1.2.0 FLAT (actor_name /
-# actor_type) per `packages/wrap/src/index.ts:72`, and atomic-writes
-# it to `<projectRoot>/.cognit/inbox/<session-id>-<event-id>.json`
+# builds a `raw_tool_signal` envelope v1.3.0 FLAT (actor_name /
+# actor_type) per `packages/db/src/event-schema.ts` RawToolSignalPayload,
+# and atomic-writes it to
+# `<projectRoot>/.cognit/inbox/<session-id>-<event-id>.json`
 # (project-relative, with `$COGNIT_INBOX` override) following the
 # protocol from `packages/wrap/src/atomic-write.ts` (open(wx) → write
 # → fsync → close → rename) — see the python block at the bottom.
@@ -74,6 +75,8 @@ fields="$(cognits_tool_fields_json "$input" "post")"
 tool="$(jq -r '.tool // "unknown"' <<<"$fields")"
 tool_input="$(jq -c '.tool_input // {}' <<<"$fields")"
 tool_response="$(jq -c '.tool_response // null' <<<"$fields")"
+file_path="$(jq -r '.file_path // ""' <<<"$fields")"
+command="$(jq -r '.command // ""' <<<"$fields")"
 text="$(jq -r '.text // ("tool " + .tool + " returned")' <<<"$fields")"
 
 # Mint event ULID (26-char Crockford) via shared helper — never short fallbacks.
@@ -81,18 +84,19 @@ event_id="$(cognits_ulid)"
 
 dest="$inbox_dir/${session}-${event_id}.json"
 
-# Build the envelope. `version: "1.2.0"` matches the wrap producer and
-# the inbox watcher's EnvelopeSchema literal union. `actor_name` and
-# `actor_type` are top-level (FLAT), not nested under `actor:`.
+# Build the envelope. `raw_tool_signal` v1.3.0 FLAT; evidence only.
 payload="$(jq -n \
-  --arg     version   "1.2.0" \
+  --arg     version   "1.3.0" \
   --arg     session   "$session" \
-  --arg     type      "observation_recorded" \
+  --arg     type      "raw_tool_signal" \
   --arg     actorName "$actor_name" \
   --arg     hostId    "$host_id" \
   --arg     hostEvent "$host_event" \
+  --arg     phase     "post" \
   --arg     tool      "$tool" \
   --arg     text      "$text" \
+  --arg     path      "$file_path" \
+  --arg     cmd       "$command" \
   --argjson toolInput "$tool_input" \
   --argjson toolResp  "$tool_response" \
   --arg     id        "$event_id" \
@@ -105,21 +109,19 @@ payload="$(jq -n \
      id:         $id,
      source:     {tool: $hostId, command: $hostEvent},
      payload:    {
-       text: $text,
+       phase: $phase,
+       host: $hostId,
        tool: $tool,
        tool_input: $toolInput,
-       tool_response: $toolResp
+       tool_response: $toolResp,
+       text: $text,
+       path: (if $path == "" then null else $path end),
+       command: (if $cmd == "" then null else $cmd end)
      }
    }')"
 
 cognits_atomic_write_json "$dest" "$payload"
 
-# D-M4-00 §4.1: near-realtime without a daemon. When
-# `inbox.realtime: true`, `cognit env --shell` exports
-# COGNIT_REALTIME=1; fire-and-forget a one-shot drain so SQLite sees
-# the event without waiting for the next read command. Never block
-# the host CLI; never fail the hook if cognit is missing.
-if [[ "${COGNIT_REALTIME:-0}" == "1" ]] && command -v cognit >/dev/null 2>&1; then
-  (cognit inbox --process >/dev/null 2>&1 &) || true
-fi
-
+# Agent OOB drain: fire-and-forget inbox → SQLite (default ON).
+# Self-resolves inbox.realtime / COGNIT_REALTIME; debounced. See hook-lib.sh.
+cognits_maybe_drain || true

@@ -53,33 +53,42 @@ both are present.
 
 ## Flow
 
-| Host event   | Script         | Cognit envelope       |
-|--------------|----------------|------------------------|
-| `PostToolUse`| `codex-post.sh`| `observation_recorded` |
+| Host event   | Script         | Cognit envelope                  |
+|--------------|----------------|----------------------------------|
+| `PreToolUse` | `codex-pre.sh` | `raw_tool_signal` (phase `pre`)  |
+| `PostToolUse`| `codex-post.sh`| `raw_tool_signal` (phase `post`) |
 
 Follows the **Common behavior** algorithms in
 [`docs/hooks/README.md`](./README.md#common-behavior). Identical to
-the Claude Code PostToolUse path except for `actor_name` (`"codex"`)
-and `source.tool` (`"codex"`).
+the Claude Code path except for `actor_name` / `source.tool` /
+`payload.host` (`"codex"`).
 
 ## Payload
 
-`observation_recorded` payload (PostToolUse):
+Hooks emit evidence-only `raw_tool_signal` (v1.3.0). Classification
+is deferred to ingest Phase 2b.
+
+`raw_tool_signal` payload (PostToolUse):
 
 ```json
 {
-  "text": "tool <tool_name> returned",
+  "phase": "post",
+  "host": "codex",
   "tool": "<tool_name>",
-  "tool_input": {...}
+  "tool_input": {...},
+  "tool_response": {...},
+  "text": "tool <tool_name> returned",
+  "path": null,
+  "command": null
 }
 ```
 
-Canonical envelope (v1.2.0 FLAT — see [`docs/technical/events.md`](../technical/events.md)):
+Canonical envelope (v1.3.0 FLAT — see [`docs/technical/events.md`](../technical/events.md)):
 
 ```json
 {
-  "version": "1.2.0",
-  "type": "observation_recorded",
+  "version": "1.3.0",
+  "type": "raw_tool_signal",
   "session_id": "01HXY...ULID",
   "actor_name": "codex",
   "actor_type": "worker",

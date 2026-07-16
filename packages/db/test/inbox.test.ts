@@ -19,6 +19,7 @@ import {
   SnapshotService,
   UuidTest,
   openDb,
+  CURRENT_VERSION,
 } from "../src";
 import { EventStoreDefault } from "../src/event-store";
 import { SessionServiceLive } from "../src/session-service";
@@ -1033,7 +1034,7 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
   });
 
   describe("CURRENT_VERSION envelope acceptance", () => {
-    it("accepts a CURRENT_VERSION (1.2.0) envelope and moves it to processed", async () => {
+    it("accepts a CURRENT_VERSION envelope and moves it to processed", async () => {
       // Regression: the envelope literal union previously listed
       // only "1.0.0"/"1.1.0" while every live producer (wrap,
       // claude/codex/gemini/opencode hooks) emits CURRENT_VERSION
@@ -1048,7 +1049,7 @@ describe("inbox processFile — Cognit-9w6 negative tests", () => {
       };
       const file = await writeEnvelope(dirs.inbox, INBOX_FILENAME, {
         type: "observation_recorded",
-        version: "1.2.0",
+        version: CURRENT_VERSION,
         session_id: SESSION_ULID,
         actor_name: "inboxer",
         actor_type: "worker",

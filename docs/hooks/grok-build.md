@@ -47,3 +47,13 @@ Matchers in Claude-style settings alias Claude tool names onto Grok tools (`Edit
 | `source.command` | `PostToolUse` / `PreToolUse` (normalized) |
 
 Actor family defaults to `grok` then resolves to `<model>+<sessionHash6>` when a model is detectable from env/transcript.
+
+## Drain hooks (Stop / SessionEnd)
+
+`cognit init` also wires `~/.cognit/hooks/cc-drain.sh` on `Stop` and
+`SessionEnd`. That script only flushes the inbox → SQLite (no new
+observation). Combined with per-tool `cognits_maybe_drain` in
+`cc-pre.sh` / `cc-post.sh`, Grok sessions populate the dashboard
+without `cognit inbox --process`.
+
+Opt out: `inbox.realtime: false` in `.cognit/cognit.yaml`.

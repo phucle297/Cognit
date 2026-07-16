@@ -5,11 +5,13 @@
 # Spins up /tmp/cognit-smoke-gemini with a .cognit/inbox/ tree and
 # a .cognit/current-session pointer, pipes a mocked AfterTool JSON
 # payload (matching the shape Gemini CLI emits) into gemini-post.sh,
-# and asserts the resulting envelope file matches the v1.2.0
-# contract for the Gemini producer (AC47):
+# and asserts the resulting envelope file matches the v1.3.0
+# raw_tool_signal contract for the Gemini producer:
 #
-#   - version       = "1.2.0"
-#   - actor_name    = "gemini-cli"
+#   - version       = "1.3.0"
+#   - type          = "raw_tool_signal"
+#   - payload.phase = "post"
+#   - actor_name    = "gemini+..."
 #   - source.tool   = "gemini-cli"
 #   - source.command = "AfterTool"
 #   - id            present (ULID-shaped, non-empty)
@@ -59,14 +61,21 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 1
 fi
 
-# 1. version = 1.2.0
+# 1. version = 1.3.0
 version="$(jq -r '.version' "$envelope")"
-if [[ "$version" != "1.2.0" ]]; then
-  echo "FAIL: expected version=1.2.0, got version=$version (file: $envelope)" >&2
+if [[ "$version" != "1.3.0" ]]; then
+  echo "FAIL: expected version=1.3.0, got version=$version (file: $envelope)" >&2
   exit 1
 fi
 
-# 2. actor_name = "gemini-cli"
+# 2. type = raw_tool_signal
+type="$(jq -r '.type' "$envelope")"
+if [[ "$type" != "raw_tool_signal" ]]; then
+  echo "FAIL: expected type=raw_tool_signal, got type=$type" >&2
+  exit 1
+fi
+
+# 3. actor_name = "gemini+..."
 actor_name="$(jq -r '.actor_name' "$envelope")"
 expected_actor="gemini+${SESSION: -6}"
 if [[ "$actor_name" != "$expected_actor" ]]; then
@@ -74,40 +83,47 @@ if [[ "$actor_name" != "$expected_actor" ]]; then
   exit 1
 fi
 
-# 3. source.tool = "gemini-cli"
+# 4. source.tool = "gemini-cli"
 source_tool="$(jq -r '.source.tool' "$envelope")"
 if [[ "$source_tool" != "gemini-cli" ]]; then
   echo "FAIL: expected source.tool=gemini-cli, got source.tool=$source_tool" >&2
   exit 1
 fi
 
-# 4. source.command = "AfterTool"
+# 5. source.command = "AfterTool"
 source_command="$(jq -r '.source.command' "$envelope")"
 if [[ "$source_command" != "AfterTool" ]]; then
   echo "FAIL: expected source.command=AfterTool, got source.command=$source_command" >&2
   exit 1
 fi
 
-# 5. id present
+# 6. payload.phase = post
+phase="$(jq -r '.payload.phase' "$envelope")"
+if [[ "$phase" != "post" ]]; then
+  echo "FAIL: expected payload.phase=post, got phase=$phase" >&2
+  exit 1
+fi
+
+# 7. id present
 id="$(jq -r '.id // ""' "$envelope")"
 if [[ -z "$id" || "$id" == "null" ]]; then
   echo "FAIL: id field missing or empty" >&2
   exit 1
 fi
 
-# 6. file mode = 0o600
+# 8. file mode = 0o600
 mode="$(stat -c '%a' "$envelope" 2>/dev/null || stat -f '%Lp' "$envelope")"
 if [[ "$mode" != "600" ]]; then
   echo "FAIL: expected mode 0o600, got 0o$mode" >&2
   exit 1
 fi
 
-# 7. session_id matches the pre-seeded sticky pointer
+# 9. session_id matches the pre-seeded sticky pointer
 session_id="$(jq -r '.session_id' "$envelope")"
 if [[ "$session_id" != "$SESSION" ]]; then
   echo "FAIL: expected session_id=$SESSION, got session_id=$session_id" >&2
   exit 1
 fi
 
-echo "PASS: gemini-post.sh emitted valid envelope at $envelope (version=$version, actor_name=$actor_name, source.tool=$source_tool, source.command=$source_command, id=$id, mode=0o$mode)"
+echo "PASS: gemini-post.sh emitted valid envelope at $envelope (version=$version, type=$type, phase=$phase, actor_name=$actor_name, source.tool=$source_tool, source.command=$source_command, id=$id, mode=0o$mode)"
 exit 0

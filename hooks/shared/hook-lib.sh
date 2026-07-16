@@ -487,3 +487,86 @@ finally:
 os.rename(tmp, path)
 PY
 }
+
+# ---------------------------------------------------------------------------
+# Inbox → SQLite drain (agent OOB path)
+# ---------------------------------------------------------------------------
+#
+# Producers only write inbox JSON. Something must call
+# `cognit inbox --process` or data never reaches the dashboard.
+# Agents do NOT run `eval "$(cognit env --shell)"`, so hooks must
+# self-decide whether to drain — never depend on a pre-exported env.
+#
+# Decision order for cognits_realtime_wanted:
+#   1. COGNIT_REALTIME=0|false|no  → off (explicit opt-out)
+#   2. COGNIT_REALTIME=1|true|yes  → on
+#   3. .cognit/cognit.yaml inbox.realtime: false → off
+#   4. .cognit/cognit.yaml inbox.realtime: true  → on
+#   5. default ON (out-of-the-box: drain after tool / turn end)
+#
+# cognits_maybe_drain [force]
+#   force=1  — skip debounce (Stop / SessionEnd)
+#   default  — debounce ~2s so tool storms don't spawn N cognit procs
+
+cognits_realtime_wanted() {
+  local env_rt yaml_rt yml
+  env_rt="${COGNIT_REALTIME:-}"
+  case "$env_rt" in
+    0|false|FALSE|no|NO|off|OFF) return 1 ;;
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+  esac
+
+  yml="./.cognit/cognit.yaml"
+  if [[ -f "$yml" ]]; then
+    # Prefer a tiny python parse (stdlib only) so nested YAML is reliable.
+    yaml_rt="$(
+      python3 - "$yml" <<'PY' 2>/dev/null || true
+import re, sys
+text = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+# Match `realtime: true|false` under an `inbox:` block (2+ space indent).
+m = re.search(
+    r"(?m)^inbox:\s*\n(?:[ \t]+.+\n)*?[ \t]+realtime:\s*(true|false)\b",
+    text,
+)
+if m:
+    print(m.group(1))
+else:
+    # Flat / missing → default on
+    print("true")
+PY
+    )"
+    case "$yaml_rt" in
+      false|FALSE) return 1 ;;
+      true|TRUE|"") return 0 ;;
+      *) return 0 ;;
+    esac
+  fi
+  return 0
+}
+
+cognits_maybe_drain() {
+  local force="${1:-0}"
+  local stamp now last debounce=2
+
+  cognits_realtime_wanted || return 0
+  command -v cognit >/dev/null 2>&1 || return 0
+
+  # Debounce concurrent/back-to-back tool hooks (not for force).
+  if [[ "$force" != "1" && "$force" != "force" ]]; then
+    stamp="./.cognit/inbox/.drain-requested"
+    mkdir -p ./.cognit/inbox 2>/dev/null || true
+    now="$(date +%s 2>/dev/null || echo 0)"
+    if [[ -f "$stamp" ]]; then
+      last="$(tr -d '[:space:]' <"$stamp" 2>/dev/null || echo 0)"
+      if [[ "$last" =~ ^[0-9]+$ && "$now" =~ ^[0-9]+$ ]]; then
+        if (( now - last < debounce )); then
+          return 0
+        fi
+      fi
+    fi
+    printf '%s' "$now" >"$stamp" 2>/dev/null || true
+  fi
+
+  # Never block the host agent; never fail the hook if drain dies.
+  (cognit inbox --process >/dev/null 2>&1 &) || true
+}

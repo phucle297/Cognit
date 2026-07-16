@@ -54,7 +54,7 @@ export const INBOX_FILENAME_RE = new RegExp(
  */
 export const EnvelopeSchema = Schema.Struct({
   type: Schema.String.pipe(Schema.minLength(1)),
-  version: Schema.Literal("1.0.0", "1.1.0", CURRENT_VERSION),
+  version: Schema.Literal("1.0.0", "1.1.0", "1.2.0", CURRENT_VERSION),
   session_id: Schema.String.pipe(Schema.pattern(ULID_RE)),
   actor_name: Schema.String.pipe(Schema.minLength(1)),
   actor_type: ActorType,
