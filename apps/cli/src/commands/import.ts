@@ -231,11 +231,14 @@ const readAllRows = (
   // state that doesn't round-trip — schema_version is local
   // migration bookkeeping, inbox_processed is a per-machine dedup
   // log).
+  // D-M6-00: raw_events before events so fork can remap correlation_id
+  // via the raw_events: id map after raw rows are allocated.
   const tables = [
     "projects",
     "actors",
     "sessions",
     "hypotheses",
+    "raw_events",
     "events",
     "snapshots",
     "artifacts",
@@ -275,6 +278,9 @@ const applyImport = (
     actors: [],
     sessions: ["project_id", "parent_session_id"],
     hypotheses: ["session_id"],
+    // D-M6-00: raw_events FKs; correlation_id on events remapped specially
+    // (soft link → raw_events id map, not events map).
+    raw_events: ["project_id", "session_id"],
     events: [
       "project_id",
       "session_id",
@@ -352,6 +358,15 @@ const applyImport = (
               newRow[fk] = null;
             }
           }
+          // D-M6-00 KD-23: soft correlation_id → raw_events id map only
+          // (not events:). Leave unchanged if no raw map entry (legacy).
+          if (table === "events" && newRow.correlation_id != null) {
+            const corr = String(newRow.correlation_id);
+            const rawRemapped = idMap.get(`raw_events:${corr}`);
+            if (rawRemapped) {
+              newRow.correlation_id = rawRemapped;
+            }
+          }
           stats.forked += 1;
         } else if (strategy === "overwrite" && localExists) {
           // OR REPLACE below handles the write; just record the stat.
@@ -386,6 +401,7 @@ const fkRefersTo = (table: string, column: string): string | null => {
   const map: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     sessions: { project_id: "projects", parent_session_id: "sessions" },
     hypotheses: { session_id: "sessions" },
+    raw_events: { project_id: "projects", session_id: "sessions" },
     events: {
       project_id: "projects",
       session_id: "sessions",

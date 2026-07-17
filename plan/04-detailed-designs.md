@@ -30,6 +30,18 @@ Each accepted change has a design under `designs/`. Implement **one design per P
 
 13. [D-M3-01 Payload evolution](./designs/D-M3-01-payload-evolution.md)
 
+### Milestone 4
+
+14. [D-M4-00 Inbox ingestion OOB](./designs/D-M4-00-inbox-ingestion-oob.md)
+
+### Milestone 5
+
+15. [D-M5-00 Semantic events](./designs/D-M5-00-semantic-events.md)
+
+### Milestone 6
+
+16. [D-M6-00 Dual store: raw_events + domain events (Option A)](./designs/D-M6-00-raw-events-store.md) — DB schema **1.4.0**, payload `CURRENT_VERSION` stays **1.3.0**; Timeline Summary \| Raw evidence; `cognit raw backfill`
+
 ## Design template (used by all)
 
 Every design answers:

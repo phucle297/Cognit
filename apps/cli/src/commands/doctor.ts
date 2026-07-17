@@ -188,9 +188,10 @@ const checkCaptureHealth = async (projectRoot: string): Promise<CheckResult[]> =
     });
   }
 
-  // Inbox pending / error sidecars (filesystem, no DB).
-  const inboxDir = projectPaths(projectRoot).inbox;
-  const processedDir = path.join(inboxDir, "processed");
+  // Inbox pending / error sidecars + processed archive (filesystem).
+  const paths = projectPaths(projectRoot);
+  const inboxDir = paths.inbox;
+  const processedDir = paths.processed;
   const errorDir = path.join(inboxDir, "_error");
   const countJsonFiles = (dir: string): number => {
     if (!fs.existsSync(dir)) return 0;
@@ -212,7 +213,7 @@ const checkCaptureHealth = async (projectRoot: string): Promise<CheckResult[]> =
     }
   }
   const errors = countJsonFiles(errorDir);
-  void processedDir;
+  const processedCount = countJsonFiles(processedDir);
   // Soft cap from config (inbox.max_pending, default 1000). Fall back
   // to 1000 when yaml is unreadable so doctor still reports something.
   let maxPending = 1000;
@@ -251,6 +252,57 @@ const checkCaptureHealth = async (projectRoot: string): Promise<CheckResult[]> =
       ? `last drain ${lastDrain}`
       : "never drained (run a read command like `cognit continue`)",
   });
+
+  // D-M6-00: raw_events dual-store health + processed>>raw backfill hint.
+  try {
+    const rawStats = await Effect.runPromise(
+      withAppLayer(
+        projectRoot,
+        Effect.gen(function* () {
+          const conn = yield* DbConnection;
+          const rawCount =
+            conn.handle.get<{ c: number }>("SELECT COUNT(*) AS c FROM raw_events")?.c ?? 0;
+          const domainWithCorr =
+            conn.handle.get<{ c: number }>(
+              "SELECT COUNT(*) AS c FROM events WHERE correlation_id IS NOT NULL",
+            )?.c ?? 0;
+          return { rawCount, domainWithCorr };
+        }),
+      ),
+    );
+    checks.push({
+      id: "raw.events",
+      label: "raw store: raw_events rows",
+      status: "pass",
+      detail: `${rawStats.rawCount} raw envelope(s); ${rawStats.domainWithCorr} domain row(s) with correlation_id`,
+    });
+    const gap = processedCount - rawStats.rawCount;
+    if (processedCount > 0 && gap > 0) {
+      checks.push({
+        id: "raw.backfill_hint",
+        label: "raw store: processed vs raw_events",
+        status: "warn",
+        detail: `${processedCount} file(s) in .cognit/processed/ vs ${rawStats.rawCount} raw_events (${gap} more on disk — run \`cognit raw backfill\`)`,
+      });
+    } else {
+      checks.push({
+        id: "raw.backfill_hint",
+        label: "raw store: processed vs raw_events",
+        status: "pass",
+        detail:
+          processedCount === 0
+            ? "no processed/ archive yet"
+            : `${processedCount} processed file(s) covered by raw_events`,
+      });
+    }
+  } catch (e) {
+    checks.push({
+      id: "raw.events",
+      label: "raw store: raw_events rows",
+      status: "skip",
+      detail: `skipped: ${(e as Error).message}`,
+    });
+  }
 
   return checks;
 };

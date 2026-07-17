@@ -15,6 +15,7 @@ import {
   Logger,
   LoggerNoop,
   ProjectService,
+  RawEventStore,
   SessionPolicy,
   SessionPolicyDefault,
   SessionService,
@@ -57,6 +58,7 @@ export type AppServices =
   | SnapshotService
   | ProjectService
   | CognitionService
+  | RawEventStore
   | Logger
   | Redactor
   | RedactionConfig

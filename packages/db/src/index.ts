@@ -23,6 +23,7 @@ export * from "./bus";
 export * from "./bus-noop";
 export * from "./bus-live";
 export * from "./envelope";
+export * from "./raw-event-store";
 export * from "./inbox";
 export * from "./inbox-sidecar";
 export * from "./actor-defaults";

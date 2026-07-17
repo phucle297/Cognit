@@ -234,6 +234,42 @@ export const decodeEnvelope = (parsed: unknown): Either.Either<DecodedEnvelope, 
  * at a resolved session id. `ingest` resolves the session (envelope id
  * → sticky pointer → minted bootstrap), then calls this.
  */
+/**
+ * Reconstruct FLAT wire envelope for raw_events storage / re-ingest.
+ * Never JSON.stringify(decoded) — DecodedEnvelope is camelCase.
+ * Top-level session/actor keys are snake_case; optional link fields
+ * stay camelCase as in EnvelopeSchema.
+ */
+export const toWireEnvelope = (d: DecodedEnvelope): Record<string, unknown> => {
+  const wire: Record<string, unknown> = {
+    type: d.type,
+    version: d.version,
+    session_id: d.sessionId,
+    actor_name: d.actorName,
+    actor_type: d.actorType,
+    payload: d.payload,
+  };
+  if (d.id !== undefined) wire["id"] = d.id;
+  if (d.source !== undefined) {
+    wire["source"] = {
+      tool: d.source.tool,
+      command: d.source.command,
+      ...(d.source.filePath !== undefined ? { filePath: d.source.filePath } : {}),
+    };
+  }
+  if (d.artifactRefs !== undefined) wire["artifactRefs"] = d.artifactRefs;
+  if (d.causationId !== undefined) wire["causationId"] = d.causationId;
+  if (d.correlationId !== undefined) wire["correlationId"] = d.correlationId;
+  if (d.confidence !== undefined) wire["confidence"] = d.confidence;
+  if (d.parentVerificationId !== undefined) {
+    wire["parentVerificationId"] = d.parentVerificationId;
+  }
+  if (d.linkedHypothesisId !== undefined) {
+    wire["linkedHypothesisId"] = d.linkedHypothesisId;
+  }
+  return wire;
+};
+
 export const envelopeToAppendInput = (
   e: DecodedEnvelope,
   sessionId: string,

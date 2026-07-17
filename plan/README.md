@@ -51,6 +51,9 @@ This directory is the implementation roadmap derived from architecture review fi
 | [D-M2-03](./designs/D-M2-03-docs-alignment.md) | M2 | README / scope alignment |
 | [D-M2-04](./designs/D-M2-04-npm-package.md) | M2 | Publishable CLI package |
 | [D-M3-01](./designs/D-M3-01-payload-evolution.md) | M3 | Payload migration evolution (when needed) |
+| [D-M4-00](./designs/D-M4-00-inbox-ingestion-oob.md) | M4 | Inbox ingestion OOB |
+| [D-M5-00](./designs/D-M5-00-semantic-events.md) | M5 | Semantic event pipeline |
+| [D-M6-00](./designs/D-M6-00-raw-events-store.md) | M6 | Dual store: `raw_events` + domain `events` (Option A) |
 
 ## Implementation rules (binding)
 

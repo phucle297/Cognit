@@ -102,7 +102,7 @@ export type AppendError =
 export type ReadError = DbError | NotFound;
 
 export class NotFound extends Data.TaggedError("NotFound")<{
-  readonly entity: "event" | "session" | "actor" | "project";
+  readonly entity: "event" | "session" | "actor" | "project" | "raw_event";
   readonly id: string;
 }> {}
 

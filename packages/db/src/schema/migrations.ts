@@ -36,6 +36,13 @@ const loadMigration = (file: string): string =>
 const MIGRATION_0002_SQL = loadMigration("0002_payload_v1.1.0.sql");
 const MIGRATION_0003_SQL = loadMigration("0003_gravity_fired_at_v1.2.0.sql");
 const MIGRATION_0004_SQL = loadMigration("0004_constraint_action_log_v1.3.0.sql");
+const MIGRATION_0005_SQL = loadMigration("0005_raw_events_v1.4.0.sql");
+
+/**
+ * SQLite DDL head version. Independent of payload CURRENT_VERSION
+ * (which stays at 1.3.0 for D-M6-00 — see KD-2).
+ */
+export const DB_SCHEMA_VERSION = "1.4.0" as const;
 
 export interface Migration {
   readonly version: string;
@@ -100,6 +107,18 @@ const MIGRATIONS: ReadonlyArray<Migration> = [
           db.exec(MIGRATION_0004_SQL);
         },
         catch: (e) => new DbError({ message: `migration 1.3.0 failed: ${String(e)}`, cause: e }),
+      }),
+  },
+  {
+    version: "1.4.0",
+    up: (db) =>
+      Effect.try({
+        try: () => {
+          // D-M6-00 — dual logical store: raw_events + correlation index.
+          // Does not bump payload CURRENT_VERSION (stays 1.3.0).
+          db.exec(MIGRATION_0005_SQL);
+        },
+        catch: (e) => new DbError({ message: `migration 1.4.0 failed: ${String(e)}`, cause: e }),
       }),
   },
 ];

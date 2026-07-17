@@ -26,10 +26,14 @@ import {
   CURRENT_VERSION,
   DbConnection,
   DbError,
+  EventStore,
+  NotFound,
+  RawEventStore,
   SessionService,
   UnknownEventType,
   type EventRow,
   type ActorType,
+  type RawEventRow,
 } from "@cognit/db";
 import { envelope } from "../envelope.js";
 import { apiErrorResponse } from "../api-error.js";
@@ -309,5 +313,75 @@ export const registerEventsRoutes = (app: Hono, deps: EventsRouteDeps): void => 
       }),
       201,
     );
+  });
+
+  // D-M6-00: GET /api/events/:id/raw — must register before bare :id
+  app.get("/api/events/:id/raw", async (c) => {
+    const id = c.req.param("id");
+    if (!ULID_RE.test(id)) {
+      return apiErrorResponse(c, "bad_request", "`id` must be a 26-char ULID");
+    }
+    const program = Effect.gen(function* () {
+      const rawStore = yield* RawEventStore;
+      return yield* rawStore.resolveForEventId(id);
+    });
+    const exit = await runtime.runPromiseExit(
+      program as Effect.Effect<
+        { row: RawEventRow; domainEventId: string | null },
+        NotFound,
+        never
+      >,
+    );
+    if (exit._tag === "Failure") {
+      return apiErrorResponse(c, "not_found", "no raw envelope for event");
+    }
+    const { row, domainEventId } = (
+      exit as { value: { row: RawEventRow; domainEventId: string | null } }
+    ).value;
+    let parsedEnvelope: unknown = {};
+    try {
+      parsedEnvelope = JSON.parse(row.envelope_json);
+    } catch {
+      parsedEnvelope = {};
+    }
+    return c.json(
+      envelope("events.raw", {
+        raw_event: {
+          id: row.id,
+          project_id: row.project_id,
+          session_id: row.session_id,
+          type: row.type,
+          version: row.version,
+          actor_name: row.actor_name,
+          actor_type: row.actor_type,
+          domain_event_count: row.domain_event_count,
+          created_at: row.created_at,
+          source_tool: row.source_tool,
+          source_command: row.source_command,
+          envelope: parsedEnvelope,
+        },
+        domain_event_id: domainEventId,
+      }),
+    );
+  });
+
+  // D-M6-00: GET /api/events/:id — domain event by id
+  app.get("/api/events/:id", async (c) => {
+    const id = c.req.param("id");
+    if (!ULID_RE.test(id)) {
+      return apiErrorResponse(c, "bad_request", "`id` must be a 26-char ULID");
+    }
+    const program = Effect.gen(function* () {
+      const store = yield* EventStore;
+      return yield* store.get(id);
+    });
+    const exit = await runtime.runPromiseExit(
+      program as Effect.Effect<EventRow, NotFound, never>,
+    );
+    if (exit._tag === "Failure") {
+      return apiErrorResponse(c, "not_found", "event not found");
+    }
+    const event = (exit as { value: EventRow }).value;
+    return c.json(envelope("events.get", { event }));
   });
 };

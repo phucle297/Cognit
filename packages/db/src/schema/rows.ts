@@ -111,6 +111,23 @@ export interface InboxProcessedRow {
   processed_at: string;
 }
 
+/** D-M6-00: full redacted wire envelope (raw store). */
+export interface RawEventRow {
+  id: string;
+  project_id: string;
+  session_id: string;
+  type: string;
+  version: string;
+  actor_name: string;
+  actor_type: "human" | "worker" | "system";
+  envelope_json: string;
+  source_tool: string | null;
+  source_command: string | null;
+  domain_event_count: number;
+  source_file: string | null;
+  created_at: string;
+}
+
 export interface HypothesisRow {
   id: string;
   session_id: string;

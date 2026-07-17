@@ -128,6 +128,13 @@ export const TABLES_DDL: ReadonlyArray<string> = [
    )`,
 ];
 
+/**
+ * Post-1.0.0 objects (not in TABLES_DDL; applied by migrations only):
+ *   - hypotheses.gravity_fired_at          → 0003_gravity_fired_at_v1.2.0.sql
+ *   - constraint_action_log                → 0004_constraint_action_log_v1.3.0.sql
+ *   - raw_events + idx_events_correlation  → 0005_raw_events_v1.4.0.sql (D-M6-00)
+ */
+
 /** Pragmas applied at open. WAL = crash-safe + concurrent reader. */
 export const PRAGMAS: ReadonlyArray<string> = [
   `PRAGMA journal_mode = WAL`,

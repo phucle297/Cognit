@@ -12,6 +12,7 @@ import {
   LoggerNoop,
   MigrationRegistryLive,
   openDb,
+  RawEventStoreLive,
   RedactorLiveWithDefault,
   SessionPolicy,
   SessionService,
@@ -47,20 +48,19 @@ const makeTestLayer = (
   const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   // eventStore consumes DbConnection once; dbConn is merged back in below.
   const eventStore = Layer.provide(Layer.provide(EventStoreDefault, leafs), dbConn);
+  // D-M6-00 raw store
+  const rawEvents = Layer.provide(RawEventStoreLive, Layer.merge(leafs, dbConn));
   // snapshotService depends on DbConnection + leafs.
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   // constraintPolicy depends on EventStore.
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   // sessionService needs EventStore + SnapshotService + ConstraintPolicy
-  // + leafs + DbConnection + SessionPolicy + EventBus. Provide
-  // EventBusNoop INSIDE the chain so the constructed `sessionService`
-  // has R=never; without that, the public merge would have to
-  // self-satisfy and runtime builds flake.
+  // + RawEventStore + leafs + DbConnection + SessionPolicy + EventBus.
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, policyLayer), leafs),
     Layer.merge(
       Layer.merge(
-        Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy),
+        Layer.merge(Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy), rawEvents),
         dbConn,
       ),
       EventBusNoop,
@@ -68,7 +68,7 @@ const makeTestLayer = (
   );
   return Layer.merge(
     Layer.merge(
-      Layer.merge(Layer.merge(eventStore, sessionService), snapshotService),
+      Layer.merge(Layer.merge(Layer.merge(eventStore, sessionService), snapshotService), rawEvents),
       constraintPolicy,
     ),
     Layer.merge(dbConn, LoggerNoop),
@@ -1274,6 +1274,16 @@ describe("SessionService.ingest (semantic pipeline)", () => {
         const types = domainTypes(conn, sessionId);
         expect(types).toEqual(["action_recorded"]);
         expect(types).not.toContain("raw_tool_signal");
+
+        // D-M6-00: dual-write raw envelope
+        const raw = conn.handle.get<{ id: string; domain_event_count: number; type: string }>(
+          "SELECT id, domain_event_count, type FROM raw_events WHERE id = ?",
+          [INGEST_EVENT_WRITE],
+        );
+        expect(raw?.id).toBe(INGEST_EVENT_WRITE);
+        expect(raw?.type).toBe("raw_tool_signal");
+        expect(raw?.domain_event_count).toBe(1);
+        expect(r.event.correlation_id).toBe(INGEST_EVENT_WRITE);
       }),
     );
   });
@@ -1311,7 +1321,7 @@ describe("SessionService.ingest (semantic pipeline)", () => {
     );
   });
 
-  it("raw_tool_signal todo_write → ignore success (no domain events)", async () => {
+  it("raw_tool_signal todo_write → ignore success stores raw with count 0", async () => {
     await runWithLayer(
       Effect.gen(function* () {
         const conn = yield* DbConnection;
@@ -1343,6 +1353,12 @@ describe("SessionService.ingest (semantic pipeline)", () => {
         expect(r.event.session_id).toBe(sessionId);
         // No domain rows (seeded session has no session_created either).
         expect(domainTypes(conn, sessionId)).toEqual([]);
+        // D-M6-00: ignore still persists raw with domain_event_count=0
+        const raw = conn.handle.get<{ domain_event_count: number }>(
+          "SELECT domain_event_count FROM raw_events WHERE id = ?",
+          [INGEST_EVENT_TODO],
+        );
+        expect(raw?.domain_event_count).toBe(0);
       }),
     );
   });

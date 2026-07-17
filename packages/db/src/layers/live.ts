@@ -15,6 +15,7 @@ import { CognitionService, CognitionServiceLive } from "../cognition-service";
 import { ConstraintPolicy, ConstraintPolicyLive } from "../constraint-policy";
 import { DbSize, DbSizeLive } from "../db-size";
 import { ArtifactRepo, ArtifactRepoLive } from "../artifact-repo";
+import { RawEventStore, RawEventStoreLive } from "../raw-event-store";
 import type { DbError, DbCorrupted } from "../errors";
 
 /**
@@ -78,7 +79,8 @@ export const DbLive = (
   | DbSize
   | ArtifactRepo
   | VerificationQueries
-  | GravityQueries,
+  | GravityQueries
+  | RawEventStore,
   DbError | DbCorrupted,
   never
 > => {
@@ -105,6 +107,8 @@ export const DbLive = (
   );
   // EventStore needs DbConnection + Redactor + Uuid + Logger (leafs).
   const eventStore = Layer.provide(Layer.provide(EventStoreLive, localLeafs), dbConn);
+  // D-M6-00 RawEventStore needs DbConnection + Redactor + Logger.
+  const rawEvents = Layer.provide(RawEventStoreLive, Layer.merge(localLeafs, dbConn));
   // SnapshotService needs DbConnection + Uuid + Logger.
   const snapshots = Layer.provide(SnapshotServiceLive, Layer.merge(localLeafs, dbConn));
   // VerificationQueries is read-only and only needs DbConnection.
@@ -121,12 +125,11 @@ export const DbLive = (
   // ConstraintPolicy needs EventStore.
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   // SessionService needs EventStore + SnapshotService + ConstraintPolicy
-  // + leafs. After we provide eventStore and snapshots below, the only
-  // remaining dep on R is from the leafs, which we already provided.
+  // + RawEventStore + leafs.
   const sessions = Layer.provide(
     Layer.provide(
       Layer.provide(SessionServiceLive, localLeafs),
-      Layer.merge(Layer.merge(eventStore, snapshots), constraintPolicy),
+      Layer.merge(Layer.merge(Layer.merge(eventStore, snapshots), constraintPolicy), rawEvents),
     ),
     localLeafs,
   );
@@ -151,6 +154,7 @@ export const DbLive = (
   // test layers in this package for the wiring shape.
   const inner = Layer.mergeAll(
     eventStore,
+    rawEvents,
     sessions,
     snapshots,
     projects,
@@ -179,7 +183,8 @@ export const DbLive = (
     | DbSize
     | ArtifactRepo
     | VerificationQueries
-    | GravityQueries,
+    | GravityQueries
+    | RawEventStore,
     DbError | DbCorrupted,
     never
   >;

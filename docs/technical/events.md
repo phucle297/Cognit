@@ -65,6 +65,13 @@ Domain event type is derived from **meaning**, not tool name:
 
 See `plan/designs/D-M5-00-semantic-events.md` and `packages/core/src/semantics/`.
 
+### Dual store (D-M6-00)
+
+Classify-path ingest also persists the **redacted full wire envelope** in
+`raw_events` (raw-first, then domain). Domain `events.correlation_id` links
+to `raw_events.id`. Timeline: `GET /api/events/:id` (domain) and
+`GET /api/events/:id/raw` (evidence). Design: `plan/designs/D-M6-00-raw-events-store.md`.
+
 Each type has its own payload schema; see
 `packages/db/src/event-schema.ts` for the authoritative Effect Schema
 definitions.

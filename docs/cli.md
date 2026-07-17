@@ -50,8 +50,9 @@ count. Each lives in its own file under `apps/cli/src/commands/`.
 | 22 | `schema-dump`  | `apps/cli/src/commands/schema-dump.ts`            | Print the v1 JSON envelope shape as TypeScript types.                                         |
 | 23 | `recovery`     | `apps/cli/src/commands/recovery.ts`               | Read a v0.2 recovery envelope, or fuzzy-search sessions.                                      |
 | 24 | `gc`           | `apps/cli/src/commands/gc.ts`                     | Garbage-collect stale artifacts past `cleanup.artifact_max_age_days`; archive / delete / keep. |
-| 25 | `export`       | `apps/cli/src/commands/export.ts`                 | Export the current project to a `tar.gz` bundle (manifest + `cognit.yaml` + `cognit.db` + optional `artifacts/`). |
-| 26 | `import`       | `apps/cli/src/commands/import.ts`                 | Import a `tar.gz` bundle produced by `cognit export` (`skip` / `overwrite` / `fork`).          |
+| 25 | `export`       | `apps/cli/src/commands/export.ts`                 | Export the current project to a `tar.gz` bundle (manifest + `cognit.yaml` + `cognit.db` + optional `artifacts/`). Manifest `schema_version` is the **DB** schema head (e.g. 1.4.0), not payload `CURRENT_VERSION`. |
+| 26 | `import`       | `apps/cli/src/commands/import.ts`                 | Import a `tar.gz` bundle produced by `cognit export` (`skip` / `overwrite` / `fork`). Fork remaps `raw_events` ids and domain `correlation_id` via the `raw_events:` id map (D-M6-00). |
+| 26b | `raw`        | `apps/cli/src/commands/raw.ts`                    | **D-M6-00** raw envelope store. `cognit raw backfill` loads missing rows from `.cognit/processed/*.json` into `raw_events` (strict decode; no session invent; `--dry-run` / `--limit` / `--verbose`). |
 
 ## LLM and runtime surfaces
 

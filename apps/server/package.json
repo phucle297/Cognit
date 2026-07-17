@@ -4,11 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && pnpm run copy-migrations",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest --run --passWithNoTests",
     "test:watch": "vitest",
+    "copy-migrations": "rm -rf dist/migrations && cp -R ../../packages/db/src/schema/migrations dist/migrations",
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {

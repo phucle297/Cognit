@@ -20,6 +20,7 @@ import {
   UuidTest,
   openDb,
   CURRENT_VERSION,
+  RawEventStoreLive,
 } from "../src";
 import { EventStoreDefault } from "../src/event-store";
 import { SessionServiceLive } from "../src/session-service";
@@ -59,12 +60,16 @@ const makeTestLayer = (dbPath: string) => {
   // pull trust defaults off the R-channel instead of the historical
   // hardcoded literal.
   const eventStore = Layer.provide(Layer.provide(EventStoreDefault, leafs), dbConn);
+  const rawEvents = Layer.provide(RawEventStoreLive, Layer.merge(leafs, dbConn));
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   const constraintPolicy = Layer.provide(ConstraintPolicyLive, eventStore);
   const sessionService = Layer.provide(
     Layer.provide(Layer.provide(SessionServiceLive, SessionPolicyDefault), leafs),
     Layer.merge(
-      Layer.merge(Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy), dbConn),
+      Layer.merge(
+        Layer.merge(Layer.merge(Layer.merge(eventStore, snapshotService), constraintPolicy), rawEvents),
+        dbConn,
+      ),
       EventBusNoop,
     ),
   );

@@ -69,16 +69,29 @@ The schema is applied via the DDL in `packages/db/src/schema/tables.ts:11-129`
 - `busy_timeout = 5000` — 5s tolerance for short-lived lock contention.
 
 Schema migrations are tracked in the singleton `schema_version` table
-(`tables.ts:109`) and applied by `packages/db/src/migrate.ts`.
+(`tables.ts:109`) and applied by `packages/db/src/schema/migrations.ts`.
+**DB schema version** (currently **1.4.0** after D-M6-00) is independent of
+event payload `CURRENT_VERSION` (**1.3.0**). Export manifest `schema_version`
+reads the DB row (not the payload constant).
+
+### Dual store (D-M6-00)
+
+| Store | Table | Role |
+|-------|-------|------|
+| Domain | `events` | Summaries / meaning; reducer + timeline |
+| Raw | `raw_events` | Redacted full tool envelopes; evidence UI |
+
+Classify-path ingest writes raw first, then domain. Full unredacted copies may still exist under `.cognit/processed/` (dual-write safety net). Operator backfill: `cognit raw backfill`.
 
 ## Backup + portability
 
 - The full project can be exported to a `tar.gz` bundle by
   `cognit export` (`apps/cli/src/commands/export.ts:1`); bundle contents:
   manifest + `cognit.yaml` + `cognit.db` + optional `artifacts/`.
+  Raw envelopes travel inside `cognit.db` (`raw_events`); `processed/` is not required in the bundle.
 - A bundle can be re-imported with `cognit import`
   (`apps/cli/src/commands/import.ts:1`) under one of three policies:
-  `skip` / `overwrite` / `fork`.
+  `skip` / `overwrite` / `fork` (fork remaps `raw_events` ids and domain `correlation_id`).
 - Per-session snapshots are stored under `snapshots/` and in the `snapshots`
   table; the reducer folds snapshot + tail on cold-start
   (`packages/core/src/reducer.ts:13`).

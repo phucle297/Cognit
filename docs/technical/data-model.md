@@ -14,7 +14,8 @@ TypeScript row types live alongside in `packages/db/src/schema/rows.ts`.
 | `projects`        | `id`     | One row per initialised Cognit project. Created by `cognit init` (`tables.ts:12`).                                |
 | `sessions`        | `id`     | Investigation session inside a project. Has `status` ∈ `active`/`paused`/`closed` and optional `parent_session_id` for forks. Pointer to the latest snapshot at `last_snapshot_event_id` (`tables.ts:19`). |
 | `actors`          | `id`     | Registered emitters of events: `human`, `worker`, or `system`. Uniqueness on `name`. Carries `trust_score` and config JSON (`tables.ts:30`). |
-| `events`          | `id`     | Append-only event log. `type` is the discriminator; `payload_json` holds the type-specific body. `causation_id` + `correlation_id` give basic causality. FKs to `projects`, `sessions`, `actors`, and self-references for `parent_verification_id` / `linked_hypothesis_id` (`tables.ts:40`). |
+| `events`          | `id`     | Append-only **domain** event log (SSOT for reducer / timeline). `type` is the discriminator; `payload_json` holds the type-specific body. Soft link to raw: `correlation_id` → `raw_events.id` (D-M6-00). |
+| `raw_events`      | `id`     | **D-M6-00** redacted full wire envelopes (SSOT for evidence / UI raw tab / best-effort reclassify). Migration `0005_raw_events_v1.4.0.sql`. Not folded by the reducer. |
 | `snapshots`       | `id`     | Frozen projection of a session's state at `event_id`, with `event_count` and the folded `state_json`. Used for fast cold-start (`tables.ts:67`). |
 | `artifacts`       | `id`     | Content-addressed file attached to a session. `sha256` + `size_bytes` + `kind`. May be archived (`archived_at`) when GC runs (`tables.ts:76`). |
 | `edges`           | `id`     | Typed relationship between two entities: `from_entity_type`/`from_entity_id` → `to_entity_type`/`to_entity_id`. Indexed both directions (`tables.ts:87`). |

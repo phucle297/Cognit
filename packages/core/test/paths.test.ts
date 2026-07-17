@@ -69,6 +69,7 @@ describe("projectPaths", () => {
       "gitignore",
       "inbox",
       "inboxError",
+      "processed",
       "artifacts",
       "artifactsCurated",
       "snapshots",
@@ -86,6 +87,7 @@ describe("projectPaths", () => {
     expect(p.gitignore).toBe(path.join(tmp, ".cognit", ".gitignore"));
     expect(p.inbox).toBe(path.join(tmp, ".cognit", "inbox"));
     expect(p.inboxError).toBe(path.join(tmp, ".cognit", "inbox", "_error"));
+    expect(p.processed).toBe(path.join(tmp, ".cognit", "processed"));
     expect(p.artifacts).toBe(path.join(tmp, ".cognit", "artifacts"));
     expect(p.artifactsCurated).toBe(path.join(tmp, ".cognit", "artifacts", "curated"));
     expect(p.snapshots).toBe(path.join(tmp, ".cognit", "snapshots"));

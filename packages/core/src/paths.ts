@@ -55,6 +55,8 @@ export interface ProjectPaths {
   gitignore: string;
   inbox: string;
   inboxError: string;
+  /** Successfully processed inbox envelopes (D-M4 / D-M6 backfill source). */
+  processed: string;
   artifacts: string;
   artifactsCurated: string;
   snapshots: string;
@@ -73,6 +75,7 @@ export function projectPaths(projectRoot: string): ProjectPaths {
     gitignore: path.join(dir, ".gitignore"),
     inbox: path.join(dir, "inbox"),
     inboxError: path.join(dir, "inbox", "_error"),
+    processed: path.join(dir, "processed"),
     artifacts: path.join(dir, "artifacts"),
     artifactsCurated: path.join(dir, "artifacts", "curated"),
     snapshots: path.join(dir, "snapshots"),

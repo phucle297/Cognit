@@ -29,6 +29,7 @@ import {
   Logger,
   LoggerNoop,
   ProjectService,
+  RawEventStore,
   SessionPolicyDefault,
   SessionService,
   SnapshotService,
@@ -62,6 +63,7 @@ type TestContext =
   | ConstraintPolicy
   | VerificationQueries
   | GravityQueries
+  | RawEventStore
   | EventBus
   | Logger
   | Uuid

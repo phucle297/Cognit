@@ -33,6 +33,7 @@ import {
   RejectionSheet,
   type RejectionSummary,
 } from "@/widgets/rejection-sheet";
+import { RawEvidencePanel } from "@/components/RawEvidencePanel";
 
 export type EventsResp = {
   events: ReadonlyArray<EventRowShape>;
@@ -166,6 +167,8 @@ export const TimelinePage = (): JSX.Element => {
 
   const [selectedEvent, setSelectedEvent] = useState<EventRowShape | null>(null);
   const [fullEvent, setFullEvent] = useState<unknown>(null);
+  /** D-M6-00: Summary | Raw evidence tabs */
+  const [detailTab, setDetailTab] = useState<"summary" | "raw">("summary");
   // Phase B.4 row action: "Why was this rejected?" opens a side
   // sheet with supporting observations, contradicting observations,
   // the linked check, the AI rank history sparkline, and a
@@ -174,10 +177,11 @@ export const TimelinePage = (): JSX.Element => {
   useEffect(() => {
     if (!selectedEvent) {
       setFullEvent(null);
+      setDetailTab("summary");
       return;
     }
     // Prefer the already-normalized row payload (list endpoint has full
-    // payload_json). Optional GET /api/events/:id is not implemented yet.
+    // payload_json). GET /api/events/:id available for deep fetch later.
     setFullEvent({
       id: selectedEvent.id,
       kind: selectedEvent.kind,
@@ -186,6 +190,7 @@ export const TimelinePage = (): JSX.Element => {
       ts: selectedEvent.ts,
       payload: selectedEvent.payload,
     });
+    setDetailTab("summary");
   }, [selectedEvent]);
 
   if (!sessionId) {
@@ -466,23 +471,69 @@ export const TimelinePage = (): JSX.Element => {
       >
         {selectedEvent ? (
           <div className="flex flex-col gap-3">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">When</div>
-              <div className="font-mono text-xs">{formatIso(selectedEvent.ts)}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Actor</div>
-              <div>{selectedEvent.actor || "—"}</div>
-            </div>
-            <div>
-              <div className="text-xs uppercase tracking-wide text-muted-foreground">Payload</div>
-              <pre
-                data-testid="timeline-event-payload"
-                className="mt-1 max-h-96 overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-xs"
+            <div
+              className="flex gap-1 border-b pb-2"
+              role="tablist"
+              data-testid="timeline-detail-tabs"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={detailTab === "summary"}
+                data-testid="timeline-tab-summary"
+                data-on={detailTab === "summary"}
+                onClick={(): void => setDetailTab("summary")}
+                className={
+                  detailTab === "summary"
+                    ? "rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground"
+                    : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                }
               >
-                {fullEvent ? JSON.stringify(fullEvent, null, 2) : "Loading…"}
-              </pre>
+                Summary
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={detailTab === "raw"}
+                data-testid="timeline-tab-raw"
+                data-on={detailTab === "raw"}
+                onClick={(): void => setDetailTab("raw")}
+                className={
+                  detailTab === "raw"
+                    ? "rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground"
+                    : "rounded-md px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                }
+              >
+                Raw evidence
+              </button>
             </div>
+            {detailTab === "summary" ? (
+              <>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">When</div>
+                  <div className="font-mono text-xs">{formatIso(selectedEvent.ts)}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Actor</div>
+                  <div>{selectedEvent.actor || "—"}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Family</div>
+                  <div>{eventFamilyLabel(selectedEvent.kind)}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Payload</div>
+                  <pre
+                    data-testid="timeline-event-payload"
+                    className="mt-1 max-h-96 overflow-auto rounded-md border bg-muted/50 p-2 font-mono text-xs"
+                  >
+                    {fullEvent ? JSON.stringify(fullEvent, null, 2) : "Loading…"}
+                  </pre>
+                </div>
+              </>
+            ) : (
+              <RawEvidencePanel eventId={selectedEvent.id} />
+            )}
           </div>
         ) : null}
       </Sheet>

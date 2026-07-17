@@ -46,6 +46,7 @@ import {
   SnapshotService,
   SnapshotServiceLive,
   UuidTest,
+  RawEventStoreLive,
 } from "../src";
 import { EventStoreDefault } from "../src/event-store";
 import {
@@ -94,6 +95,7 @@ const makeAuditLayer = (
   const dbConn = Layer.effect(DbConnection, openDb(dbPath));
   const leafs = Layer.mergeAll(RedactorLiveWithDefault, MigrationRegistryLive, UuidTest, LoggerNoop);
   const eventStore = Layer.provide(Layer.provide(EventStoreDefault, leafs), dbConn);
+  const rawEvents = Layer.provide(RawEventStoreLive, Layer.merge(leafs, dbConn));
   const snapshotService = Layer.provide(SnapshotServiceLive, Layer.merge(leafs, dbConn));
   // Inject the fixture policy in place of ConstraintPolicyLive.
   // `Layer.succeed` requires a Context.Tag — pass the resolved
@@ -123,7 +125,7 @@ const makeAuditLayer = (
     ),
     Layer.merge(
       Layer.merge(
-        Layer.merge(Layer.merge(eventStore, snapshotService), dbConn),
+        Layer.merge(Layer.merge(Layer.merge(eventStore, snapshotService), rawEvents), dbConn),
         leafs,
       ),
       EventBusNoop,

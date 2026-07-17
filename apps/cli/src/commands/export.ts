@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { create as tarCreate } from "tar";
 import BetterSqlite3 from "better-sqlite3";
-import { vacuumInto, CURRENT_VERSION } from "@cognit/db";
+import { vacuumInto, CURRENT_VERSION, DB_SCHEMA_VERSION } from "@cognit/db";
 import { Effect } from "effect";
 import { findProjectRoot, projectPaths } from "../paths.js";
 import { readConfig } from "../yaml-io.js";
@@ -121,11 +121,29 @@ export function registerExport(program: Command): void {
           }
 
           // 4. Manifest last — every other entry is on disk by now.
+          // D-M6-00 KD-2: schema_version is DB DDL head, not payload CURRENT_VERSION.
+          let dbSchemaVersion: string = DB_SCHEMA_VERSION;
+          try {
+            const schemaDb = new BetterSqlite3(path.join(work, "cognit.db"), {
+              readonly: true,
+            });
+            try {
+              const row = schemaDb
+                .prepare("SELECT version FROM schema_version WHERE id = 1")
+                .get() as { version?: string } | undefined;
+              if (row?.version) dbSchemaVersion = row.version;
+            } finally {
+              schemaDb.close();
+            }
+          } catch {
+            /* keep DB_SCHEMA_VERSION fallback */
+          }
           const manifest = {
             format_version: BUNDLE_FORMAT_VERSION,
             created_at: new Date().toISOString(),
             project_name: config.project.name,
-            schema_version: CURRENT_VERSION,
+            schema_version: dbSchemaVersion,
+            payload_version: CURRENT_VERSION,
           };
           await fs.writeFile(
             path.join(work, "manifest.json"),
@@ -166,7 +184,8 @@ export function registerExport(program: Command): void {
           emit("json", "export", {
             output: outAbs,
             formatVersion: BUNDLE_FORMAT_VERSION,
-            schemaVersion: CURRENT_VERSION,
+            schemaVersion: DB_SCHEMA_VERSION,
+            payloadVersion: CURRENT_VERSION,
             projectName: config.project.name,
             includeArtifacts: !!opts.includeArtifacts,
             artifactCount,

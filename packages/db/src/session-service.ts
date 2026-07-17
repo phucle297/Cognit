@@ -49,9 +49,11 @@ import type { AppendEventInput } from "./event-store";
 import {
   decodeEnvelope,
   envelopeToAppendInput,
+  toWireEnvelope,
   type DecodedEnvelope,
   type IngestError,
 } from "./envelope";
+import { RawEventStore } from "./raw-event-store";
 import { readCurrentSession, writeCurrentSession } from "@cognit/core/current-session";
 import {
   semanticPipeline,
@@ -142,6 +144,8 @@ export interface IngestInput {
   readonly projectRoot?: string;
   readonly lazyCreate?: boolean;
   readonly goalHint?: string;
+  /** Optional inbox/processed basename for raw_events.source_file (D-M6-00). */
+  readonly sourceFile?: string | null;
 }
 
 export interface SessionListQuery {
@@ -511,6 +515,7 @@ export const SessionServiceLive: Layer.Layer<
   | SessionPolicy
   | ConstraintPolicy
   | EventBus
+  | RawEventStore
 > = Layer.effect(
   SessionService,
   Effect.gen(function* () {
@@ -522,6 +527,7 @@ export const SessionServiceLive: Layer.Layer<
     const policy: Context.Tag.Service<typeof SessionPolicy> = yield* SessionPolicy;
     const constraintPolicy = yield* ConstraintPolicy;
     const eventBus: EventBusT = yield* EventBus;
+    const rawStore = yield* RawEventStore;
 
     // Private helper: the snapshot+tail replay path. Used by both
     // `show` (the public read API) and `appendEvent` (phase 3c
@@ -1330,14 +1336,15 @@ export const SessionServiceLive: Layer.Layer<
 
     /**
      * Unified envelope entry point (§1.5). Decode → resolve/create
-     * session → (optional D-M5-00 semantic classify) → append domain
-     * events via `appendEvent`. Inbox JSON and server `POST /events`
-     * both go through here.
+     * session → (optional D-M5-00 semantic classify) → D-M6-00 raw
+     * dual-write → append domain events via `appendEvent`. Inbox JSON
+     * and server `POST /events` both go through here.
      *
      * Classification path (raw_tool_signal + legacy Pre/Post tool hooks):
-     * never appends the transport envelope itself — only produced domain
-     * events. Empty produce (ignore) succeeds without a log write.
-     * CLI verbs and other types still single-append as before.
+     * never appends the transport envelope as a domain event — only
+     * produced domain events. Raw envelope is stored in raw_events
+     * first (fail-closed). Empty produce (ignore) still stores raw
+     * with domain_event_count=0. CLI verbs still single-append only.
      */
     const _ingest = (input: IngestInput): Effect.Effect<SessionAppendEventResult, IngestError> =>
       Effect.gen(function* () {
@@ -1377,21 +1384,37 @@ export const SessionServiceLive: Layer.Layer<
           sessionContext,
         );
 
+        // D-M6-00: raw-first dual-write. Fail → no domain appends.
+        const rawId = decoded.id ?? (yield* uuid.make());
+        const wire = toWireEnvelope({ ...decoded, id: rawId });
+        const projectId = sessionRow?.project_id ?? input.projectId;
+        yield* rawStore.append({
+          id: rawId,
+          projectId,
+          sessionId,
+          type: decoded.type,
+          version: decoded.version,
+          actorName: decoded.actorName,
+          actorType: decoded.actorType,
+          envelope: wire,
+          domainEventCount: produced.length,
+          ...(input.sourceFile !== undefined ? { sourceFile: input.sourceFile } : {}),
+        });
+
         if (produced.length === 0) {
-          // Ignore: succeed without appending. Synthetic row keeps
+          // Ignore: raw stored with count 0. Synthetic row keeps
           // inbox rename + callers that read result.event.id working.
-          const skipId = decoded.id ?? (yield* uuid.make());
           const synthetic = syntheticSkippedEventRow({
-            id: skipId,
-            projectId: sessionRow?.project_id ?? input.projectId,
+            id: rawId,
+            projectId,
             sessionId,
             type: decoded.type,
             version: decoded.version,
           });
           yield* logger.log(
             "info",
-            { sessionId, envelopeId: skipId, type: decoded.type },
-            "ingest: semantic pipeline ignored signal (no domain events)",
+            { sessionId, envelopeId: rawId, type: decoded.type },
+            "ingest: semantic pipeline ignored signal (raw stored, no domain events)",
           );
           return {
             event: synthetic,
@@ -1407,16 +1430,15 @@ export const SessionServiceLive: Layer.Layer<
           const p = produced[i]!;
           // Deterministic ids: envelope id + derived siblings so reprocess
           // is idempotent for multi-event produces (verify start+outcome).
-          const eventId =
-            decoded.id !== undefined ? derivedDomainEventId(decoded.id, i) : undefined;
+          const eventId = derivedDomainEventId(rawId, i);
           const appendInput: SessionAppendEventInput = {
             sessionId,
             type: p.type,
             payload: p.payload,
             actor: { name: decoded.actorName, type: decoded.actorType },
-            ...(eventId !== undefined ? { id: eventId } : {}),
+            id: eventId,
             ...(decoded.source !== undefined ? { source: decoded.source } : {}),
-            ...(decoded.id !== undefined ? { correlationId: decoded.id } : {}),
+            correlationId: rawId,
             ...(p.confidence !== undefined ? { confidence: p.confidence } : {}),
             ...(p.linked_hypothesis_id != null && p.linked_hypothesis_id !== undefined
               ? { linkedHypothesisId: p.linked_hypothesis_id }
