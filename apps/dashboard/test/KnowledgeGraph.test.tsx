@@ -47,46 +47,60 @@ describe("KnowledgeGraphPage (6.8.2.P4)", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders full-bleed node count", async () => {
+  const mockGraphFetch = (graph: GraphResp = sampleGraph): void => {
     globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-      if (String(url).includes("/graph")) {
-        return Promise.resolve(new Response(envelope(sampleGraph), { status: 200 }));
+      const u = String(url);
+      if (u.includes("/graph")) {
+        return Promise.resolve(new Response(envelope(graph), { status: 200 }));
       }
-      if (String(url).includes("/events")) {
+      if (u.includes("/events")) {
         return Promise.resolve(new Response(envelope({ events: [] }), { status: 200 }));
+      }
+      if (u.endsWith("/api/sessions") || u.includes("/api/sessions?")) {
+        return Promise.resolve(
+          new Response(
+            envelope({
+              sessions: [{ id: "01TEST", goal: "test", status: "active" }],
+            }),
+            { status: 200 },
+          ),
+        );
       }
       return Promise.resolve(new Response("{}", { status: 404 }));
     }) as unknown as typeof fetch;
+  };
 
+  it("renders full-bleed node count", async () => {
+    mockGraphFetch();
     renderKG("01TEST");
     const count = await screen.findByTestId("kg-node-count");
     expect(count).toHaveTextContent("2 nodes");
   });
 
+  it("shows session selector when no session", async () => {
+    mockGraphFetch();
+    render(
+      <MemoryRouter initialEntries={["/knowledge-graph"]}>
+        <SidebarProvider>
+          <Routes>
+            <Route path="/knowledge-graph" element={<KnowledgeGraphPage />} />
+          </Routes>
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("kg-session-select")).toBeInTheDocument();
+    expect(screen.getByText(/No session selected/i)).toBeInTheDocument();
+  });
+
   it("EmptyState when graph has 0 nodes", async () => {
     const empty: GraphResp = { session_id: "01TEST", nodes: [], edges: [] };
-    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-      if (String(url).includes("/graph")) {
-        return Promise.resolve(new Response(envelope(empty), { status: 200 }));
-      }
-      return Promise.resolve(new Response("{}", { status: 404 }));
-    }) as unknown as typeof fetch;
-
+    mockGraphFetch(empty);
     renderKG("01TEST");
     expect(await screen.findByTestId("kg-empty")).toBeInTheDocument();
   });
 
   it("does NOT auto-collapse sidebar on mount (user toggles manually)", async () => {
-    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
-      if (String(url).includes("/graph")) {
-        return Promise.resolve(new Response(envelope(sampleGraph), { status: 200 }));
-      }
-      if (String(url).includes("/events")) {
-        return Promise.resolve(new Response(envelope({ events: [] }), { status: 200 }));
-      }
-      return Promise.resolve(new Response("{}", { status: 404 }));
-    }) as unknown as typeof fetch;
-
+    mockGraphFetch();
     renderKG("01TEST");
     await screen.findByTestId("kg-node-count");
     await waitFor(() => {

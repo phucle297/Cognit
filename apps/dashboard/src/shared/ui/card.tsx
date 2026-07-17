@@ -9,7 +9,7 @@ import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "../lib/cn";
 
 const cardVariants = cva(
-  "rounded-lg text-card-foreground transition-[box-shadow,transform] duration-[var(--duration-base)] ease-[var(--ease-out)]",
+  "rounded-[var(--radius-lg)] text-card-foreground transition-[box-shadow,transform] duration-[var(--duration-base)] ease-[var(--ease-out)]",
   {
     variants: {
       variant: {

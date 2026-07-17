@@ -1,12 +1,8 @@
 /**
  * apps/dashboard/src/widgets/nav-bar/index.tsx — top chrome.
  *
- * Slim topbar in the Alina template pattern: breadcrumb on the
- * left, a global search input (placeholder — wires to the
- * recovery-center search API in a follow-up), and a version label
- * on the right. No notification bell or user profile chip —
- * Cognit is local-first CLI tooling and has no notification feed
- * or auth surface yet.
+ * Search is intentionally non-functional (placeholder styling) until
+ * it is wired to recovery search. Cognit is local-first; no auth chip.
  */
 import type { JSX } from "react";
 import { Search } from "lucide-react";
@@ -19,7 +15,7 @@ export const NavBar = (): JSX.Element => {
   return (
     <header
       data-testid="nav-bar"
-      className="flex h-14 items-center gap-4 border-b border-[oklch(0.88_0_0)] bg-card px-[var(--space-page-x)]"
+      className="flex h-14 items-center gap-4 border-b border-border bg-card px-[var(--space-page-x)]"
     >
       <Breadcrumb items={[{ label: "Cognit" }]} />
 
@@ -30,9 +26,12 @@ export const NavBar = (): JSX.Element => {
         />
         <Input
           type="search"
-          placeholder="Search sessions, observations, decisions…"
-          aria-label="Global search"
-          className="h-9 pl-8 pr-3 text-sm"
+          placeholder="Search coming soon…"
+          aria-label="Global search (not available yet)"
+          disabled
+          readOnly
+          className="h-9 cursor-not-allowed pl-8 pr-3 text-sm opacity-70"
+          data-testid="nav-search-placeholder"
         />
       </div>
 

@@ -1,15 +1,11 @@
 /**
- * apps/dashboard/src/pages/knowledge-graph.tsx — Knowledge Graph (6.8.2.P4).
+ * apps/dashboard/src/pages/knowledge-graph.tsx — Knowledge Graph.
  *
- * Full-bleed xyflow canvas with refined node theme (rounded
- * --radius, --shadow-sm, border by entity type color). Right
- * Sheet on node click (title / type / summary / related events).
- * Sidebar auto-collapses on mount and restores on unmount.
- *
- * FSD layer: pages. Reads `?session=<id>` from the URL.
+ * Session: ?session= → last graph session → empty + selector.
+ * FSD layer: pages.
  */
 import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Share2 } from "lucide-react";
 
 import { useApi } from "@/lib/use-api";
@@ -19,6 +15,10 @@ import { EmptyState } from "@/shared/ui/empty-state";
 import { ErrorState } from "@/shared/ui/error-state";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Sheet } from "@/shared/ui/sheet";
+import {
+  resolveGraphSession,
+  writeLastGraphSession,
+} from "@/shared/lib/graph-session";
 
 import { GraphCanvas, type GraphResp, type LayoutMode } from "@/components/GraphCanvas";
 import { GraphControls } from "@/components/GraphControls";
@@ -37,9 +37,32 @@ type EventsResp = {
   }>;
 };
 
+type SessionRow = {
+  readonly id: string;
+  readonly goal: string;
+  readonly status: string;
+};
+
+type SessionsResp = { readonly sessions: ReadonlyArray<SessionRow> };
+
 export const KnowledgeGraphPage = (): JSX.Element => {
-  const [searchParams] = useSearchParams();
-  const sessionId = searchParams.get("session") ?? "";
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSession = searchParams.get("session");
+  const sessionId = resolveGraphSession(urlSession);
+
+  // Persist last session and sync URL when we resolved from storage.
+  useEffect(() => {
+    if (!sessionId) return;
+    writeLastGraphSession(sessionId);
+    if (!urlSession) {
+      const next = new URLSearchParams(searchParams);
+      next.set("session", sessionId);
+      setSearchParams(next, { replace: true });
+    }
+  }, [sessionId, urlSession, searchParams, setSearchParams]);
+
+  const sessionsList = useApi<SessionsResp>("/api/sessions");
   const apiPath = sessionId ? buildPath(sessionId) : null;
 
   const { data, error, loading, refetch } = useApi<GraphResp>(apiPath);
@@ -66,15 +89,6 @@ export const KnowledgeGraphPage = (): JSX.Element => {
     [data, sessionId],
   );
 
-  // Phase B.4 query-string flags:
-  //   ?kind=decision  → restrict the rendered graph to decisions
-  //                    (matches the old `/decision-graph` view)
-  //   ?ai=1           → AI reasoning mode toggle. Adds a banner
-  //                    indicating the AI-reasoning filter is active;
-  //                    the full reasoning view still lives in
-  //                    Settings → Advanced → AI reasoning.
-  // Both flags are read from `searchParams` (already destructured
-  // above) and applied as filters on the node list before render.
   const kindFilter = searchParams.get("kind");
   const aiMode = searchParams.get("ai") === "1";
   const filteredNodes = useMemo<GraphResp["nodes"]>(() => {
@@ -103,6 +117,19 @@ export const KnowledgeGraphPage = (): JSX.Element => {
 
   const onZoomReset = useCallback(() => setRemountKey((k) => k + 1), []);
 
+  const onPickSession = useCallback(
+    (id: string): void => {
+      if (!id) return;
+      writeLastGraphSession(id);
+      const next = new URLSearchParams(searchParams);
+      next.set("session", id);
+      setSearchParams(next, { replace: true });
+      setMode(null);
+      setSelectedNode(null);
+    },
+    [searchParams, setSearchParams],
+  );
+
   const visibleNodeCount = filteredGraph.nodes.length;
 
   const relatedEvents = useMemo<
@@ -122,22 +149,43 @@ export const KnowledgeGraphPage = (): JSX.Element => {
       .map((e) => ({ id: e.id, type: e.type, created_at: e.created_at }));
   }, [selectedNode, events.data]);
 
+  const sessionSelect = (
+    <label className="flex flex-col gap-1 text-xs" data-testid="kg-session-select-wrap">
+      <span className="font-medium uppercase tracking-wide text-muted-foreground">Session</span>
+      <select
+        className="h-9 max-w-md rounded-[var(--radius)] border border-input bg-background px-3 text-sm"
+        value={sessionId}
+        onChange={(e): void => onPickSession(e.target.value)}
+        data-testid="kg-session-select"
+        aria-label="Select session for graph"
+      >
+        <option value="">Select a session…</option>
+        {(sessionsList.data?.sessions ?? []).map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.goal} ({s.status})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+
   if (!sessionId) {
     return (
-      <div className="flex flex-col gap-3" data-testid="kg-page">
+      <div className="flex flex-col gap-4 p-[var(--space-page-y)] px-[var(--space-page-x)]" data-testid="kg-page">
         <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
         <EmptyState
           icon={Share2}
           title="No session selected"
-          description="Open the Graph from a session timeline to inspect its reasoning graph."
+          description="Pick a session below, or open Graph from Overview / Timeline."
         />
+        {sessionSelect}
       </div>
     );
   }
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-3" data-testid="kg-page">
+      <div className="flex flex-col gap-3 p-[var(--space-page-y)] px-[var(--space-page-x)]" data-testid="kg-page">
         <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
         <Skeleton className="h-[60vh] w-full" />
       </div>
@@ -146,44 +194,56 @@ export const KnowledgeGraphPage = (): JSX.Element => {
 
   if (error) {
     return (
-      <div className="flex flex-col gap-3" data-testid="kg-page">
+      <div className="flex flex-col gap-3 p-[var(--space-page-y)] px-[var(--space-page-x)]" data-testid="kg-page">
         <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
         <ErrorState
           message={error.message}
           onRetry={(): void => refetch()}
           data-testid="kg-error"
         />
+        {sessionSelect}
       </div>
     );
   }
 
   return (
     <div
-      className="-mx-[var(--space-page-x)] -my-[var(--space-page-y)] flex h-[calc(100vh-3rem)] flex-col"
+      className="flex h-[calc(100vh-var(--space-topbar-h))] flex-col"
       data-testid="kg-page"
     >
-      <div className="flex items-center justify-between border-b px-[var(--space-page-x)] py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-[var(--space-page-x)] py-2">
         <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: "Graph" }]} />
-        <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="kg-node-count">
-          {kindFilter ? (
-            <span data-testid="kg-kind-filter">
-              kind: <span className="font-mono">{kindFilter}</span>
-              {" · "}
-              {visibleNodeCount} of {nodeCount} node{nodeCount === 1 ? "" : "s"}
-            </span>
-          ) : (
-            <span>
-              {nodeCount} node{nodeCount === 1 ? "" : "s"}
-            </span>
-          )}
-          {aiMode ? (
-            <span
-              data-testid="kg-ai-mode"
-              className="rounded-full border border-[var(--color-brand)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-brand)]"
+        <div className="flex flex-wrap items-center gap-3">
+          {sessionSelect}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground" data-testid="kg-node-count">
+            {kindFilter ? (
+              <span data-testid="kg-kind-filter">
+                kind: <span className="font-mono">{kindFilter}</span>
+                {" · "}
+                {visibleNodeCount} of {nodeCount} node{nodeCount === 1 ? "" : "s"}
+              </span>
+            ) : (
+              <span>
+                {nodeCount} node{nodeCount === 1 ? "" : "s"}
+              </span>
+            )}
+            {aiMode ? (
+              <span
+                data-testid="kg-ai-mode"
+                className="rounded-full border border-[var(--color-brand)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-brand)]"
+              >
+                AI reasoning mode
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="text-xs text-[var(--color-brand)] hover:underline"
+              onClick={(): void => navigate(`/timeline?session=${encodeURIComponent(sessionId)}`)}
+              data-testid="kg-open-timeline"
             >
-              AI reasoning mode
-            </span>
-          ) : null}
+              Timeline
+            </button>
+          </div>
         </div>
       </div>
       <div className="relative flex-1">
@@ -261,7 +321,7 @@ export const KnowledgeGraphPage = (): JSX.Element => {
                   {relatedEvents.map((e) => (
                     <li
                       key={e.id}
-                      className="flex items-center justify-between gap-2 rounded border bg-muted/40 px-2 py-1 text-xs"
+                      className="flex items-center justify-between gap-2 rounded-[var(--radius)] border border-border bg-muted/40 px-2 py-1 text-xs"
                     >
                       <span className="font-mono">{e.type}</span>
                       <span className="font-mono text-muted-foreground">{e.id.slice(0, 8)}…</span>
@@ -277,9 +337,5 @@ export const KnowledgeGraphPage = (): JSX.Element => {
   );
 };
 
-// Re-export the api client error symbol so eslint tree-shaking
-// stays happy when consumers re-import the type.
 export type _KgApiError = ApiError;
-// Reference apiFetch to keep the bundler's tree-shaker from
-// pruning the import; the page only uses it through the hook.
 void apiFetch;

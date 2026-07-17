@@ -59,4 +59,18 @@ describe("SettingsPage", () => {
     expect(stored).not.toBeNull();
     expect(JSON.parse(stored!).server.bind).toBe("10.0.0.1");
   });
+
+  it("saving dark theme applies html.dark class", async () => {
+    const user = userEvent.setup();
+    document.documentElement.classList.remove("dark");
+    renderSettings();
+    const theme = await screen.findByTestId("settings-display-theme");
+    await user.selectOptions(theme, "dark");
+    await user.click(await screen.findByTestId("settings-save"));
+    expect(await screen.findByTestId("settings-saved")).toBeInTheDocument();
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    const stored = JSON.parse(window.localStorage.getItem("cognit.settings.v1")!);
+    expect(stored.display.theme).toBe("dark");
+  });
 });
+

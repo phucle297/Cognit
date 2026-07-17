@@ -8,8 +8,8 @@
  * EmptyState on no-match.
  */
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Activity, ChevronRight, HelpCircle, Search, X } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Activity, ChevronRight, HelpCircle, Search, Share2, X } from "lucide-react";
 
 import { useApi } from "@/lib/use-api";
 import { useEventSource } from "@/lib/use-event-source";
@@ -318,11 +318,20 @@ export const TimelinePage = (): JSX.Element => {
             <h1 className="truncate text-xl font-semibold tracking-tight">{goal}</h1>
             {sessionMeta ? <StatusPill status={SESSION_STATUS_KEY[sessionMeta.status]} /> : null}
           </div>
-          <PauseSseButton
-            paused={paused}
-            onToggle={(): void => setPaused((p) => !p)}
-            status={paused ? "closed" : live.status}
-          />
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/knowledge-graph?session=${encodeURIComponent(sessionId)}`}
+              data-testid="timeline-open-graph"
+              className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-input bg-background px-3 text-xs font-medium hover:bg-accent hover:text-accent-foreground"
+            >
+              <Share2 className="size-3.5" aria-hidden /> Graph
+            </Link>
+            <PauseSseButton
+              paused={paused}
+              onToggle={(): void => setPaused((p) => !p)}
+              status={paused ? "closed" : live.status}
+            />
+          </div>
         </div>
       </div>
 

@@ -37,6 +37,7 @@ import {
   type SnapshotRow,
 } from "@cognit/db";
 import type { SessionState } from "@cognit/core/state";
+import { sortKeysDeep } from "@cognit/core/serialize-state";
 import {
   buildRecovery,
   serialiseLatestVerification,
@@ -139,7 +140,13 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       return apiErrorResponse(c, "internal", "session.state: query failed");
     }
     const v = (exit as { value: { session: SessionRow; state: SessionState; snapshot: SnapshotRow | null; eventsAfterSnapshot: number } }).value;
-    return c.json(envelope("session.state", v));
+    // Maps stringify to {} — convert to plain objects (same as export path).
+    return c.json(
+      envelope("session.state", {
+        ...v,
+        state: sortKeysDeep(v.state),
+      }),
+    );
   });
 
   // GET /sessions/:id/graph

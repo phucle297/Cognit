@@ -22,6 +22,11 @@ import { Input } from "@/shared/ui/input";
 import { ConfigView } from "@/components/ConfigView";
 import { StorageUsage } from "@/components/StorageUsage";
 import { SettingsAdvanced, type SectionId } from "@/widgets/settings-advanced";
+import {
+  applyThemePreference,
+  SETTINGS_STORAGE_KEY,
+  type ThemePreference,
+} from "@/shared/lib/theme";
 
 const ADVANCED_SECTIONS: ReadonlyArray<SectionId> = [
   "guardrails",
@@ -38,7 +43,7 @@ type ServerSettings = {
 };
 
 type DisplaySettings = {
-  theme: "light" | "dark" | "system";
+  theme: ThemePreference;
   pageSize: number;
 };
 
@@ -47,12 +52,10 @@ const DEFAULTS: { server: ServerSettings; display: DisplaySettings } = {
   display: { theme: "system", pageSize: 50 },
 };
 
-const STORAGE_KEY = "cognit.settings.v1";
-
 const loadSettings = (): { server: ServerSettings; display: DisplaySettings } => {
   if (typeof window === "undefined") return DEFAULTS;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return DEFAULTS;
     const parsed = JSON.parse(raw) as Partial<typeof DEFAULTS>;
     return {
@@ -67,7 +70,7 @@ const loadSettings = (): { server: ServerSettings; display: DisplaySettings } =>
 const saveSettings = (s: typeof DEFAULTS): void => {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(s));
   } catch {
     // ignore quota / privacy mode failures
   }
@@ -100,6 +103,7 @@ export const SettingsPage = (): JSX.Element => {
 
   const onSave = (): void => {
     saveSettings(draft);
+    applyThemePreference(draft.display.theme);
     setSaved(draft);
     setStatus("saved");
     window.setTimeout(() => setStatus("idle"), 1500);
@@ -197,7 +201,7 @@ export const SettingsPage = (): JSX.Element => {
                   setDraft({ ...draft, display: { ...draft.display, theme: e.target.value as DisplaySettings["theme"] } })
                 }
                 data-testid="settings-display-theme"
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                className="h-9 w-full rounded-[var(--radius)] border border-input bg-background px-3 text-sm"
               >
                 <option value="system">System</option>
                 <option value="light">Light</option>

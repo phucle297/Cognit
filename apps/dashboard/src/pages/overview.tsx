@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Activity, CheckCircle2, Inbox, Pause, Plus } from "lucide-react";
+import { Activity, CheckCircle2, Inbox, Pause, Plus, Share2 } from "lucide-react";
 
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent } from "@/shared/ui/card";
@@ -146,6 +146,25 @@ export const OverviewPage = (): JSX.Element => {
       width: "12rem",
       render: (s) => (
         <span className="font-mono text-xs text-muted-foreground">{formatIso(s.created_at)}</span>
+      ),
+    },
+    {
+      key: "graph",
+      header: "",
+      width: "6rem",
+      render: (s) => (
+        <button
+          type="button"
+          onClick={(e): void => {
+            e.stopPropagation();
+            navigate(`/knowledge-graph?session=${encodeURIComponent(s.id)}`);
+          }}
+          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--color-brand)] hover:underline"
+          data-testid="overview-open-graph"
+          aria-label={`Open graph for ${s.goal}`}
+        >
+          <Share2 className="size-3.5" aria-hidden /> Graph
+        </button>
       ),
     },
   ];

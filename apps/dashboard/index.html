@@ -3,8 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light" />
+    <meta name="color-scheme" content="light dark" />
     <title>Cognit Dashboard</title>
+    <!-- FOUC guard: apply theme before paint from cognit.settings.v1 -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("cognit.settings.v1");
+          var theme = "system";
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && parsed.display && parsed.display.theme) theme = parsed.display.theme;
+          }
+          var dark =
+            theme === "dark" ||
+            (theme === "system" &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+          document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body class="bg-background text-foreground antialiased">
     <div id="root"></div>

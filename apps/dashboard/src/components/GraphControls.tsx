@@ -43,15 +43,33 @@ export const GraphControls = ({
     return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
   }, [edges]);
 
+  const allTypeList = useMemo(() => edgeTypeCounts.map(([t]) => t), [edgeTypeCounts]);
+
+  /**
+   * Empty set = show all. First uncheck seeds the full set then
+   * removes one type so the checkbox matches user intent.
+   */
   const toggleType = (type: string): void => {
-    const next = new Set(visibleEdgeTypes);
-    if (next.has(type)) next.delete(type);
-    else next.add(type);
+    let next: Set<string>;
+    if (visibleEdgeTypes.size === 0) {
+      next = new Set(allTypeList);
+      next.delete(type);
+    } else if (visibleEdgeTypes.has(type)) {
+      next = new Set(visibleEdgeTypes);
+      next.delete(type);
+    } else {
+      next = new Set(visibleEdgeTypes);
+      next.add(type);
+      // All selected → collapse back to empty (= all) for simpler state.
+      if (next.size === allTypeList.length && allTypeList.every((t) => next.has(t))) {
+        next = new Set();
+      }
+    }
     onVisibleEdgeTypesChange(next);
   };
 
   const clearTypes = (): void => onVisibleEdgeTypesChange(new Set());
-  const allTypes = (): void => onVisibleEdgeTypesChange(new Set(edgeTypeCounts.map(([t]) => t)));
+  const allTypes = (): void => onVisibleEdgeTypesChange(new Set());
 
   return (
     <Card className="flex flex-wrap items-center gap-2 p-3" data-testid="graph-controls">

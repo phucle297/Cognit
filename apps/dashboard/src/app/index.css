@@ -1,80 +1,66 @@
 /**
  * apps/dashboard/src/app/index.css — Tailwind 4 + design tokens.
  *
- * Feature-Sliced Design: this file lives in src/app/ because the
- * tokens it defines are app-wide (used by every layer below).
- * Tailwind 4 uses a CSS-first config via the `@theme` block —
- * no `tailwind.config.js` is needed.
+ * Cognit-mf8: warm paper light + soft charcoal dark, larger radii.
+ * Dark tokens activate under `html.dark` (theme apply path).
  */
 @import "tailwindcss";
 
 @theme {
-  /* existing color tokens (lightened for a subtler feel) */
-  --color-background: oklch(1 0 0);
-  --color-foreground: oklch(0.145 0 0);
-  --color-muted: oklch(0.97 0 0);
-  --color-muted-foreground: oklch(0.556 0 0);
-  /* Border palette — three tiers so we can pick the right weight
-     per surface without leaning on a single hard 1px line. */
-  --color-border: oklch(0.94 0 0);              /* default separators (was 0.922) */
-  --color-border-subtle: oklch(0.965 0 0);     /* sidebar divider, list rows (effectively bg-muted/40) */
-  --color-divider: oklch(0.965 0 0);           /* semantic alias for list-row separators */
-  --color-input: oklch(0.922 0 0);             /* inputs keep a touch more contrast for focus */
-  /* Primary / brand — amber `#ebb434` (oklch ≈ 0.81 0.16 85).
-     Used by primary buttons, sidebar active state, brand chip,
-     KPI icon chip, focus ring. Foreground flips to near-black so
-     the warm bg reads with sufficient contrast. */
+  /* Warm paper canvas (engineering notebook) */
+  --color-background: oklch(0.975 0.012 85);
+  --color-foreground: oklch(0.22 0.02 55);
+  --color-muted: oklch(0.945 0.015 85);
+  --color-muted-foreground: oklch(0.48 0.02 55);
+  --color-border: oklch(0.90 0.02 85);
+  --color-border-subtle: oklch(0.935 0.015 85);
+  --color-divider: oklch(0.935 0.015 85);
+  --color-input: oklch(0.88 0.02 85);
+  /* Ember brand — amber `#ebb434` (oklch ≈ 0.81 0.16 85) */
   --color-primary: oklch(0.81 0.16 85);
-  --color-primary-foreground: oklch(0.205 0 0);
-  --color-secondary: oklch(0.97 0 0);
-  --color-secondary-foreground: oklch(0.205 0 0);
-  --color-accent: oklch(0.97 0 0);
-  --color-accent-foreground: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.205 0.02 55);
+  --color-secondary: oklch(0.945 0.015 85);
+  --color-secondary-foreground: oklch(0.22 0.02 55);
+  --color-accent: oklch(0.945 0.02 85);
+  --color-accent-foreground: oklch(0.22 0.02 55);
   --color-destructive: oklch(0.577 0.245 27.325);
   --color-destructive-foreground: oklch(0.985 0 0);
-  --color-card: oklch(1 0 0);
-  --color-card-foreground: oklch(0.145 0 0);
+  --color-card: oklch(0.99 0.008 85);
+  --color-card-foreground: oklch(0.22 0.02 55);
   --color-ring: oklch(0.81 0.16 85);
 
-  /* brand accent (amber) — used for active sidebar item, focus
-     rings, KPI sparklines. Single token, semantic alias. */
   --color-brand: oklch(0.81 0.16 85);
-  --color-brand-foreground: oklch(0.205 0 0);
-  --color-brand-bg: oklch(0.96 0.05 85);
+  --color-brand-foreground: oklch(0.205 0.02 55);
+  --color-brand-bg: oklch(0.94 0.06 85);
 
-  /* typography */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Inter var", sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
 
-  /* spacing semantic aliases */
-  --space-page-x: 1.5rem;     /* page horizontal padding */
-  --space-page-y: 2rem;       /* page vertical padding */
-  --space-card:  1.5rem;      /* card inner padding */
-  --space-stack: 1rem;        /* vertical stack between siblings */
-  --space-sidebar-w: 14rem;   /* sidebar expanded width */
+  --space-page-x: 1.5rem;
+  --space-page-y: 2rem;
+  --space-card: 1.5rem;
+  --space-stack: 1rem;
+  --space-sidebar-w: 14rem;
   --space-sidebar-w-collapsed: 3.5rem;
-  --space-topbar-h: 3.5rem;   /* topbar height */
-  --space-kpi-min-h: 7rem;    /* KPI card minimum height */
+  --space-topbar-h: 3.5rem;
+  --space-kpi-min-h: 7rem;
 
-  /* radius scale */
-  --radius-sm: 0.25rem;
-  --radius: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  /* Larger, softer radii (warm / rounded) */
+  --radius-sm: 0.375rem;
+  --radius: 0.625rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
 
-  /* elevation — slightly softer so cards feel lighter */
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.04);
-  --shadow: 0 1px 3px oklch(0 0 0 / 0.06), 0 1px 2px oklch(0 0 0 / 0.03);
-  --shadow-md: 0 6px 16px oklch(0 0 0 / 0.06), 0 2px 4px oklch(0 0 0 / 0.03);
-  --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.08), 0 4px 8px oklch(0 0 0 / 0.04);
+  --shadow-sm: 0 1px 2px oklch(0.35 0.03 55 / 0.05);
+  --shadow: 0 1px 3px oklch(0.35 0.03 55 / 0.07), 0 1px 2px oklch(0.35 0.03 55 / 0.04);
+  --shadow-md: 0 6px 16px oklch(0.35 0.03 55 / 0.08), 0 2px 4px oklch(0.35 0.03 55 / 0.04);
+  --shadow-lg: 0 12px 32px oklch(0.35 0.03 55 / 0.10), 0 4px 8px oklch(0.35 0.03 55 / 0.05);
 
-  /* motion */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --duration-fast: 120ms;
   --duration-base: 200ms;
   --duration-slow: 320ms;
 
-  /* status palette (semantic event/session state) */
   --color-status-active: oklch(0.65 0.18 145);
   --color-status-active-bg: oklch(0.95 0.05 145);
   --color-status-pending: oklch(0.72 0.16 75);
@@ -84,14 +70,48 @@
   --color-status-verified: oklch(0.60 0.18 250);
   --color-status-verified-bg: oklch(0.95 0.05 250);
   --color-status-archived: oklch(0.55 0.01 250);
-  --color-status-archived-bg: oklch(0.96 0 0);
+  --color-status-archived-bg: oklch(0.94 0.01 85);
 }
 
-@media (prefers-color-scheme: dark) {
-  /* Light theme is hard-pinned. We intentionally do NOT redefine
-     the color tokens for dark mode — the OS-level dark preference
-     is ignored so the dashboard stays light on every machine.
-     Revisit when the user explicitly asks for dark-mode support. */
+/* Dark: soft charcoal + same ember accent. Tailwind 4 @theme
+   defines defaults; we override the same custom props on .dark. */
+html.dark {
+  --color-background: oklch(0.20 0.015 55);
+  --color-foreground: oklch(0.93 0.01 85);
+  --color-muted: oklch(0.26 0.015 55);
+  --color-muted-foreground: oklch(0.70 0.02 85);
+  --color-border: oklch(0.32 0.015 55);
+  --color-border-subtle: oklch(0.28 0.015 55);
+  --color-divider: oklch(0.28 0.015 55);
+  --color-input: oklch(0.30 0.015 55);
+  --color-primary: oklch(0.81 0.16 85);
+  --color-primary-foreground: oklch(0.18 0.02 55);
+  --color-secondary: oklch(0.28 0.015 55);
+  --color-secondary-foreground: oklch(0.93 0.01 85);
+  --color-accent: oklch(0.28 0.02 55);
+  --color-accent-foreground: oklch(0.93 0.01 85);
+  --color-destructive: oklch(0.62 0.22 25);
+  --color-destructive-foreground: oklch(0.98 0 0);
+  --color-card: oklch(0.24 0.015 55);
+  --color-card-foreground: oklch(0.93 0.01 85);
+  --color-ring: oklch(0.81 0.16 85);
+  --color-brand: oklch(0.81 0.16 85);
+  --color-brand-foreground: oklch(0.18 0.02 55);
+  --color-brand-bg: oklch(0.32 0.06 85);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.25);
+  --shadow: 0 1px 3px oklch(0 0 0 / 0.35), 0 1px 2px oklch(0 0 0 / 0.2);
+  --shadow-md: 0 6px 16px oklch(0 0 0 / 0.4), 0 2px 4px oklch(0 0 0 / 0.25);
+  --shadow-lg: 0 12px 32px oklch(0 0 0 / 0.5), 0 4px 8px oklch(0 0 0 / 0.3);
+  --color-status-active: oklch(0.72 0.16 145);
+  --color-status-active-bg: oklch(0.30 0.05 145);
+  --color-status-pending: oklch(0.78 0.14 75);
+  --color-status-pending-bg: oklch(0.32 0.05 75);
+  --color-status-failed: oklch(0.70 0.18 25);
+  --color-status-failed-bg: oklch(0.32 0.05 25);
+  --color-status-verified: oklch(0.72 0.14 250);
+  --color-status-verified-bg: oklch(0.30 0.05 250);
+  --color-status-archived: oklch(0.65 0.01 250);
+  --color-status-archived-bg: oklch(0.28 0.01 55);
 }
 
 html,
@@ -115,9 +135,6 @@ body,
   to   { opacity: 1; }
 }
 
-/* Stagger helper: child sets --stagger-index, this scales the
-   delay so a list fades in one item at a time. Caps at index 12
-   so a long list doesn't feel slow. */
 .stagger-item {
   opacity: 0;
   animation: item-enter var(--duration-base) var(--ease-out) both;

@@ -73,7 +73,7 @@ export const Sidebar = () => {
         )}
       >
         <div
-          className="flex size-8 shrink-0 items-center justify-center rounded-md bg-[var(--color-brand)] text-[var(--color-brand-foreground)]"
+          className="flex size-8 shrink-0 items-center justify-center rounded-xl bg-[var(--color-brand)] text-[var(--color-brand-foreground)] shadow-sm"
           aria-hidden
         >
           <Boxes className="size-4" />
@@ -104,7 +104,7 @@ export const Sidebar = () => {
                 data-testid={`sidebar-link-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
                 className={({ isActive }) =>
                   cn(
-                    "group relative flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm font-medium",
+                    "group relative flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-sm font-medium tracking-wide",
                     transition("colors", "fast"),
                     isActive
                       ? "bg-[var(--color-brand-bg)] text-[var(--color-brand)]"

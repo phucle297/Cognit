@@ -54,13 +54,25 @@ describe("cognit server — /sessions routes", () => {
       kind: string;
       data: {
         session: { id: string };
-        state: { session_id: string; goal: string };
+        state: {
+          session_id: string;
+          goal: string;
+          decisions: unknown;
+          hypotheses: unknown;
+        };
       };
     };
     expect(body.kind).toBe("session.state");
     expect(body.data.session.id).toBe(ctx.sessionId);
     expect(body.data.state.session_id).toBe(ctx.sessionId);
     expect(body.data.state.goal).toBe("server test");
+    // Map fields must be plain objects on the wire (JSON.stringify({})
+    // would drop Map contents; sortKeysDeep materialises them).
+    expect(body.data.state.decisions).not.toBeInstanceOf(Map);
+    expect(typeof body.data.state.decisions).toBe("object");
+    expect(body.data.state.decisions).not.toBeNull();
+    expect(body.data.state.hypotheses).not.toBeInstanceOf(Map);
+    expect(typeof body.data.state.hypotheses).toBe("object");
   });
 
   it("GET /sessions/:id/events returns the events for the session", async () => {

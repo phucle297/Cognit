@@ -84,12 +84,16 @@ export const DecisionGraphPage = (): JSX.Element => {
   const onZoomReset = useCallback(() => setRemountKey((k) => k + 1), []);
 
   const effectiveMode: LayoutMode = mode ?? "constellation";
-  const nodeCount = graph.data?.nodes.length ?? 0;
-  const capped = nodeCount > 500;
-  const graphResp: GraphResp = useMemo(
-    () => graph.data ?? { session_id: sessionId, nodes: [], edges: [] },
-    [graph.data, sessionId],
-  );
+  // Decision view: only decision entities (and edges touching them).
+  const graphResp: GraphResp = useMemo(() => {
+    const raw = graph.data ?? { session_id: sessionId, nodes: [], edges: [] };
+    const nodes = raw.nodes.filter((n) => n.entity_type === "decision");
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges = raw.edges.filter((e) => ids.has(e.from) || ids.has(e.to));
+    return { session_id: raw.session_id, nodes, edges };
+  }, [graph.data, sessionId]);
+  const nodeCount = graphResp.nodes.length;
+  const capped = (graph.data?.nodes.length ?? 0) > 500;
 
   const selectedDecision = useMemo<DecisionStateShape | null>(() => {
     if (!selectedNode) return null;

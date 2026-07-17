@@ -8,8 +8,13 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
+import { initTheme } from "@/shared/lib/theme";
 import { router } from "./router";
 import "./index.css";
+
+// Apply theme before first paint of React tree (FOUC script in
+// index.html already ran; this re-applies + watches system changes).
+initTheme();
 
 const root = document.getElementById("root");
 if (!root) {

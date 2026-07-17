@@ -219,9 +219,10 @@ const GraphCanvasInner = ({
       if (t - lastTick > 33) {
         lastTick = t;
         simRef.current.tick(1);
+        const simPositions = simRef.current.nodes();
         setNodes((cur) =>
           cur.map((node) => {
-            const sn = simNodes.find((s) => s.id === node.id);
+            const sn = simPositions.find((s) => s.id === node.id);
             if (!sn) return node;
             return { ...node, position: { x: sn.x ?? 0, y: sn.y ?? 0 } };
           }),
@@ -248,7 +249,7 @@ const GraphCanvasInner = ({
   }, [cappedNodes, cappedEdges, initialPositions, mode, setNodes]);
 
   return (
-    <div className="relative h-[600px] w-full overflow-hidden rounded-md border" data-testid="graph-canvas">
+    <div className="relative h-full min-h-[480px] w-full overflow-hidden rounded-xl border border-border bg-card" data-testid="graph-canvas">
       <ReactFlow
         nodes={nodes}
         edges={edges}

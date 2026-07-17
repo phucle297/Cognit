@@ -59,21 +59,25 @@ export type Simulation<NodeT extends SimNode> = {
 };
 
 export const forceSimulation = <NodeT extends SimNode>(initialNodes: NodeT[]): Simulation<NodeT> => {
-  const nodes: NodeT[] = initialNodes.map((n, i) => {
-    const copy = { ...n } as NodeT;
-    copy.x = n.x ?? Math.random() * 400;
-    copy.y = n.y ?? Math.random() * 400;
-    copy.vx = n.vx ?? 0;
-    copy.vy = n.vy ?? 0;
-    copy.fx = n.fx ?? null;
-    copy.fy = n.fy ?? null;
-    copy.index = i;
-    return copy;
-  });
+  // Mutate input nodes in place (d3-force style). Callers hold the
+  // same references and read x/y each tick — do NOT copy here.
+  const nodes: NodeT[] = initialNodes;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    n.x = n.x ?? Math.random() * 400;
+    n.y = n.y ?? Math.random() * 400;
+    n.vx = n.vx ?? 0;
+    n.vy = n.vy ?? 0;
+    n.fx = n.fx ?? null;
+    n.fy = n.fy ?? null;
+    n.index = i;
+  }
 
   const forces = new Map<string, Force>();
+  // d3-force defaults: alpha decays toward alphaTarget (0) each tick.
   let alpha = 1;
   let alphaMin = 0.001;
+  let alphaTarget = 0;
   let alphaDecay = 1 - Math.pow(alphaMin, 1 / 300);
   let velocityDecay = 0.4;
   const tickListeners: Array<() => void> = [];
@@ -93,6 +97,7 @@ export const forceSimulation = <NodeT extends SimNode>(initialNodes: NodeT[]): S
 
   const alphaRef = { value: alpha };
   const alphaMinRef = { value: alphaMin };
+  const alphaTargetRef = { value: alphaTarget };
   const alphaDecayRef = { value: alphaDecay };
   const velocityDecayRef = { value: velocityDecay };
 
@@ -122,6 +127,12 @@ export const forceSimulation = <NodeT extends SimNode>(initialNodes: NodeT[]): S
     },
     tick: (iterations = 1) => {
       for (let step = 0; step < iterations; step++) {
+        // d3-force: alpha += (alphaTarget - alpha) * alphaDecay
+        alphaRef.value += (alphaTargetRef.value - alphaRef.value) * alphaDecayRef.value;
+        if (alphaRef.value < alphaMinRef.value) {
+          alphaRef.value = 0;
+          break;
+        }
         for (const f of forces.values()) f(alphaRef.value);
         for (const n of nodes) {
           if (n.fx !== null && n.fx !== undefined) n.x = n.fx;
@@ -131,8 +142,6 @@ export const forceSimulation = <NodeT extends SimNode>(initialNodes: NodeT[]): S
           n.x = (n.x ?? 0) + (n.vx ?? 0);
           n.y = (n.y ?? 0) + (n.vy ?? 0);
         }
-        alphaRef.value += alphaDecayRef.value;
-        if (alphaRef.value < alphaMinRef.value) alphaRef.value = 0;
       }
       for (const cb of tickListeners) cb();
       if (alphaRef.value === 0) for (const cb of endListeners) cb();
