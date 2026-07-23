@@ -59,6 +59,14 @@ const EDGE_COLOR: Record<string, string> = {
   informs: "#0ea5e9",
   supersedes: "#f59e0b",
   cites: "#64748b",
+  // Synthesized relationship edges (graph endpoint derives these
+  // from entity fields when no explicit edge_created exists).
+  derived_from: "#0ea5e9",
+  belongs_to: "#14b8a6",
+  based_on: "#a855f7",
+  tests: "#f97316",
+  caused: "#ec4899",
+  references: "#64748b",
 };
 
 const FALLBACK_NODE_FILL = "bg-slate-500";

@@ -31,6 +31,12 @@ export interface DataTableProps<T> {
   readonly emptyMessage?: string;
   /** Zebra striping — off by default to keep dense tables readable. */
   readonly striped?: boolean;
+  /**
+   * Constrain the body to a max height and make it scroll, so the
+   * `sticky` header stays pinned under the page header on long
+   * lists. Omit (default) to let the table grow with the page.
+   */
+  readonly maxBodyHeight?: string;
 }
 
 export function DataTable<T>({
@@ -41,6 +47,7 @@ export function DataTable<T>({
   className,
   emptyMessage = "No items.",
   striped = false,
+  maxBodyHeight,
 }: DataTableProps<T>) {
   const [sortBy, setSortBy] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
@@ -65,9 +72,12 @@ export function DataTable<T>({
 
   return (
     <div className={cn("overflow-hidden rounded-lg border bg-card shadow-[var(--shadow-sm)]", className)}>
-      <div className="overflow-x-auto">
+      <div
+        className={cn("overflow-x-auto", maxBodyHeight && "overflow-y-auto")}
+        style={maxBodyHeight ? { maxHeight: maxBodyHeight } : undefined}
+      >
         <table className="w-full text-sm">
-          <thead className="sticky top-0 z-10 border-b bg-muted/60 text-left text-xs uppercase tracking-wider text-muted-foreground backdrop-blur">
+          <thead className="sticky top-0 z-10 border-b bg-muted text-left text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
               {columns.map((c) => {
                 const isActive = sortBy?.key === c.key;

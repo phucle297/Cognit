@@ -258,8 +258,106 @@ export const registerSessionsRoutes = (app: Hono, deps: SessionsRouteDeps): void
       push("verification", c2.verification_id, c2.verification_id);
     }
 
+    // Derive implicit edges from entity relationship fields. The
+    // state holds many entity-to-entity pointers (finding→observation,
+    // theory→hypothesis, decision→conclusion, experiment→hypothesis,
+    // superseded chains) that are never written as `edge_created`
+    // events. Without these the graph renders isolated nodes and
+    // "no edges" for any session that only used the lifecycle APIs.
+    // We synthesize virtual edges (deduped against explicit edges)
+    // so the canvas shows real structure. Endpoint entities must
+    // exist in state — dangling references are skipped.
+    const seenEdgeKey = new Set<string>();
+    for (const e of edges) seenEdgeKey.add(`${e.edge_type}|${e.from}|${e.to}`);
+    const hasObservation = (oid: string): boolean => state.observations.some((o) => o.id === oid);
+    const addSynth = (
+      edge_type: string,
+      ft: string,
+      fi: string,
+      tt: string,
+      ti: string,
+    ): void => {
+      const fromKey = `${ft}:${fi}`;
+      const toKey = `${tt}:${ti}`;
+      const key = `${edge_type}|${fromKey}|${toKey}`;
+      if (seenEdgeKey.has(key)) return;
+      seenEdgeKey.add(key);
+      edges.push({
+        id: `synth#${key}`,
+        edge_type,
+        from: fromKey,
+        to: toKey,
+        from_entity_type: ft,
+        from_entity_id: fi,
+        to_entity_type: tt,
+        to_entity_id: ti,
+        virtual: true,
+      });
+    };
+    for (const f of state.findings) {
+      for (const oid of f.related_observation_ids) {
+        if (hasObservation(oid)) addSynth("derived_from", "finding", f.id, "observation", oid);
+      }
+    }
+    for (const t of state.theories.values()) {
+      for (const hid of t.hypothesis_ids) {
+        if (state.hypotheses.has(hid)) addSynth("belongs_to", "hypothesis", hid, "theory", t.id);
+      }
+    }
+    for (const h of state.hypotheses.values()) {
+      if (h.belongs_to_theory_id !== null && state.theories.has(h.belongs_to_theory_id)) {
+        addSynth("belongs_to", "hypothesis", h.id, "theory", h.belongs_to_theory_id);
+      }
+      if (h.superseded_by_id !== null && state.hypotheses.has(h.superseded_by_id)) {
+        addSynth("supersedes", "hypothesis", h.id, "hypothesis", h.superseded_by_id);
+      }
+    }
+    for (const d of state.decisions.values()) {
+      for (const cid of d.based_on_conclusion_ids) {
+        if (state.conclusions.has(cid)) addSynth("based_on", "decision", d.id, "conclusion", cid);
+      }
+      if (d.superseded_by_decision_id !== null && state.decisions.has(d.superseded_by_decision_id)) {
+        addSynth("supersedes", "decision", d.id, "decision", d.superseded_by_decision_id);
+      }
+    }
+    for (const ex of state.experiments.values()) {
+      if (ex.tests_hypothesis_id !== null && state.hypotheses.has(ex.tests_hypothesis_id)) {
+        addSynth("tests", "experiment", ex.id, "hypothesis", ex.tests_hypothesis_id);
+      }
+    }
+
+    // Census + recent items for the summary panel. Counts include
+    // actions (which are not graph nodes) so sparse sessions still
+    // read usefully. Edges count is post-synthesis.
+    const summary = {
+      counts: {
+        observation: state.observations.length,
+        action: state.actions.length,
+        hypothesis: state.hypotheses.size,
+        decision: state.decisions.size,
+        conclusion: state.conclusions.size,
+        verification: state.verifications.size,
+        finding: state.findings.length,
+        theory: state.theories.size,
+        experiment: state.experiments.size,
+        edge: edges.length,
+      },
+      recent: (
+        [
+          ...state.observations.map((o) => ({ id: o.id, type: "observation", label: o.text, created_at: o.created_at })),
+          ...state.actions.map((a) => ({ id: a.id, type: "action", label: a.text, created_at: a.created_at })),
+          ...[...state.hypotheses.values()].map((h) => ({ id: h.id, type: "hypothesis", label: h.title, created_at: h.created_at })),
+          ...[...state.decisions.values()].map((d) => ({ id: d.id, type: "decision", label: d.text, created_at: d.created_at })),
+          ...[...state.conclusions.values()].map((cc) => ({ id: cc.id, type: "conclusion", label: cc.text, created_at: cc.created_at })),
+        ] as Array<{ id: string; type: string; label: string; created_at: string }>
+      )
+        .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+        .slice(0, 8)
+        .map(({ id, type, label }) => ({ id, type, label })),
+    };
+
     return c.json(
-      envelope("session.graph", { session_id: id, nodes, edges }),
+      envelope("session.graph", { session_id: id, nodes, edges, summary }),
     );
   });
 

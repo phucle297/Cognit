@@ -20,7 +20,12 @@ import {
   writeLastGraphSession,
 } from "@/shared/lib/graph-session";
 
-import { GraphCanvas, type GraphResp, type LayoutMode } from "@/components/GraphCanvas";
+import {
+  GraphCanvas,
+  type GraphResp,
+  type GraphSummary,
+  type LayoutMode,
+} from "@/components/GraphCanvas";
 import { GraphControls } from "@/components/GraphControls";
 
 const AUTO_CONSTELLATION_THRESHOLD = 200;
@@ -44,6 +49,99 @@ type SessionRow = {
 };
 
 type SessionsResp = { readonly sessions: ReadonlyArray<SessionRow> };
+
+/**
+ * Summary panel for the Knowledge Graph. Renders a census of entity
+ * types + edges and a short "recent" list. Sparse sessions (e.g. one
+ * that only recorded observations + actions) produce zero graph edges,
+ * so the canvas alone is useless — this panel carries the value.
+ *
+ * Counts prefer the server `summary` block (it includes actions,
+ * which are not graph nodes). When absent (older server / test mock)
+ * we fall back to counting canvas nodes by entity_type.
+ */
+const ENTITY_ROWS: ReadonlyArray<{ readonly key: string; readonly label: string }> = [
+  { key: "observation", label: "Observations" },
+  { key: "action", label: "Actions" },
+  { key: "hypothesis", label: "Hypotheses" },
+  { key: "finding", label: "Findings" },
+  { key: "conclusion", label: "Conclusions" },
+  { key: "verification", label: "Verifications" },
+  { key: "decision", label: "Decisions" },
+  { key: "theory", label: "Theories" },
+  { key: "experiment", label: "Experiments" },
+];
+
+const deriveCounts = (
+  summary: GraphSummary | undefined,
+  nodes: GraphResp["nodes"],
+  edgeCount: number,
+): Record<string, number> => {
+  if (summary) return { ...summary.counts, edge: edgeCount };
+  const counts: Record<string, number> = { edge: edgeCount };
+  for (const n of nodes) counts[n.entity_type] = (counts[n.entity_type] ?? 0) + 1;
+  return counts;
+};
+
+const GraphSummaryPanel = ({
+  summary,
+  nodes,
+  edgeCount,
+}: {
+  readonly summary: GraphSummary | undefined;
+  readonly nodes: GraphResp["nodes"];
+  readonly edgeCount: number;
+}): JSX.Element => {
+  const counts = deriveCounts(summary, nodes, edgeCount);
+  return (
+    <div className="flex flex-col gap-4" data-testid="kg-summary">
+      <div>
+        <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Summary
+        </div>
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+          {ENTITY_ROWS.map((row) => {
+            const value = counts[row.key];
+            const hasValue = typeof value === "number";
+            return (
+              <div key={row.key} className="flex items-center justify-between gap-2 text-sm">
+                <dt className="text-muted-foreground">{row.label}</dt>
+                <dd
+                  className={
+                    hasValue && value > 0
+                      ? "font-medium tabular-nums text-foreground"
+                      : "tabular-nums text-muted-foreground/60"
+                  }
+                >
+                  {hasValue ? value : "—"}
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </div>
+      {summary && summary.recent.length > 0 ? (
+        <div>
+          <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Recent
+          </div>
+          <ul className="flex flex-col gap-1.5" data-testid="kg-summary-recent">
+            {summary.recent.map((item) => (
+              <li key={`${item.type}:${item.id}`} className="flex flex-col gap-0.5">
+                <span className="text-[10px] font-medium uppercase tracking-wide text-[var(--color-brand)]">
+                  {item.type}
+                </span>
+                <span className="line-clamp-2 break-words text-xs text-muted-foreground">
+                  {item.label || "—"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+};
 
 export const KnowledgeGraphPage = (): JSX.Element => {
   const navigate = useNavigate();
@@ -238,7 +336,9 @@ export const KnowledgeGraphPage = (): JSX.Element => {
             <button
               type="button"
               className="text-xs text-[var(--color-brand)] hover:underline"
-              onClick={(): void => navigate(`/timeline?session=${encodeURIComponent(sessionId)}`)}
+              onClick={(): void => {
+                void navigate(`/timeline?session=${encodeURIComponent(sessionId)}`);
+              }}
               data-testid="kg-open-timeline"
             >
               Timeline
@@ -246,47 +346,56 @@ export const KnowledgeGraphPage = (): JSX.Element => {
           </div>
         </div>
       </div>
-      <div className="relative flex-1">
-        <div className="absolute left-4 top-4 z-10 max-w-xs">
-          <GraphControls
-            mode={effectiveMode}
-            onModeChange={setMode}
-            edges={filteredGraph.edges}
-            visibleEdgeTypes={visibleEdgeTypes}
-            onVisibleEdgeTypesChange={setVisibleEdgeTypes}
-            onZoomReset={onZoomReset}
-            nodeCount={visibleNodeCount}
-            capped={capped}
+      <div className="relative flex flex-1 overflow-hidden">
+        <aside className="hidden w-72 shrink-0 flex-col gap-3 overflow-y-auto border-r border-border bg-card/50 p-4 md:flex">
+          <GraphSummaryPanel
+            summary={data?.summary}
+            nodes={filteredGraph.nodes}
+            edgeCount={filteredEdges.length}
           />
+        </aside>
+        <div className="relative flex-1">
+          <div className="absolute left-4 top-4 z-10 max-w-xs">
+            <GraphControls
+              mode={effectiveMode}
+              onModeChange={setMode}
+              edges={filteredGraph.edges}
+              visibleEdgeTypes={visibleEdgeTypes}
+              onVisibleEdgeTypesChange={setVisibleEdgeTypes}
+              onZoomReset={onZoomReset}
+              nodeCount={visibleNodeCount}
+              capped={capped}
+            />
+          </div>
+          {nodeCount === 0 ? (
+            <div className="flex h-full items-center justify-center p-6">
+              <EmptyState
+                icon={Share2}
+                title="No graph data"
+                description="This session has no observations, findings, or hypotheses yet."
+                data-testid="kg-empty"
+              />
+            </div>
+          ) : visibleNodeCount === 0 && kindFilter !== null ? (
+            <div className="flex h-full items-center justify-center p-6">
+              <EmptyState
+                icon={Share2}
+                title={`No ${kindFilter} nodes`}
+                description={`This session has no ${kindFilter} entities. Try clearing the kind filter.`}
+                data-testid="kg-empty-filtered"
+              />
+            </div>
+          ) : (
+            <GraphCanvas
+              key={`${effectiveMode}-${remountKey}-${kindFilter ?? ""}-${aiMode ? "ai" : ""}`}
+              data={filteredGraph}
+              mode={effectiveMode}
+              visibleEdgeTypes={visibleEdgeTypes}
+              onNodeClick={onNodeClick}
+              onFitView={onZoomReset}
+            />
+          )}
         </div>
-        {nodeCount === 0 ? (
-          <div className="flex h-full items-center justify-center p-6">
-            <EmptyState
-              icon={Share2}
-              title="No graph data"
-              description="This session has no observations, findings, or hypotheses yet."
-              data-testid="kg-empty"
-            />
-          </div>
-        ) : visibleNodeCount === 0 && kindFilter !== null ? (
-          <div className="flex h-full items-center justify-center p-6">
-            <EmptyState
-              icon={Share2}
-              title={`No ${kindFilter} nodes`}
-              description={`This session has no ${kindFilter} entities. Try clearing the kind filter.`}
-              data-testid="kg-empty-filtered"
-            />
-          </div>
-        ) : (
-          <GraphCanvas
-            key={`${effectiveMode}-${remountKey}-${kindFilter ?? ""}-${aiMode ? "ai" : ""}`}
-            data={filteredGraph}
-            mode={effectiveMode}
-            visibleEdgeTypes={visibleEdgeTypes}
-            onNodeClick={onNodeClick}
-            onFitView={onZoomReset}
-          />
-        )}
       </div>
       <Sheet
         open={selectedNode !== null}

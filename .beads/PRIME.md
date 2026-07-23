@@ -1,4 +1,4 @@
 ## Last Checkpoint
-search: Dashboard redesign: warm visual system + theme/graph fixes
+search: Fix timeline sticky + knowledge graph edges/summary/physics lag
 queue: 
 next: 

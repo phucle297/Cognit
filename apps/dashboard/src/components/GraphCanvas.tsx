@@ -53,10 +53,35 @@ export type GraphEdge = {
   readonly virtual: boolean;
 };
 
+export type GraphSummaryCount = {
+  readonly observation: number;
+  readonly action: number;
+  readonly hypothesis: number;
+  readonly decision: number;
+  readonly conclusion: number;
+  readonly verification: number;
+  readonly finding: number;
+  readonly theory: number;
+  readonly experiment: number;
+  readonly edge: number;
+};
+
+export type GraphSummaryItem = {
+  readonly id: string;
+  readonly type: string;
+  readonly label: string;
+};
+
+export type GraphSummary = {
+  readonly counts: GraphSummaryCount;
+  readonly recent: ReadonlyArray<GraphSummaryItem>;
+};
+
 export type GraphResp = {
   readonly session_id: string;
   readonly nodes: GraphNode[];
   readonly edges: GraphEdge[];
+  readonly summary?: GraphSummary;
 };
 
 export type LayoutMode = "physics" | "constellation";
@@ -96,7 +121,7 @@ const toXYNodes = (
       id: n.id,
       type: "default",
       position: { x: p.x, y: p.y },
-      data: { label: truncate(n.label, 32) },
+      data: { label: truncate(n.label, 24) },
       style: {
         background: undefined,
         border: undefined,
@@ -219,14 +244,27 @@ const GraphCanvasInner = ({
       if (t - lastTick > 33) {
         lastTick = t;
         simRef.current.tick(1);
+        // ponytail: build an id→pos Map once per tick instead of
+        // `find()` per node. The old path was O(n²) per frame — the
+        // reason the Physics tab locked up past ~100 nodes.
         const simPositions = simRef.current.nodes();
-        setNodes((cur) =>
-          cur.map((node) => {
-            const sn = simPositions.find((s) => s.id === node.id);
-            if (!sn) return node;
-            return { ...node, position: { x: sn.x ?? 0, y: sn.y ?? 0 } };
-          }),
-        );
+        const posById = new Map<string, { x: number; y: number }>();
+        for (const s of simPositions) posById.set(s.id, { x: s.x ?? 0, y: s.y ?? 0 });
+        let moved = false;
+        setNodes((cur) => {
+          const next = new Array<XYNode>(cur.length);
+          for (let i = 0; i < cur.length; i++) {
+            const node = cur[i]!;
+            const p = posById.get(node.id);
+            if (!p || (p.x === node.position.x && p.y === node.position.y)) {
+              next[i] = node;
+            } else {
+              moved = true;
+              next[i] = { ...node, position: p };
+            }
+          }
+          return moved ? next : cur;
+        });
         if (simRef.current.alpha() <= 0) {
           animRef.current = null;
           return;

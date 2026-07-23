@@ -255,9 +255,17 @@ export const TimelinePage = (): JSX.Element => {
     {
       key: "summary",
       header: "Summary",
-      render: (e) => (
-        <span className="text-sm text-muted-foreground">{formatPayloadSummary(e.payload)}</span>
-      ),
+      render: (e) => {
+        const text = formatPayloadSummary(e.payload);
+        return (
+          <span
+            className="line-clamp-2 block break-words text-sm text-muted-foreground"
+            title={text}
+          >
+            {text}
+          </span>
+        );
+      },
     },
     {
       // Phase B.4 row action — only `hypothesis_rejected` rows get
@@ -311,7 +319,7 @@ export const TimelinePage = (): JSX.Element => {
 
   return (
     <div className="flex flex-col gap-4" data-testid="timeline-page">
-      <div className="sticky top-0 z-20 -mx-[var(--space-page-x)] flex flex-col gap-2 border-b bg-background/95 px-[var(--space-page-x)] py-3 backdrop-blur">
+      <div className="sticky top-0 z-20 -mx-[var(--space-page-x)] flex flex-col gap-2 border-b bg-background px-[var(--space-page-x)] py-3">
         <Breadcrumb items={[{ label: "Cognit", href: "/" }, { label: goal }]} />
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -465,6 +473,7 @@ export const TimelinePage = (): JSX.Element => {
               rowKey={(e) => e.id}
               onRowClick={setSelectedEvent}
               emptyMessage=""
+              maxBodyHeight="calc(100vh - 20rem)"
             />
           </CardContent>
         </Card>
